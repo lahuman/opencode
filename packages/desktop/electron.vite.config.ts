@@ -2,6 +2,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "electron-vite"
 import appPlugin from "@opencode-ai/app/vite"
 import * as fs from "node:fs/promises"
+import { parseEnterpriseProfile } from "./src/enterprise"
 
 const OPENCODE_SERVER_DIST = "../opencode/dist/node"
 
@@ -14,15 +15,29 @@ const channel = (() => {
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
-const enterprise = {
-  "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify(process.env.OPENCODE_ENTERPRISE ?? "0"),
-  "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(process.env.OPENCODE_ENTERPRISE_BASE_URL ?? ""),
-  "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(process.env.OPENCODE_ENTERPRISE_MODEL_ID ?? ""),
-  "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(process.env.OPENCODE_ENTERPRISE_MODEL_NAME ?? ""),
-  "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(
-    process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "",
-  ),
-}
+const enterpriseProfile = parseEnterpriseProfile({
+  OPENCODE_ENTERPRISE: process.env.OPENCODE_ENTERPRISE,
+  OPENCODE_ENTERPRISE_BASE_URL: process.env.OPENCODE_ENTERPRISE_BASE_URL,
+  OPENCODE_ENTERPRISE_MODEL_ID: process.env.OPENCODE_ENTERPRISE_MODEL_ID,
+  OPENCODE_ENTERPRISE_MODEL_NAME: process.env.OPENCODE_ENTERPRISE_MODEL_NAME,
+  OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS,
+})
+
+const enterprise = enterpriseProfile.enabled
+  ? {
+      "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify("1"),
+      "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(enterpriseProfile.baseURL),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(enterpriseProfile.modelID),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(enterpriseProfile.modelName),
+      "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(enterpriseProfile.allowedOrigins.join(",")),
+    }
+  : {
+      "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify("0"),
+      "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(""),
+    }
 
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
