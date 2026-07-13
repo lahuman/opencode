@@ -32,6 +32,10 @@ export function settings() {
   }
 }
 
+export function upgradeAllowed(policy: Pick<Policy, "enabled"> = settings()) {
+  return !policy.enabled
+}
+
 export function materializeDefaults(info: Info, policy: DefaultsPolicy = settings()): Info {
   if (!policy.enabled) return info
   if (!policy.baseURL || !policy.modelID || !policy.modelName) {

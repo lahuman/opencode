@@ -91,6 +91,7 @@ function uiApp(input?: {
   username?: string
   client?: Layer.Layer<HttpClient.HttpClient>
   disableEmbeddedWebUi?: boolean
+  enterpriseOffline?: boolean
 }) {
   const handler = HttpRouter.toWebHandler(
     HttpRouter.use((router) =>
@@ -99,7 +100,12 @@ function uiApp(input?: {
         const client = yield* HttpClient.HttpClient
         const flags = yield* RuntimeFlags.Service
         yield* router.add("*", "/*", (request) =>
-          serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
+          serveUIEffect(request, {
+            fs,
+            client,
+            disableEmbeddedWebUi: flags.disableEmbeddedWebUi,
+            enterpriseOffline: flags.enterpriseOffline,
+          }),
         )
       }),
     ).pipe(
@@ -107,7 +113,10 @@ function uiApp(input?: {
       Layer.provide([
         fsUtilLayer,
         input?.client ?? httpClient(new Response("ui")),
-        RuntimeFlags.layer({ disableEmbeddedWebUi: input?.disableEmbeddedWebUi ?? false }),
+        RuntimeFlags.layer({
+          disableEmbeddedWebUi: input?.disableEmbeddedWebUi ?? false,
+          enterpriseOffline: input?.enterpriseOffline ?? false,
+        }),
         HttpServer.layerServices,
       ]),
     ),
@@ -184,6 +193,22 @@ function responseText(response: Response) {
 }
 
 describe("HttpApi UI fallback", () => {
+  it.live("returns local 404 when enterprise offline without invoking upstream HTTP", () =>
+    Effect.gen(function* () {
+      const response = yield* uiApp({
+        disableEmbeddedWebUi: true,
+        enterpriseOffline: true,
+        client: Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make(() => Effect.die("enterprise UI fallback must not invoke upstream HTTP")),
+        ),
+      }).request("/")
+
+      expect(response.status).toBe(404)
+      expect(yield* responseText(response)).toBe('{"error":"Not Found"}')
+    }),
+  )
+
   it.live("serves the web UI through the HTTP API app", () =>
     Effect.gen(function* () {
       let proxiedUrl: string | undefined

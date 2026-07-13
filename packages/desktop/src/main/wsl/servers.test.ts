@@ -3,6 +3,7 @@ import {
   clearWslDistroState,
   requireWslIpcString,
   requireWslIpcStrings,
+  unavailableWslIntegration,
   wslServerIdToRestart,
   wslTerminalArgs,
 } from "./policy"
@@ -16,6 +17,17 @@ import { createWslServersController, type WslServerConfig } from "./servers"
 
 let persistedServers: WslServerConfig[] = []
 let releaseOpencodeResolve: (() => void) | undefined
+
+test("reports policy-disabled WSL state and rejects actions", () => {
+  const integration = unavailableWslIntegration(false)
+
+  expect(integration.state().runtime).toEqual({
+    available: false,
+    version: null,
+    error: "WSL integration is disabled in this build",
+  })
+  expect(integration.unavailable).toThrow("WSL integration is disabled in this build")
+})
 
 test("starts every configured WSL server on initialization", () => {
   expect(

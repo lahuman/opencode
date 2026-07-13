@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test"
 import { ConfigEnterprise } from "@/config/enterprise"
 
+test("enterprise policy disables server upgrades", () => {
+  expect(ConfigEnterprise.upgradeAllowed({ enabled: true })).toBe(false)
+})
+
 test("enterprise enforcement keeps local plugins and removes registry plugins", () => {
   const local = { spec: "file:///C:/project/.opencode/plugins/company.ts", source: "project", scope: "local" as const }
   const registry = { spec: "public-plugin@latest", source: "project", scope: "local" as const }

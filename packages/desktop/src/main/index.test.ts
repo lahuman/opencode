@@ -1,6 +1,27 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
+import { enterpriseTelemetryEnabled } from "../enterprise"
 import { forwardInitializationFailure } from "./initialization"
+import { desktopRuntimeFeatures } from "./runtime-features"
+
+test("enterprise profile disables updater and WSL", () => {
+  expect(desktopRuntimeFeatures({ packaged: true, channel: "prod", enterprise: true })).toEqual({
+    updater: false,
+    wsl: false,
+  })
+})
+
+test("ordinary production keeps updater and WSL", () => {
+  expect(desktopRuntimeFeatures({ packaged: true, channel: "prod", enterprise: false })).toEqual({
+    updater: true,
+    wsl: true,
+  })
+})
+
+test("enterprise profile disables telemetry even when a DSN is present", () => {
+  expect(enterpriseTelemetryEnabled({ enabled: true }, "https://sentry.example/1")).toBe(false)
+  expect(enterpriseTelemetryEnabled({ enabled: false }, "https://sentry.example/1")).toBe(true)
+})
 
 describe("desktop initialization", () => {
   const failure = new Error("sidecar startup failed")

@@ -17,6 +17,8 @@ import { authorizationLayer } from "../../src/server/routes/instance/httpapi/mid
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
 
+const installationCalls: string[] = []
+
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
     Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
@@ -33,9 +35,20 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(MoveSession.Service)({})),
   Layer.provide(
     Layer.mock(Installation.Service)({
-      method: () => Effect.succeed("npm"),
-      latest: () => Effect.succeed("9.9.9"),
-      upgrade: () => Effect.void,
+      method: () =>
+        Effect.sync(() => {
+          installationCalls.push("method")
+          return "npm"
+        }),
+      latest: () =>
+        Effect.sync(() => {
+          installationCalls.push("latest")
+          return "9.9.9"
+        }),
+      upgrade: () =>
+        Effect.sync(() => {
+          installationCalls.push("upgrade")
+        }),
     }),
   ),
   Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
@@ -45,10 +58,35 @@ const it = testEffect(apiLayer)
 describe("global HttpApi", () => {
   it.live("upgrades to latest when the request body is omitted", () =>
     Effect.gen(function* () {
+      installationCalls.length = 0
       const response = yield* HttpClient.post(GlobalPaths.upgrade)
 
       expect(response.status).toBe(200)
       expect(yield* response.json).toEqual({ success: true, version: "9.9.9" })
+      expect(installationCalls).toEqual(["method", "latest", "upgrade"])
+    }),
+  )
+
+  it.live("blocks enterprise upgrades before invoking installation services", () =>
+    Effect.gen(function* () {
+      const previous = process.env.OPENCODE_ENTERPRISE_OFFLINE
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previous === undefined) {
+            delete process.env.OPENCODE_ENTERPRISE_OFFLINE
+            return
+          }
+          process.env.OPENCODE_ENTERPRISE_OFFLINE = previous
+        }),
+      )
+      process.env.OPENCODE_ENTERPRISE_OFFLINE = "1"
+      installationCalls.length = 0
+
+      const response = yield* HttpClient.post(GlobalPaths.upgrade)
+
+      expect(response.status).toBe(403)
+      expect(yield* response.json).toEqual({ success: false, error: "Upgrade is disabled in this build" })
+      expect(installationCalls).toEqual([])
     }),
   )
 

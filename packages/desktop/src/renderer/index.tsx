@@ -29,13 +29,14 @@ import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
+import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseTelemetryEnabled } from "../enterprise"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
   throw new Error(t("error.dev.rootNotFound"))
 }
 
-if (import.meta.env.VITE_SENTRY_DSN) {
+if (enterpriseTelemetryEnabled(ENTERPRISE_PROFILE, import.meta.env.VITE_SENTRY_DSN)) {
   Sentry.init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
@@ -163,7 +164,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     }
   })()
 
-  const wslServersApi = os === "windows" ? window.api.wslServers : undefined
+  const wslServersApi = os === "windows" && !ENTERPRISE_ENABLED ? window.api.wslServers : undefined
 
   return {
     platform: "desktop",

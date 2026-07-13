@@ -40,7 +40,10 @@ const enterprise = enterpriseProfile.enabled
     }
 
 const sentry =
-  process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+  process.env.OPENCODE_ENTERPRISE !== "1" &&
+  process.env.SENTRY_AUTH_TOKEN &&
+  process.env.SENTRY_ORG &&
+  process.env.SENTRY_PROJECT
     ? sentryVitePlugin({
         authToken: process.env.SENTRY_AUTH_TOKEN,
         org: process.env.SENTRY_ORG,
@@ -122,7 +125,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     publicDir: "../../../app/public",
     root: "src/renderer",
     build: {
-      sourcemap: true,
+      sourcemap: !enterpriseProfile.enabled,
       rollupOptions: {
         input: {
           main: "src/renderer/index.html",

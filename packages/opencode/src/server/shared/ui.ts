@@ -77,9 +77,15 @@ export function serveEmbeddedUIEffect(
 
 export function serveUIEffect(
   request: HttpServerRequest.HttpServerRequest,
-  services: { fs: FSUtil.Interface; client: HttpClient.HttpClient; disableEmbeddedWebUi: boolean },
+  services: {
+    fs: FSUtil.Interface
+    client: HttpClient.HttpClient
+    disableEmbeddedWebUi: boolean
+    enterpriseOffline?: boolean
+  },
 ) {
   return Effect.gen(function* () {
+    if (services.enterpriseOffline) return notFound()
     const embeddedWebUI = yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi))
     const path = new URL(request.url, "http://localhost").pathname
 

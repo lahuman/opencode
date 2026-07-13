@@ -1,12 +1,11 @@
 import { app, ipcMain } from "electron"
 import type { IpcMainInvokeEvent } from "electron"
 import type { WslServersController } from "./servers"
-import { requireWslIpcString, requireWslIpcStrings } from "./policy"
-import type { WslServersState } from "../../preload/types"
+import { requireWslIpcString, requireWslIpcStrings, unavailableWslIntegration } from "./policy"
 
-export function registerWslIpcHandlers(controller: WslServersController) {
-  if (process.platform !== "win32") {
-    registerUnavailableWslIpcHandlers()
+export function registerWslIpcHandlers(controller: WslServersController, enabled = true) {
+  if (process.platform !== "win32" || !enabled) {
+    registerUnavailableWslIpcHandlers(enabled)
     return
   }
 
@@ -66,38 +65,22 @@ export function registerWslIpcHandlers(controller: WslServersController) {
   )
 }
 
-function registerUnavailableWslIpcHandlers() {
-  const unavailable = () => {
-    throw new Error("WSL is only available on Windows")
-  }
-  const state = (): WslServersState => ({
-    runtime: {
-      available: false,
-      version: null,
-      error: "WSL is only available on Windows",
-    },
-    installed: [],
-    online: [],
-    distroProbes: {},
-    opencodeChecks: {},
-    pendingRestart: false,
-    servers: [],
-    job: null,
-  })
+function registerUnavailableWslIpcHandlers(enabled: boolean) {
+  const integration = unavailableWslIntegration(enabled)
 
   ipcMain.handle("wsl-servers-subscribe", (event) => {
-    event.sender.send("wsl-servers-event", { type: "state", state: state() })
+    event.sender.send("wsl-servers-event", { type: "state", state: integration.state() })
   })
   ipcMain.handle("wsl-servers-unsubscribe", () => undefined)
-  ipcMain.handle("wsl-servers-get-state", () => state())
-  ipcMain.handle("wsl-servers-probe-runtime", unavailable)
-  ipcMain.handle("wsl-servers-refresh-distros", unavailable)
-  ipcMain.handle("wsl-servers-install-wsl", unavailable)
-  ipcMain.handle("wsl-servers-install-distro", unavailable)
-  ipcMain.handle("wsl-servers-probe-addable", unavailable)
-  ipcMain.handle("wsl-servers-install-opencode", unavailable)
-  ipcMain.handle("wsl-servers-open-terminal", unavailable)
-  ipcMain.handle("wsl-servers-add", unavailable)
-  ipcMain.handle("wsl-servers-remove", unavailable)
-  ipcMain.handle("wsl-servers-start", unavailable)
+  ipcMain.handle("wsl-servers-get-state", () => integration.state())
+  ipcMain.handle("wsl-servers-probe-runtime", integration.unavailable)
+  ipcMain.handle("wsl-servers-refresh-distros", integration.unavailable)
+  ipcMain.handle("wsl-servers-install-wsl", integration.unavailable)
+  ipcMain.handle("wsl-servers-install-distro", integration.unavailable)
+  ipcMain.handle("wsl-servers-probe-addable", integration.unavailable)
+  ipcMain.handle("wsl-servers-install-opencode", integration.unavailable)
+  ipcMain.handle("wsl-servers-open-terminal", integration.unavailable)
+  ipcMain.handle("wsl-servers-add", integration.unavailable)
+  ipcMain.handle("wsl-servers-remove", integration.unavailable)
+  ipcMain.handle("wsl-servers-start", integration.unavailable)
 }

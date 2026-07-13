@@ -12,3 +12,7 @@ export const ENTERPRISE_PROFILE = parseEnterpriseProfile({
 })
 
 export const ENTERPRISE_ENABLED = ENTERPRISE_PROFILE.enabled
+
+export function enterpriseTelemetryEnabled(profile: { enabled: boolean }, dsn?: string) {
+  return !profile.enabled && Boolean(dsn)
+}

@@ -1,4 +1,5 @@
 import { Config } from "@/config/config"
+import { ConfigEnterprise } from "@/config/enterprise"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -95,6 +96,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
+      if (!ConfigEnterprise.upgradeAllowed()) {
+        return {
+          status: 403,
+          body: { success: false as const, error: "Upgrade is disabled in this build" },
+        }
+      }
       const method = yield* installation.method()
       if (method === "unknown") {
         return {
