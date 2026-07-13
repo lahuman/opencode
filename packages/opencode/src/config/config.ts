@@ -28,6 +28,7 @@ import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { ConfigAgent } from "./agent"
 import { ConfigCommand } from "./command"
+import { ConfigEnterprise } from "./enterprise"
 import { ConfigManaged } from "./managed"
 import { ConfigParse } from "./parse"
 import { ConfigPaths } from "./paths"
@@ -214,6 +215,7 @@ const layer = Layer.effect(
       text: string,
       options: { path: string } | { dir: string; source: string },
       env?: Record<string, string>,
+      persistSchema = true,
     ) {
       const source = "path" in options ? options.path : options.source
       const expanded = yield* Effect.promise(() =>
@@ -228,7 +230,7 @@ const layer = Layer.effect(
       if (!("path" in options)) return data
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
-      if (!data.$schema) {
+      if (persistSchema && !data.$schema) {
         data.$schema = "https://opencode.ai/config.json"
         const updated = text.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
         yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
@@ -236,11 +238,15 @@ const layer = Layer.effect(
       return data
     })
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>) {
+    const loadFile = Effect.fnUntraced(function* (
+      filepath: string,
+      env?: Record<string, string>,
+      options: { persistSchema?: boolean } = {},
+    ) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
-      return yield* loadConfig(text, { path: filepath }, env)
+      return yield* loadConfig(text, { path: filepath }, env, options.persistSchema)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -353,8 +359,15 @@ const layer = Layer.effect(
           return mergePluginOrigins(source, next.plugin, kind)
         }
 
-        for (const [key, value] of Object.entries(auth)) {
-          if (value.type === "wellknown") {
+        const enterprise = ConfigEnterprise.settings()
+        if (enterprise.defaultsPath) {
+          const defaults = yield* loadFile(enterprise.defaultsPath, authEnv, { persistSchema: false })
+          yield* merge(enterprise.defaultsPath, ConfigEnterprise.materializeDefaults(defaults, enterprise), "global")
+        }
+
+        if (!enterprise.enabled) {
+          for (const [key, value] of Object.entries(auth)) {
+            if (value.type !== "wellknown") continue
             const url = key.replace(/\/+$/, "")
             authEnv[value.key] = value.token
             const wellknownURL = `${url}/.well-known/opencode`
@@ -435,26 +448,28 @@ const layer = Layer.effect(
 
           yield* ensureGitignore(dir).pipe(Effect.orDie)
 
-          const dep = yield* npmSvc
-            .install(dir, {
-              add: [
-                {
-                  name: "@opencode-ai/plugin",
-                  version: InstallationLocal ? undefined : InstallationVersion,
-                },
-              ],
-            })
-            .pipe(
-              Effect.exit,
-              Effect.tap((exit) =>
-                Exit.isFailure(exit)
-                  ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
-                  : Effect.void,
-              ),
-              Effect.asVoid,
-              Effect.forkDetach,
-            )
-          deps.push(dep)
+          if (!enterprise.enabled) {
+            const dep = yield* npmSvc
+              .install(dir, {
+                add: [
+                  {
+                    name: "@opencode-ai/plugin",
+                    version: InstallationLocal ? undefined : InstallationVersion,
+                  },
+                ],
+              })
+              .pipe(
+                Effect.exit,
+                Effect.tap((exit) =>
+                  Exit.isFailure(exit)
+                    ? Effect.logWarning("background dependency install failed", { dir, error: String(exit.cause) })
+                    : Effect.void,
+                ),
+                Effect.asVoid,
+                Effect.forkDetach,
+              )
+            deps.push(dep)
+          }
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
@@ -475,9 +490,9 @@ const layer = Layer.effect(
           yield* Effect.logDebug("loaded custom config from OPENCODE_CONFIG_CONTENT")
         }
 
-        const activeAccount = Option.getOrUndefined(
-          yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))),
-        )
+        const activeAccount = enterprise.enabled
+          ? undefined
+          : Option.getOrUndefined(yield* accountSvc.active().pipe(Effect.catch(() => Effect.succeed(Option.none()))))
         if (activeAccount?.active_org_id) {
           const accountID = activeAccount.id
           const orgID = activeAccount.active_org_id
@@ -532,6 +547,8 @@ const layer = Layer.effect(
             }),
           )
         }
+
+        result = ConfigEnterprise.enforce(result)
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
           result.agent = mergeDeep(result.agent ?? {}, {

@@ -2050,3 +2050,96 @@ test("parseManagedPlist handles empty config", async () => {
   )
   expect(config.$schema).toBe("https://opencode.ai/config.json")
 })
+
+it.effect("loads enterprise defaults below global, project, and managed settings", () =>
+  Effect.gen(function* () {
+    const enterprise = yield* tmpdirScoped()
+    const global = yield* tmpdirScoped()
+    const root = yield* tmpdirScoped()
+    const project = path.join(root, "project")
+    const enterpriseFile = path.join(enterprise, "enterprise.jsonc")
+    yield* writeConfigEffect(enterprise, schemaConfig({ model: "company/default" }), "enterprise.jsonc")
+    yield* writeConfigEffect(global, schemaConfig({ model: "company/global" }))
+    yield* writeConfigEffect(project, schemaConfig({ model: "company/project" }))
+    yield* writeManagedSettingsEffect({ model: "company/managed" })
+
+    yield* withProcessEnvs(
+      {
+        OPENCODE_ENTERPRISE_OFFLINE: "1",
+        OPENCODE_ENTERPRISE_DEFAULTS_PATH: enterpriseFile,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+        OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+        OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+        OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      },
+      withGlobalConfigDir(
+        global,
+        withInstanceDir(
+          project,
+          Effect.gen(function* () {
+            expect((yield* Config.use.get()).model).toBe("company/managed")
+            expect(yield* FSUtil.use.readFileString(enterpriseFile)).toBe(
+              JSON.stringify(schemaConfig({ model: "company/default" })),
+            )
+          }),
+        ),
+      ),
+    )
+  }),
+)
+
+it.effect("allows project provider overrides only on packaged internal origins", () =>
+  withConfigTree(
+    {
+      global: {
+        provider: {
+          company: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "Company",
+            options: { baseURL: "https://llm.corp.example/v1" },
+            models: { default: { name: "Default" } },
+          },
+        },
+      },
+      project: {
+        provider: {
+          company: {
+            options: {
+              baseURL: "https://llm-dr.corp.example/v1",
+              apiKey: "plaintext-project-key",
+              headers: { Authorization: "plaintext-project-header" },
+            },
+            models: { project: { name: "Project Model" } },
+          },
+          public_api: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "Public",
+            options: { baseURL: "https://api.openai.com/v1" },
+            models: { default: { name: "Default" } },
+          },
+          embedded_secret: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "Embedded Secret",
+            options: { baseURL: "https://user:secret@llm.corp.example/v1" },
+            models: { default: { name: "Default" } },
+          },
+        },
+      },
+    },
+    withProcessEnvs(
+      {
+        OPENCODE_ENTERPRISE_OFFLINE: "1",
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
+      },
+      Effect.gen(function* () {
+        const config = yield* Config.use.get()
+        expect(Object.keys(config.provider ?? {})).toEqual(["company"])
+        expect(config.provider?.company?.options?.baseURL).toBe("https://llm-dr.corp.example/v1")
+        expect(config.provider?.company?.options?.apiKey).toBeUndefined()
+        expect(config.provider?.company?.options?.headers).toBeUndefined()
+        expect(config.provider?.company?.models?.project?.name).toBe("Project Model")
+        expect(config.enabled_providers).toEqual(["company"])
+      }),
+    ),
+  ),
+)

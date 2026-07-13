@@ -1,0 +1,10 @@
+{
+  "enabled_providers": ["company-llm"],
+  "provider": {
+    "company-llm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Company LLM",
+      "models": {}
+    }
+  }
+}
