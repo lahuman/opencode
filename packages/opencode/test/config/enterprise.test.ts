@@ -19,6 +19,46 @@ test("enterprise enforcement keeps local plugins and removes registry plugins", 
   expect(result.plugin_origins).toEqual([local])
 })
 
+test("enterprise enforcement overrides retained model SDKs", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        company: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://llm.corp.example/v1" },
+          models: { default: { provider: { npm: "untrusted-sdk" } } },
+        },
+      },
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set(["https://llm.corp.example"]),
+    },
+  )
+  expect(result.provider?.company?.models?.default?.provider?.npm).toBe("@ai-sdk/openai-compatible")
+})
+
+test("enterprise enforcement clears provider credential env", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        company: {
+          npm: "@ai-sdk/openai-compatible",
+          env: ["COMPANY_API_KEY"],
+          options: { baseURL: "https://llm.corp.example/v1" },
+        },
+      },
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set(["https://llm.corp.example"]),
+    },
+  )
+  expect(result.provider?.company?.env).toEqual([])
+})
+
 test("materializes company provider metadata as structured defaults", () => {
   const result = ConfigEnterprise.materializeDefaults(
     { provider: { "company-llm": { models: {} } } },

@@ -2054,14 +2054,15 @@ test("parseManagedPlist handles empty config", async () => {
 it.effect("loads enterprise defaults below global, project, and managed settings", () =>
   Effect.gen(function* () {
     const enterprise = yield* tmpdirScoped()
+    const emptyGlobal = yield* tmpdirScoped()
     const global = yield* tmpdirScoped()
     const root = yield* tmpdirScoped()
+    const defaultsProject = path.join(root, "defaults")
     const project = path.join(root, "project")
     const enterpriseFile = path.join(enterprise, "enterprise.jsonc")
     yield* writeConfigEffect(enterprise, schemaConfig({ model: "company/default" }), "enterprise.jsonc")
     yield* writeConfigEffect(global, schemaConfig({ model: "company/global" }))
     yield* writeConfigEffect(project, schemaConfig({ model: "company/project" }))
-    yield* writeManagedSettingsEffect({ model: "company/managed" })
 
     yield* withProcessEnvs(
       {
@@ -2072,18 +2073,48 @@ it.effect("loads enterprise defaults below global, project, and managed settings
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
       },
-      withGlobalConfigDir(
-        global,
-        withInstanceDir(
-          project,
-          Effect.gen(function* () {
-            expect((yield* Config.use.get()).model).toBe("company/managed")
-            expect(yield* FSUtil.use.readFileString(enterpriseFile)).toBe(
-              JSON.stringify(schemaConfig({ model: "company/default" })),
-            )
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        yield* withGlobalConfigDir(
+          emptyGlobal,
+          withInstanceDir(
+            defaultsProject,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).model).toBe("company/default")
+            }),
+          ),
+        )
+        yield* withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            defaultsProject,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).model).toBe("company/global")
+            }),
+          ),
+        )
+        yield* withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            project,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).model).toBe("company/project")
+            }),
+          ),
+        )
+        yield* writeManagedSettingsEffect({ model: "company/managed" })
+        yield* withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            project,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).model).toBe("company/managed")
+              expect(yield* FSUtil.use.readFileString(enterpriseFile)).toBe(
+                JSON.stringify(schemaConfig({ model: "company/default" })),
+              )
+            }),
+          ),
+        )
+      }),
     )
   }),
 )
