@@ -12,6 +12,7 @@ import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
+import { ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
@@ -191,7 +192,16 @@ const main = Effect.gen(function* () {
     return
   }
 
-  preferAppEnv(app.getPath("userData"))
+  const enterpriseDir = app.isPackaged
+    ? join(process.resourcesPath, "enterprise")
+    : join(import.meta.dirname, "../../resources/enterprise")
+  preferAppEnv(
+    app.getPath("userData"),
+    enterpriseEnvironment(ENTERPRISE_PROFILE, {
+      defaults: join(enterpriseDir, "opencode.jsonc"),
+      guide: join(enterpriseDir, "company-guide.md"),
+    }),
+  )
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
     const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))

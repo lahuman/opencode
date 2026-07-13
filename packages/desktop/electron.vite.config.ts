@@ -14,6 +14,16 @@ const channel = (() => {
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
+const enterprise = {
+  "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify(process.env.OPENCODE_ENTERPRISE ?? "0"),
+  "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(process.env.OPENCODE_ENTERPRISE_BASE_URL ?? ""),
+  "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(process.env.OPENCODE_ENTERPRISE_MODEL_ID ?? ""),
+  "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(process.env.OPENCODE_ENTERPRISE_MODEL_NAME ?? ""),
+  "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(
+    process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "",
+  ),
+}
+
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
     ? sentryVitePlugin({
@@ -35,6 +45,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      ...enterprise,
     },
     build: {
       rollupOptions: {
@@ -91,6 +102,7 @@ const require = __cjs_mod__.createRequire(import.meta.url);
     },
   },
   renderer: {
+    define: enterprise,
     plugins: [appPlugin, sentry],
     publicDir: "../../../app/public",
     root: "src/renderer",

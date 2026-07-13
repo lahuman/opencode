@@ -1,5 +1,10 @@
 interface ImportMetaEnv {
   readonly OPENCODE_CHANNEL: string
+  readonly OPENCODE_ENTERPRISE: string
+  readonly OPENCODE_ENTERPRISE_BASE_URL: string
+  readonly OPENCODE_ENTERPRISE_MODEL_ID: string
+  readonly OPENCODE_ENTERPRISE_MODEL_NAME: string
+  readonly OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: string
 }
 
 interface ImportMeta {
