@@ -24,11 +24,10 @@ export function createEnterpriseCredentialHandlers(enabled: boolean, store: Stor
 
   const set = async (input: { apiKey?: string; headers?: Record<string, string> }) => {
     if (!enabled) return { restartRequired: true as const }
-    const current = await store.get()
-    await store.set({
+    await store.update((current) => ({
       apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey,
       headers: input.headers && Object.keys(input.headers).length ? input.headers : current.headers,
-    })
+    }))
     return { restartRequired: true as const }
   }
 
@@ -87,13 +86,17 @@ export function createEnterpriseCredentialStore(input: Input) {
     return { ...(typeof record.apiKey === "string" ? { apiKey: record.apiKey } : {}), headers }
   }
 
-  const set = (credentials: EnterpriseCredentials) =>
-    mutate(async () => {
-      if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
-      await write(temp, input.encrypt(JSON.stringify(credentials)))
-        .then(() => rename(temp, input.file))
-        .finally(() => rm(temp, { force: true }))
-    })
+  const persist = async (credentials: EnterpriseCredentials) => {
+    if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
+    await write(temp, input.encrypt(JSON.stringify(credentials)))
+      .then(() => rename(temp, input.file))
+      .finally(() => rm(temp, { force: true }))
+  }
+
+  const set = (credentials: EnterpriseCredentials) => mutate(() => persist(credentials))
+
+  const update = (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) =>
+    mutate(async () => persist(transform(await get())))
 
   const clear = () =>
     mutate(async () => {
@@ -108,5 +111,5 @@ export function createEnterpriseCredentialStore(input: Input) {
       if (errors.length) throw errors[0]
     })
 
-  return { get, set, clear }
+  return { get, set, update, clear }
 }

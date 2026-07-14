@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createEnterpriseCredentialHandlers, createEnterpriseCredentialStore } from "./enterprise-credentials"
+import type { EnterpriseCredentials } from "./enterprise-credentials"
 
 const dirs: string[] = []
 
@@ -245,6 +246,94 @@ describe("enterprise credential store", () => {
       apiKey: "replacement-key",
       headers: { "X-Replacement": "replacement-header" },
     })
+  })
+
+  test("credential handlers atomically merge concurrent partial updates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    await writeFile(file, JSON.stringify({ headers: {} }), { mode: 0o600 })
+    const writeEntered = Promise.withResolvers<void>()
+    const releaseWrite = Promise.withResolvers<void>()
+    const secondStaleRead = Promise.withResolvers<void>()
+    const secondAtomicUpdate = Promise.withResolvers<void>()
+    let decryptions = 0
+    let writes = 0
+    let updates = 0
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => {
+        decryptions++
+        if (decryptions === 2) secondStaleRead.resolve()
+        return value.toString("utf8")
+      },
+      write: async (path, value) => {
+        writes++
+        if (writes === 1) {
+          writeEntered.resolve()
+          await releaseWrite.promise
+        }
+        await writeFile(path, value, { mode: 0o600 })
+      },
+    })
+    const trackedStore = {
+      ...store,
+      update: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => {
+        updates++
+        if (updates === 2) secondAtomicUpdate.resolve()
+        return (
+          store as typeof store & {
+            update: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => Promise<void>
+          }
+        ).update(transform)
+      },
+    }
+    const handlers = createEnterpriseCredentialHandlers(true, trackedStore)
+
+    const apiKeyUpdate = handlers.set({ apiKey: "replacement-key" })
+    await writeEntered.promise
+    const headersUpdate = handlers.set({ headers: { Authorization: "replacement-header" } })
+    await Promise.race([secondStaleRead.promise, secondAtomicUpdate.promise])
+    releaseWrite.resolve()
+    await Promise.all([apiKeyUpdate, headersUpdate])
+
+    expect(await store.get()).toEqual({
+      apiKey: "replacement-key",
+      headers: { Authorization: "replacement-header" },
+    })
+    expect(updates).toBe(2)
+  })
+
+  test("credential clear is ordered after a pending partial update", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const writeEntered = Promise.withResolvers<void>()
+    const releaseWrite = Promise.withResolvers<void>()
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+      write: async (path, value) => {
+        writeEntered.resolve()
+        await releaseWrite.promise
+        await writeFile(path, value, { mode: 0o600 })
+      },
+    })
+    const handlers = createEnterpriseCredentialHandlers(true, store)
+
+    const update = handlers.set({ apiKey: "secret-key" })
+    await writeEntered.promise
+    const clear = handlers.clear()
+    releaseWrite.resolve()
+    await Promise.all([update, clear])
+
+    expect(await store.get()).toEqual({ headers: {} })
+    expect(await Bun.file(file).exists()).toBe(false)
+    expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
   })
 
   test("credential handlers expose status and explicit clear without secrets", async () => {
