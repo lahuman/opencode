@@ -1,13 +1,13 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
+    "composite": false,
+    "emitDeclarationOnly": false,
     "noEmit": true,
     "rootDir": "..",
     "types": ["node", "bun", "vite/client"]
   },
   "include": [
-    "../package.json",
-    "../src",
     "./company-llm-enterprise.spec.ts",
     "./fixtures/company-llm-enterprise.tsx",
     "./performance/timeline-stability/**/*.spec.ts",

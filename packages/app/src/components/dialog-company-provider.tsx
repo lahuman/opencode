@@ -150,7 +150,7 @@ export function useCompanyProviderSettingsState() {
     showToast({
       variant: "error",
       title: COMPANY_PROVIDER_FAILURE_MESSAGE,
-      description: result.failure?.kind ?? "connection",
+      description: result.failure?.message ?? "connection",
     })
   }
 
@@ -410,10 +410,8 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
               <Show when={diagnostic().failure}>
                 {(failure) => (
                   <>
-                    <span class="text-text-weak">Failure</span>
-                    <span class="max-w-72 text-right text-text-strong">
-                      {failure().kind}: {COMPANY_PROVIDER_FAILURE_MESSAGE}
-                    </span>
+                    <span class="text-text-weak">Failure ({failure().kind})</span>
+                    <span class="max-w-72 text-right text-text-strong">{failure().message}</span>
                   </>
                 )}
               </Show>

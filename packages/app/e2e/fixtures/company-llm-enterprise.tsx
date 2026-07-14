@@ -5,7 +5,7 @@ import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
 import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
-import { DialogCompanyProvider } from "@/components/dialog-company-provider"
+import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/components/dialog-connect-provider"
 import { useServerManagementController } from "@/components/dialog-select-server"
 import { GlobalProvider } from "@/context/global"
@@ -26,13 +26,20 @@ const DIAGNOSTIC_SUCCESS = {
 const DIAGNOSTIC_FAILURE = {
   ok: false,
   checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
-  failure: { kind: "connection", message: "private server detail" },
+  failure: { kind: "connection", message: "Install the Company TLS CA certificate and try again." },
 } as const
 
-type RequestRecord = { host: string; method: string; path: string; body?: unknown }
+type RequestRecord = {
+  origin: string
+  host: string
+  method: string
+  path: string
+  query: string
+  body?: unknown
+}
 type CredentialInput = { apiKey?: string; headers?: Record<string, string> }
 type CredentialMode = "restart" | "no-restart" | "error"
-type DiagnosticOutcome = "success" | "failure"
+type DiagnosticOutcome = "success" | "failure" | "network-error"
 
 function createHarness() {
   const sidecar: ServerConnection.Sidecar = {
@@ -106,9 +113,11 @@ function createHarness() {
               () => undefined,
             )
     setObservations("requests", observations.requests.length, {
+      origin: url.origin,
       host: url.host,
       method: request.method,
       path: url.pathname,
+      query: url.search,
       body,
     })
 
@@ -135,6 +144,9 @@ function createHarness() {
     }
     if (url.pathname === "/project") return json([])
     if (url.pathname === "/provider/company-llm/diagnostics") {
+      if (behavior.diagnosticOutcome === "network-error") {
+        throw new Error("transport failure with private detail")
+      }
       const value = await new Promise<unknown>((resolve) => {
         diagnostic.resolve = resolve
         setDiagnosticPending(true)
@@ -422,6 +434,9 @@ function CompanyControls(props: { harness: Harness }) {
         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "failure")}>
           Diagnostic failure
         </button>
+        <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "network-error")}>
+          Diagnostic network error
+        </button>
         <button type="button" disabled={!props.harness.diagnosticPending()} onClick={props.harness.resolveDiagnostic}>
           Resolve diagnostic
         </button>
@@ -436,6 +451,30 @@ function CompanyScenario(props: { harness: Harness }) {
     <>
       <DialogTree harness={props.harness}>
         <OpenDialog component={() => <DialogCompanyProvider />} />
+      </DialogTree>
+      <CompanyControls harness={props.harness} />
+    </>
+  )
+}
+
+function SettingsDiagnosticConsumer() {
+  const company = useCompanyProviderSettingsState()
+  return (
+    <>
+      <button type="button" disabled={company.checking()} onClick={company.testConnection}>
+        {company.checking() ? "Testing settings connection" : "Settings test connection"}
+      </button>
+      <output data-testid="settings-credential-status">{company.status()}</output>
+      <ToastRegion v2={false} />
+    </>
+  )
+}
+
+function SettingsScenario(props: { harness: Harness }) {
+  return (
+    <>
+      <DialogTree harness={props.harness}>
+        <SettingsDiagnosticConsumer />
       </DialogTree>
       <CompanyControls harness={props.harness} />
     </>
@@ -458,6 +497,9 @@ function Fixture() {
       </Match>
       <Match when={scenario === "company"}>
         <CompanyScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "settings"}>
+        <SettingsScenario harness={harness} />
       </Match>
     </Switch>
   )

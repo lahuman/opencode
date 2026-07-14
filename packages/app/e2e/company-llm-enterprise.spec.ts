@@ -1,7 +1,16 @@
 import { expect, test, type Page } from "@playwright/test"
 
 const REMOTE_DISABLED = "Remote servers are disabled in this build"
+const SAFE_REMEDIATION = "Install the Company TLS CA certificate and try again."
 const fixture = (scenario: string) => `/e2e/fixtures/company-llm-enterprise.html?scenario=${scenario}`
+const diagnosticRequest = {
+  origin: "http://127.0.0.1:5199",
+  host: "127.0.0.1:5199",
+  method: "POST",
+  path: "/provider/company-llm/diagnostics",
+  query: "",
+  body: { modelID: "company-code", checkToolCall: true },
+}
 const responsiveViewports = [
   { name: "desktop", width: 1280, height: 800 },
   { name: "mobile", width: 390, height: 844 },
@@ -140,21 +149,41 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   await dialog.getByRole("button", { name: "Test connection" }).click()
   await expect(status).toHaveText("Testing Company LLM connection")
   await invokeFixtureControl(page, "Resolve diagnostic")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveAttribute("role", "alert")
+  const failure = dialog.locator('[data-slot="company-diagnostic-result"]')
+  await expect(failure).toHaveAttribute("role", "alert")
+  await expect(failure.getByText("Failure (connection)", { exact: true })).toBeVisible()
+  await expect(failure.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
   await expect(status).toHaveText("")
 
-  const diagnostics = (await output<Array<{ path: string; body?: unknown }>>(page, "requests")).filter(
+  await invokeFixtureControl(page, "Diagnostic network error")
+  await dialog.getByRole("button", { name: "Test connection" }).click()
+  await expect(failure.getByText("Request failed", { exact: true })).toBeVisible()
+  await expect(failure).not.toContainText("transport failure with private detail")
+
+  const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
     (request) => request.path === "/provider/company-llm/diagnostics",
   )
-  expect(diagnostics.map((request) => request.body)).toEqual([
-    { modelID: "company-code", checkToolCall: true },
-    { modelID: "company-code", checkToolCall: true },
-    { modelID: "company-code", checkToolCall: true },
-  ])
+  expect(diagnostics).toEqual(Array.from({ length: 4 }, () => diagnosticRequest))
   const requests = await output<Array<{ path: string }>>(page, "requests")
   expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(
     false,
   )
+})
+
+test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
+  await page.goto(fixture("settings"))
+  await expect(page.getByTestId("settings-credential-status")).toHaveText("Credentials not configured")
+  await invokeFixtureControl(page, "Diagnostic failure")
+
+  await page.getByRole("button", { name: "Settings test connection" }).click()
+  await expect(page.getByRole("button", { name: "Testing settings connection" })).toBeDisabled()
+  await invokeFixtureControl(page, "Resolve diagnostic")
+
+  await expect(page.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
+  const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
+    (request) => request.path === "/provider/company-llm/diagnostics",
+  )
+  expect(diagnostics).toEqual([diagnosticRequest])
 })
 
 responsiveViewports.forEach((viewport) => {
@@ -164,6 +193,28 @@ responsiveViewports.forEach((viewport) => {
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible()
     await page.getByTestId("company-controls").evaluate((node) => node.setAttribute("hidden", ""))
+    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}.png`) })
+    await invokeFixtureControl(page, "Diagnostic failure")
+    await dialog.getByRole("button", { name: "Test connection" }).click()
+    await invokeFixtureControl(page, "Resolve diagnostic")
+    const remediation = dialog.getByText(SAFE_REMEDIATION, { exact: true })
+    const remediationVisible = () =>
+      remediation.evaluate((node) => {
+        const content = node.closest('[role="dialog"]')?.getBoundingClientRect()
+        const value = node.getBoundingClientRect()
+        return Boolean(content && value.top >= content.top && value.bottom <= content.bottom)
+      })
+    if (!(await remediationVisible())) await remediation.scrollIntoViewIfNeeded()
+    expect(await remediationVisible()).toBe(true)
+    const rowGaps = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
+      const children = [...node.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
+      return Array.from({ length: children.length / 2 }, (_, index) => {
+        const label = children[index * 2].getBoundingClientRect()
+        const value = children[index * 2 + 1].getBoundingClientRect()
+        return value.left - label.right
+      })
+    })
+    expect(rowGaps.every((gap) => gap >= 8)).toBe(true)
 
     const box = await dialog.boundingBox()
     expect(box).not.toBeNull()
@@ -178,6 +229,6 @@ responsiveViewports.forEach((viewport) => {
       })),
     ).toEqual({ horizontal: false, vertical: false })
 
-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}.png`) })
+    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}-failure.png`) })
   })
 })
