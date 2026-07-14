@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+import { MockLanguageModelV3 } from "ai/test"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -10,6 +11,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import path from "path"
 import { ProviderDiagnostic } from "@/provider/diagnostic"
 import { ProviderEnterprise } from "@/provider/enterprise"
+import { ProviderError } from "@/provider/error"
 import { Provider } from "@/provider/provider"
 import { ProviderApi } from "@/server/routes/instance/httpapi/groups/provider"
 import { ProviderTest } from "../fake/provider"
@@ -115,6 +117,94 @@ describe("provider diagnostics", () => {
         codes: ["ENOTFOUND"],
       }),
     ).toBe("model")
+  })
+
+  test("classifies trusted Bun connection-close and provider header-timeout causes", async () => {
+    const connectionByName = new Error("CONNECTION_NAME_SECRET")
+    connectionByName.name = "ConnectionClosed"
+    const connectionByCode = Object.assign(new Error("CONNECTION_CODE_SECRET"), { code: "ConnectionClosed" })
+
+    for (const error of [connectionByName, connectionByCode]) {
+      const result = await ProviderDiagnostic.probe(
+        new MockLanguageModelV3({
+          doGenerate: async () => {
+            throw error
+          },
+        }),
+        false,
+      )
+
+      expect(result).toEqual({
+        ok: false,
+        checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+        failure: {
+          kind: "connection",
+          message: "Cannot reach the Company LLM endpoint. Check the service and network route.",
+        },
+      })
+      expect(JSON.stringify(result)).not.toContain(error.message)
+    }
+
+    const headerTimeout = new ProviderError.HeaderTimeoutError(50)
+    const result = await ProviderDiagnostic.probe(
+      new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw headerTimeout
+        },
+      }),
+      false,
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+      failure: {
+        kind: "timeout",
+        message: "The Company LLM request timed out. Check service load and network latency.",
+      },
+    })
+    expect(JSON.stringify(result)).not.toContain(headerTimeout.message)
+  })
+
+  test("classifies only the trusted response stream timeout error as timeout", async () => {
+    const model = (error: Error) =>
+      new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: "text", text: "OK" }],
+          finishReason: { unified: "stop", raw: undefined },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+        }),
+        doStream: async () => {
+          throw error
+        },
+      })
+    const timeout = await ProviderDiagnostic.probe(model(new ProviderError.ResponseStreamTimeoutError(50)), false)
+    const stream = await ProviderDiagnostic.probe(
+      model(new ProviderError.ResponseStreamError("request timed out by provider policy")),
+      false,
+    )
+
+    expect(timeout).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "fail", toolCall: "skipped" },
+      failure: {
+        kind: "timeout",
+        message: "The Company LLM request timed out. Check service load and network latency.",
+      },
+    })
+    expect(stream).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "fail", toolCall: "skipped" },
+      failure: {
+        kind: "stream",
+        message: "The endpoint did not return a compatible streaming response.",
+      },
+    })
+    expect(JSON.stringify({ timeout, stream })).not.toContain("request timed out by provider policy")
   })
 
   test("uses exact transport codes and timeout statuses without partial code matches", () => {

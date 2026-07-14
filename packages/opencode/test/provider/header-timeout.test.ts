@@ -46,7 +46,7 @@ it.live("headerTimeout does not abort delayed SSE body after headers arrive", ()
   }),
 )
 
-it.live("chunkTimeout raises a response stream error when SSE body stalls", () =>
+it.live("chunkTimeout raises a distinct response stream timeout error when SSE body stalls", () =>
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => delayedBodyServer(250)),
@@ -73,7 +73,8 @@ it.live("chunkTimeout raises a response stream error when SSE body stalls", () =
               return error
             }
           })
-          expect(error).toBeInstanceOf(ProviderError.ResponseStreamError)
+          expect(error).toBeInstanceOf(ProviderError.ResponseStreamTimeoutError)
+          expect(error).toMatchObject({ name: "ProviderResponseStreamTimeoutError" })
         }),
       { config: providerConfig(server.url, { chunkTimeout: 50 }) },
     )
