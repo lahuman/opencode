@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-async function run(mode: "packaged" | "dev-origin" | "dev-slash" | "dev-index") {
+async function run(mode: "packaged" | "public-protocol" | "dev-origin" | "dev-slash" | "dev-index") {
   const child = Bun.spawn(
     [process.execPath, "run", `${import.meta.dir}/../../test/windows-policy-entrypoint.ts`, mode],
     {
@@ -17,6 +17,15 @@ async function run(mode: "packaged" | "dev-origin" | "dev-slash" | "dev-index") 
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
   return JSON.parse(stdout)
+}
+
+function parseCSP(value: string) {
+  return Object.fromEntries(
+    value.split(";").map((directive) => {
+      const [name, ...sources] = directive.trim().split(/\s+/)
+      return [name, sources]
+    }),
+  )
 }
 
 test("production windows enforce one session policy and exact packaged document navigation", async () => {
@@ -64,13 +73,77 @@ test("production windows enforce one session policy and exact packaged document 
   expect(result.protocol.registered).toBe(true)
   expect(result.protocol.partitions).toEqual(["opencode-renderer-assets"])
   expect(result.protocol.assetFetches).toHaveLength(7)
-  expect(result.protocol.assets).toEqual([
+  expect(
+    result.protocol.assets.map((asset: Record<string, unknown>) => ({
+      path: asset.path,
+      status: asset.status,
+      type: asset.type,
+    })),
+  ).toEqual([
     { path: "index.html", status: 200, type: "text/html" },
     { path: "assets/app.js", status: 200, type: "text/javascript" },
     { path: "assets/app.css", status: 200, type: "text/css" },
     { path: "assets/font.woff2", status: 200, type: "font/woff2" },
     { path: "assets/icon.png", status: 200, type: "image/png" },
   ])
+  const document = result.protocol.assets[0]
+  expect(document.documentPolicy).toBe("include-js-call-stacks-in-crash-reports")
+  const csp = document.contentSecurityPolicy
+  expect(typeof csp).toBe("string")
+  const directives = parseCSP(csp)
+  expect(directives).toEqual({
+    "default-src": ["'none'"],
+    "script-src": ["'self'"],
+    "style-src": ["'self'", "'unsafe-inline'"],
+    "font-src": ["'self'", "data:"],
+    "img-src": ["'self'", "data:", "blob:"],
+    "media-src": ["'self'", "data:", "blob:"],
+    "worker-src": ["'self'", "blob:"],
+    "manifest-src": ["'none'"],
+    "connect-src": [
+      "'self'",
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "http://[::1]:*",
+      "https://localhost:*",
+      "https://127.0.0.1:*",
+      "https://[::1]:*",
+      "ws://localhost:*",
+      "ws://127.0.0.1:*",
+      "ws://[::1]:*",
+      "wss://localhost:*",
+      "wss://127.0.0.1:*",
+      "wss://[::1]:*",
+      "https://llm.corp.example",
+      "https://telemetry.corp.example:8443",
+    ],
+    "object-src": ["'none'"],
+    "base-uri": ["'none'"],
+    "frame-src": ["'none'"],
+    "frame-ancestors": ["'none'"],
+    "form-action": ["'none'"],
+  })
+  expect(csp).not.toContain("unsafe-eval")
+  expect(csp).not.toContain("opencode.ai")
+  expect(csp).not.toContain("/v1")
+  expect(csp).not.toContain("/private")
+  expect(csp).not.toContain("csp-origin-secret")
+  expect(csp).not.toContain("wildcard.example")
+  expect(Object.values(directives).flat()).not.toContain("*")
+  expect(Object.values(directives).flat()).not.toContain("https:")
+  expect(
+    result.protocol.assets
+      .slice(1)
+      .map((asset: { contentSecurityPolicy: string | null; documentPolicy: string | null }) => ({
+        contentSecurityPolicy: asset.contentSecurityPolicy,
+        documentPolicy: asset.documentPolicy,
+      })),
+  ).toEqual(
+    Array.from({ length: 4 }, () => ({
+      contentSecurityPolicy: null,
+      documentPolicy: null,
+    })),
+  )
   expect(result.protocol.rejections).toEqual({
     invalidURL: 404,
     host: 404,
@@ -129,6 +202,35 @@ test("production windows enforce one session policy and exact packaged document 
   }
   expect(serializedLogs).not.toContain("request.url")
   expect(serializedLogs).not.toContain("file://")
+})
+
+test("public packaged protocol preserves document and asset headers without enterprise CSP", async () => {
+  const result = await run("public-protocol")
+
+  expect(result.mode).toBe("public-protocol")
+  expect(result.assets).toEqual([
+    {
+      path: "index.html",
+      status: 200,
+      type: "text/html",
+      contentSecurityPolicy: null,
+      documentPolicy: "include-js-call-stacks-in-crash-reports",
+    },
+    {
+      path: "assets/app.js",
+      status: 200,
+      type: "text/javascript",
+      contentSecurityPolicy: null,
+      documentPolicy: null,
+    },
+    {
+      path: "assets/app.css",
+      status: 200,
+      type: "text/css",
+      contentSecurityPolicy: null,
+      documentPolicy: null,
+    },
+  ])
 })
 
 test.each([

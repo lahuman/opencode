@@ -35,6 +35,7 @@ const oc2Background = {
 }
 const documentPolicyHeader = "Document-Policy"
 const jsCallStacksDocumentPolicy = "include-js-call-stacks-in-crash-reports"
+const contentSecurityPolicyHeader = "Content-Security-Policy"
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -334,7 +335,7 @@ export function registerRendererProtocol(options: { rendererRoot?: string } = {}
           "error",
         )
       }
-      return addDocumentPolicy(response, file)
+      return addDocumentHeaders(response, file)
     } catch {
       writeLog("protocol", "renderer asset unavailable", { reason: "asset-fetch-error", status: 404 }, "error")
       return new Response("Not found", { status: 404 })
@@ -495,11 +496,50 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   })
 }
 
-function addDocumentPolicy(response: Response, file: string) {
+function addDocumentHeaders(response: Response, file: string) {
   if (!file.toLowerCase().endsWith(".html")) return response
   const headers = new Headers(response.headers)
   headers.set(documentPolicyHeader, jsCallStacksDocumentPolicy)
+  const contentSecurityPolicy = enterpriseContentSecurityPolicy(ENTERPRISE_PROFILE)
+  if (contentSecurityPolicy) headers.set(contentSecurityPolicyHeader, contentSecurityPolicy)
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+}
+
+function enterpriseContentSecurityPolicy(profile: EnterpriseProfile) {
+  if (!profile.enabled) return undefined
+  const loopbackHosts = ["localhost", "127.0.0.1", "[::1]"]
+  const connectSources = Array.from(
+    new Set([
+      "'self'",
+      ...["http", "https", "ws", "wss"].flatMap((scheme) => loopbackHosts.map((host) => `${scheme}://${host}:*`)),
+      ...profile.allowedOrigins.flatMap((value) => {
+        if (!URL.canParse(value)) return []
+        const url = new URL(value)
+        if (url.username || url.password) return []
+        if (url.protocol !== "http:" && url.protocol !== "https:") return []
+        if (url.hostname.includes("*")) return []
+        return [url.origin]
+      }),
+    ]),
+  )
+  return [
+    ["default-src", "'none'"],
+    ["script-src", "'self'"],
+    ["style-src", "'self'", "'unsafe-inline'"],
+    ["font-src", "'self'", "data:"],
+    ["img-src", "'self'", "data:", "blob:"],
+    ["media-src", "'self'", "data:", "blob:"],
+    ["worker-src", "'self'", "blob:"],
+    ["manifest-src", "'none'"],
+    ["connect-src", ...connectSources],
+    ["object-src", "'none'"],
+    ["base-uri", "'none'"],
+    ["frame-src", "'none'"],
+    ["frame-ancestors", "'none'"],
+    ["form-action", "'none'"],
+  ]
+    .map((directive) => directive.join(" "))
+    .join("; ")
 }
 
 function allowRendererPermissions(win: BrowserWindow) {

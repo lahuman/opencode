@@ -4,19 +4,22 @@ import { extname, join } from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 
+const mode = process.argv[2] ?? "packaged"
+const publicProtocol = mode === "public-protocol"
 Object.assign(process.env, {
-  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE: publicProtocol ? "0" : "1",
   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
+    "https://telemetry.corp.example:8443/private?token=csp-origin-secret,https://*.wildcard.example/private",
 })
-const mode = process.argv[2] ?? "packaged"
 if (mode === "dev-origin") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
 if (mode === "dev-slash") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/"
 if (mode === "dev-index") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/index.html"
-if (mode === "packaged") delete process.env.ELECTRON_RENDERER_URL
+if (mode === "packaged" || publicProtocol) delete process.env.ELECTRON_RENDERER_URL
 
 type RequestResult = { cancel: boolean }
 type RequestDetails = { url: string; resourceType: string; requestHeaders?: Record<string, string> }
@@ -229,6 +232,21 @@ async function protocolRequest(url: string) {
   return protocolState.handler({ url }).catch(() => new Response("threw", { status: 599 }))
 }
 
+async function protocolAssets(paths: string[]) {
+  return Promise.all(
+    paths.map(async (path) => {
+      const response = await protocolRequest(`oc://renderer/${path}?token=asset-query-secret`)
+      return {
+        path,
+        status: response.status,
+        type: response.headers.get("content-type"),
+        contentSecurityPolicy: response.headers.get("content-security-policy"),
+        documentPolicy: response.headers.get("document-policy"),
+      }
+    }),
+  )
+}
+
 const assetRoot = await mkdtemp(join(tmpdir(), "opencode-renderer-assets-"))
 await mkdir(join(assetRoot, "assets"))
 await Promise.all([
@@ -238,6 +256,22 @@ await Promise.all([
   writeFile(join(assetRoot, "assets/font.woff2"), "font"),
   writeFile(join(assetRoot, "assets/icon.png"), "image"),
 ])
+
+if (publicProtocol) {
+  try {
+    const { registerRendererProtocol } = await import("../src/main/windows")
+    registerRendererProtocol({ rendererRoot: assetRoot })
+    console.log(
+      JSON.stringify({
+        mode,
+        assets: await protocolAssets(["index.html", "assets/app.js", "assets/app.css"]),
+      }),
+    )
+  } finally {
+    await rm(assetRoot, { recursive: true, force: true })
+  }
+  process.exit(0)
+}
 
 try {
   const { createMainWindow, installEnterpriseWindowPolicy, registerRendererProtocol } = await import(
@@ -327,12 +361,13 @@ try {
     redirect: navigate(second.callbacks.redirect, "https://llm.corp.example/second"),
   }
 
-  const assets = await Promise.all(
-    ["index.html", "assets/app.js", "assets/app.css", "assets/font.woff2", "assets/icon.png"].map(async (path) => {
-      const response = await protocolRequest(`oc://renderer/${path}?token=asset-query-secret`)
-      return { path, status: response.status, type: response.headers.get("content-type") }
-    }),
-  )
+  const assets = await protocolAssets([
+    "index.html",
+    "assets/app.js",
+    "assets/app.css",
+    "assets/font.woff2",
+    "assets/icon.png",
+  ])
   const protocolRejections = {
     invalidURL: (await protocolRequest("not a URL?token=protocol-malformed-secret")).status,
     host: (await protocolRequest("oc://attacker/private.js?token=host-secret")).status,
