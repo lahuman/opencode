@@ -1086,10 +1086,12 @@ export function toPublicInfo(provider: Info, options: { redactSecrets?: boolean 
   )
   if (!options.redactSecrets) return result
   delete result.key
+  delete result.options.key
   delete result.options.apiKey
   delete result.options.headers
   Object.values(result.models).forEach((model) => {
     model.headers = {}
+    delete model.options.key
     delete model.options.apiKey
     delete model.options.headers
   })

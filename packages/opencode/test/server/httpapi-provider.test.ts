@@ -52,6 +52,25 @@ function providerByID(input: unknown, key: "all" | "providers", id: string) {
   return providerList(input, key).find((provider) => isRecord(provider) && provider.id === id)
 }
 
+function expectEnterpriseProviderRedacted(input: unknown, key: "all" | "providers") {
+  const provider = providerByID(input, key, "company-llm")
+  expect(provider).toBeDefined()
+  expect(JSON.stringify(provider)).not.toContain("secret")
+  if (!isRecord(provider)) return
+  expect(provider.key).toBeUndefined()
+  expect(provider.options).toMatchObject({ baseURL: "https://llm.corp.example/v1" })
+  expect(provider.options).not.toHaveProperty("key")
+  expect(provider.options).not.toHaveProperty("apiKey")
+  expect(provider.options).not.toHaveProperty("headers")
+  if (!isRecord(provider.models) || !isRecord(provider.models["company-code"])) return
+  const model = provider.models["company-code"]
+  expect(model.headers).toEqual({})
+  expect(model.options).toMatchObject({ temperature: 0 })
+  expect(model.options).not.toHaveProperty("key")
+  expect(model.options).not.toHaveProperty("apiKey")
+  expect(model.options).not.toHaveProperty("headers")
+}
+
 function hasNonZeroModelCost(input: unknown, key: "all" | "providers", id: string) {
   const provider = providerByID(input, key, id)
   if (!isRecord(provider) || !isRecord(provider.models)) return false
@@ -261,6 +280,57 @@ function setEnvScoped(key: string, value: string) {
 }
 
 describe("provider HttpApi", () => {
+  it.instance(
+    "redacts every legacy credential variant from both enterprise provider lists",
+    Effect.gen(function* () {
+      yield* setEnvScoped("OPENCODE_ENTERPRISE_OFFLINE", "1")
+      yield* setEnvScoped("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS", "https://llm.corp.example")
+      yield* setEnvScoped(
+        "OPENCODE_AUTH_CONTENT",
+        JSON.stringify({ "company-llm": { type: "api", key: "top-level-provider-secret" } }),
+      )
+      const directory = (yield* TestInstance).directory
+      const headers = { "x-opencode-directory": directory }
+
+      const providerResponse = yield* request("/provider", { headers })
+      const configResponse = yield* request("/config/providers", { headers })
+
+      expect(providerResponse.status).toBe(200)
+      expect(configResponse.status).toBe(200)
+      expectEnterpriseProviderRedacted(yield* providerResponse.json, "all")
+      expectEnterpriseProviderRedacted(yield* configResponse.json, "providers")
+    }),
+    {
+      config: {
+        formatter: false,
+        lsp: false,
+        provider: {
+          "company-llm": {
+            npm: "@ai-sdk/openai-compatible",
+            options: {
+              baseURL: "https://llm.corp.example/v1",
+              key: "provider-option-secret",
+              apiKey: "provider-api-secret",
+              headers: { Authorization: "provider-header-secret" },
+            },
+            models: {
+              "company-code": {
+                name: "Company Code",
+                headers: { Authorization: "model-header-secret" },
+                options: {
+                  temperature: 0,
+                  key: "model-option-secret",
+                  apiKey: "model-api-secret",
+                  headers: { Authorization: "model-option-header-secret" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  )
+
   it.instance.skip(
     "returns public v2 provider not found errors",
     Effect.gen(function* () {

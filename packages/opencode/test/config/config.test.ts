@@ -893,10 +893,12 @@ Nested command template`,
 it.instance("updates config and writes to file", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
-    yield* Config.Service.use((svc) =>
+    yield* writeConfigEffect(test.directory, { username: "existing-user" }, "config.json")
+    const result = yield* Config.Service.use((svc) =>
       svc.update(ConfigParse.schema(ConfigV1.Info, { model: "updated/model" }, "test:config")),
     )
 
+    expect(result).toMatchObject({ model: "updated/model", username: "existing-user" })
     const writtenConfig = yield* FSUtil.use.readJson(path.join(test.directory, "config.json"))
     expect(writtenConfig).toMatchObject({ model: "updated/model" })
   }),

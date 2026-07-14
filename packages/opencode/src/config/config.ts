@@ -126,7 +126,7 @@ export interface Interface {
   readonly get: () => Effect.Effect<Info>
   readonly getGlobal: () => Effect.Effect<Info>
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
-  readonly update: (config: Info) => Effect.Effect<void>
+  readonly update: (config: Info) => Effect.Effect<Info>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
@@ -642,9 +642,9 @@ const layer = Layer.effect(
       const dir = yield* InstanceState.directory
       const file = path.join(dir, "config.json")
       const existing = yield* loadFile(file)
-      yield* fs
-        .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
-        .pipe(Effect.orDie)
+      const next = ConfigEnterprise.sanitizeWrite(mergeDeep(writable(existing), writable(config)))
+      yield* fs.writeFileString(file, JSON.stringify(next, null, 2)).pipe(Effect.orDie)
+      return next
     })
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
@@ -660,16 +660,25 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), patch)
-        const serialized = JSON.stringify(merged, null, 2)
+        next = ConfigEnterprise.sanitizeWrite(mergeDeep(writable(existing), patch))
+        const serialized = JSON.stringify(next, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
-        next = merged
       } else {
         const updated = patchJsonc(before, patch)
-        next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
-        changed = updated !== before
-        if (changed) yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+        const merged = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
+        next = ConfigEnterprise.sanitizeWrite(merged)
+        const serialized =
+          next === merged
+            ? updated
+            : applyEdits(
+                updated,
+                modify(updated, ["provider"], next.provider, {
+                  formattingOptions: { insertSpaces: true, tabSize: 2 },
+                }),
+              )
+        changed = serialized !== before
+        if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
       }
 
       if (changed) yield* invalidate()

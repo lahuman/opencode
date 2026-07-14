@@ -50,7 +50,22 @@ test("enterprise enforcement clears provider credential env", () => {
         company: {
           npm: "@ai-sdk/openai-compatible",
           env: ["COMPANY_API_KEY"],
-          options: { baseURL: "https://llm.corp.example/v1" },
+          options: {
+            baseURL: "https://llm.corp.example/v1",
+            key: "provider-secret-key",
+            apiKey: "provider-api-secret",
+            headers: { Authorization: "provider-header-secret" },
+          },
+          models: {
+            default: {
+              headers: { Authorization: "model-header-secret" },
+              options: {
+                key: "model-secret-key",
+                apiKey: "model-api-secret",
+                headers: { Authorization: "model-option-header-secret" },
+              },
+            },
+          },
         },
       },
     },
@@ -61,6 +76,9 @@ test("enterprise enforcement clears provider credential env", () => {
     },
   )
   expect(result.provider?.company?.env).toEqual([])
+  expect(result.provider?.company?.options).toEqual({ baseURL: "https://llm.corp.example/v1" })
+  expect(result.provider?.company?.models?.default?.headers).toBeUndefined()
+  expect(result.provider?.company?.models?.default?.options).toEqual({})
 })
 
 test("materializes company provider metadata as structured defaults", () => {

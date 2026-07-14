@@ -1565,12 +1565,14 @@ test("public provider info can redact runtime credentials without mutation", () 
   provider.key = "provider-secret-key"
   provider.options = {
     baseURL: "https://llm.corp.example/v1",
+    key: "provider-option-secret-key",
     apiKey: "option-secret-key",
     headers: { Authorization: "provider-secret-header" },
   }
   provider.models["company-code"].headers = { "X-Model-Token": "model-secret-header" }
   provider.models["company-code"].options = {
     temperature: 0,
+    key: "model-option-secret-key",
     apiKey: "model-secret-key",
     headers: { Authorization: "model-option-secret-header" },
   }
@@ -1584,6 +1586,7 @@ test("public provider info can redact runtime credentials without mutation", () 
   expect(result.models["company-code"].options).toEqual({ temperature: 0 })
   expect(Schema.is(Provider.Info)(result)).toBe(true)
   expect(provider.key).toBe("provider-secret-key")
+  expect(provider.options.key).toBe("provider-option-secret-key")
   expect(provider.options.apiKey).toBe("option-secret-key")
   expect(provider.models["company-code"].headers).toEqual({ "X-Model-Token": "model-secret-header" })
 })

@@ -105,11 +105,11 @@ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Inf
             {
               ...entry[1],
               env: Array<string>(),
-              options: omit(entry[1].options, ["apiKey", "headers"]),
+              options: omit(entry[1].options, ["key", "apiKey", "headers"]),
               models: mapValues(entry[1].models ?? {}, (model) => ({
                 ...omit(model, ["headers"]),
                 provider: { ...model.provider, npm: OPENAI_COMPATIBLE },
-                options: omit(model.options ?? {}, ["apiKey", "headers"]),
+                options: omit(model.options ?? {}, ["key", "apiKey", "headers"]),
               })),
             },
           ],
