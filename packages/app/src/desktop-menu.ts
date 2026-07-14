@@ -1,4 +1,5 @@
 export type DesktopMenuPlatform = "macos" | "windows"
+export type DesktopMenuEdition = "public" | "enterprise"
 
 export type DesktopMenuAction =
   | "app.checkForUpdates"
@@ -44,6 +45,7 @@ export type DesktopMenuRole =
 
 export type DesktopMenuItem = {
   type: "item"
+  edition?: DesktopMenuEdition
   label?: string
   command?: string
   action?: DesktopMenuAction
@@ -56,6 +58,7 @@ export type DesktopMenuItem = {
 
 export type DesktopMenuSeparator = {
   type: "separator"
+  edition?: DesktopMenuEdition
   platforms?: DesktopMenuPlatform[]
 }
 
@@ -64,6 +67,7 @@ export type DesktopMenuEntry = DesktopMenuItem | DesktopMenuSeparator
 export type DesktopMenu = {
   id: string
   label: string
+  edition?: DesktopMenuEdition
   role?: DesktopMenuRole
   items?: DesktopMenuEntry[]
   platforms?: DesktopMenuPlatform[]
@@ -200,23 +204,38 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     label: "Help",
     items: [
-      { type: "item", label: "OpenCode Documentation", href: "https://opencode.ai/docs" },
-      { type: "item", label: "Support Forum", href: "https://discord.com/invite/opencode" },
-      { type: "item", label: "Export Logs...", command: "logs.export" },
-      { type: "separator" },
+      { type: "item", edition: "enterprise", label: "Company AI Guide", command: "company.guide.open" },
       {
         type: "item",
+        edition: "public",
+        label: "OpenCode Documentation",
+        href: "https://opencode.ai/docs",
+      },
+      { type: "item", edition: "public", label: "Support Forum", href: "https://discord.com/invite/opencode" },
+      { type: "item", label: "Export Logs...", command: "logs.export" },
+      { type: "separator", edition: "public" },
+      {
+        type: "item",
+        edition: "public",
         label: "Share Feedback",
         href: "https://github.com/anomalyco/opencode/issues/new?template=feature_request.yml",
       },
       {
         type: "item",
+        edition: "public",
         label: "Report a Bug",
         href: "https://github.com/anomalyco/opencode/issues/new?template=bug_report.yml",
       },
     ],
   },
 ]
+
+export function desktopMenuForEdition(edition: DesktopMenuEdition) {
+  return DESKTOP_MENU.filter((menu) => !menu.edition || menu.edition === edition).map((menu) => ({
+    ...menu,
+    items: menu.items?.filter((item) => !item.edition || item.edition === edition),
+  }))
+}
 
 export function desktopMenuVisible(item: { platforms?: DesktopMenuPlatform[] }, platform: DesktopMenuPlatform) {
   return !item.platforms || item.platforms.includes(platform)

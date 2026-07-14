@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { basename } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -43,6 +43,21 @@ type Deps = {
     credentialStatus: () => Promise<{ configured: boolean }>
     setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
     clearCredentials: () => Promise<{ restartRequired: true }>
+    guide: {
+      enabled: boolean
+      path: string
+      version: string
+    }
+  }
+}
+
+export async function readEnterpriseGuide(input: { enabled: boolean; path: string; version: string }) {
+  if (!input.enabled) throw new Error("Company guide is unavailable")
+  const markdown = await readFile(input.path, "utf8").catch(() => undefined)
+  if (markdown === undefined) throw new Error("Company guide could not be read")
+  return {
+    version: input.version,
+    markdown,
   }
 }
 
@@ -94,6 +109,7 @@ export function registerIpcHandlers(deps: Deps) {
       deps.enterprise.setCredentials(input),
   )
   ipcMain.handle("enterprise-clear-credentials", () => deps.enterprise.clearCredentials())
+  ipcMain.handle("enterprise-guide-read", () => readEnterpriseGuide(deps.enterprise.guide))
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {
       const store = getStore(name)

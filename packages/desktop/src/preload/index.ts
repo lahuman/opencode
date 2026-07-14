@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
-import type { ElectronAPI, WslServersEvent } from "./types"
+import { createEnterpriseAPI, type ElectronAPI, type WslServersEvent } from "./types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import { ENTERPRISE_ENABLED } from "../enterprise"
 
@@ -15,12 +15,7 @@ const api: ElectronAPI = {
   killSidecar: () => ipcRenderer.invoke("kill-sidecar"),
   installCli: () => ipcRenderer.invoke("install-cli"),
   awaitInitialization: () => ipcRenderer.invoke("await-initialization"),
-  enterprise: {
-    enabled: ENTERPRISE_ENABLED,
-    credentialStatus: () => ipcRenderer.invoke("enterprise-credential-status"),
-    setCredentials: (input) => ipcRenderer.invoke("enterprise-set-credentials", input),
-    clearCredentials: () => ipcRenderer.invoke("enterprise-clear-credentials"),
-  },
+  enterprise: createEnterpriseAPI(ENTERPRISE_ENABLED, (channel, ...args) => ipcRenderer.invoke(channel, ...args)),
   wslServers: {
     getState: () => ipcRenderer.invoke("wsl-servers-get-state"),
     subscribe: (cb) => {

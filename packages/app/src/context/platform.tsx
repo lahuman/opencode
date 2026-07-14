@@ -75,6 +75,7 @@ type PlatformBase = {
     credentialStatus(): Promise<{ configured: boolean }>
     setCredentials(input: { apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
     clearCredentials(): Promise<{ restartRequired: boolean }>
+    readGuide(): Promise<{ version: string; markdown: string }>
   }
 
   /** Fetch override */

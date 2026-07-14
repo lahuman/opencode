@@ -187,6 +187,48 @@ test("settings diagnostics display the authenticated server remediation", async 
 })
 
 responsiveViewports.forEach((viewport) => {
+  test(`Company AI Guide dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.goto(fixture("guide"))
+
+    const dialog = page.getByRole("dialog")
+    const body = dialog.locator('[data-component="company-guide"]')
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toHaveAttribute("aria-labelledby", /.+/)
+    await expect(dialog.getByText("Company AI Guide", { exact: true })).toBeVisible()
+    await expect(dialog.getByText("Version 2026.07", { exact: true })).toBeVisible()
+    await expect(dialog.getByRole("heading", { name: "Internal AI guide", level: 1 })).toBeVisible()
+    await expect(dialog.locator("a")).toHaveCount(0)
+
+    const metrics = await dialog.evaluate((node) => {
+      const content = node.getBoundingClientRect()
+      const body = node.querySelector<HTMLElement>('[data-component="company-guide"]')
+      if (!body) throw new Error("Missing company guide body")
+      const bodyRect = body.getBoundingClientRect()
+      return {
+        content: { top: content.top, right: content.right, bottom: content.bottom, left: content.left },
+        body: { top: bodyRect.top, right: bodyRect.right, bottom: bodyRect.bottom, left: bodyRect.left },
+        dialogHorizontalOverflow: node.scrollWidth > node.clientWidth,
+        bodyHorizontalOverflow: body.scrollWidth > body.clientWidth,
+        bodyVerticalOverflow: body.scrollHeight > body.clientHeight,
+      }
+    })
+    expect(metrics.dialogHorizontalOverflow).toBe(false)
+    expect(metrics.bodyHorizontalOverflow).toBe(false)
+    expect(metrics.bodyVerticalOverflow).toBe(true)
+    expect(metrics.content.left).toBeGreaterThanOrEqual(0)
+    expect(metrics.content.top).toBeGreaterThanOrEqual(0)
+    expect(metrics.content.right).toBeLessThanOrEqual(viewport.width)
+    expect(metrics.content.bottom).toBeLessThanOrEqual(viewport.height)
+    expect(metrics.body.left).toBeGreaterThanOrEqual(metrics.content.left)
+    expect(metrics.body.right).toBeLessThanOrEqual(metrics.content.right)
+    expect(metrics.body.bottom).toBeLessThanOrEqual(metrics.content.bottom)
+
+    await body.evaluate((node) => node.scrollTo({ top: node.scrollHeight }))
+    expect(await body.evaluate((node) => node.scrollTop > 0)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`company-guide-${viewport.name}.png`) })
+  })
+
   test(`Company LLM dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(fixture("company"))

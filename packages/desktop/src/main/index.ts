@@ -206,11 +206,12 @@ const main = Effect.gen(function* () {
   const enterpriseDir = app.isPackaged
     ? join(process.resourcesPath, "enterprise")
     : join(import.meta.dirname, "../../resources/enterprise")
+  const enterpriseGuide = join(enterpriseDir, "company-guide.md")
   preferAppEnv(
     app.getPath("userData"),
     enterpriseEnvironment(ENTERPRISE_PROFILE, {
       defaults: join(enterpriseDir, "opencode.jsonc"),
-      guide: join(enterpriseDir, "company-guide.md"),
+      guide: enterpriseGuide,
     }),
   )
 
@@ -323,6 +324,11 @@ const main = Effect.gen(function* () {
       credentialStatus: enterpriseCredentialHandlers.status,
       setCredentials: enterpriseCredentialHandlers.set,
       clearCredentials: enterpriseCredentialHandlers.clear,
+      guide: {
+        enabled: ENTERPRISE_PROFILE.enabled,
+        path: enterpriseGuide,
+        version: ENTERPRISE_PROFILE.enabled ? ENTERPRISE_PROFILE.guideVersion : "",
+      },
     },
   })
   registerWslIpcHandlers(wslServers, RUNTIME_FEATURES.wsl)
@@ -412,6 +418,7 @@ const main = Effect.gen(function* () {
   const windows = restoreMainWindows()
   if (windows.length) {
     createMenu({
+      edition: ENTERPRISE_ENABLED ? "enterprise" : "public",
       trigger: (id) => {
         const win = getLastFocusedWindow()
         if (win) sendMenuCommand(win, id)

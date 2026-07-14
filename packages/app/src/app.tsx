@@ -1,7 +1,7 @@
 import "@/index.css"
 import * as Sentry from "@sentry/solid"
 import { I18nProvider } from "@opencode-ai/ui/context"
-import { DialogProvider } from "@opencode-ai/ui/context/dialog"
+import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/session-ui/file"
@@ -58,6 +58,8 @@ import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome, LegacyHome } from "@/pages/home"
+import { createCompanyGuideCommand, DialogCompanyGuide } from "@/components/dialog-company-guide"
+import { showToast } from "@/utils/toast"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
 
@@ -285,6 +287,7 @@ function SharedProviders(props: ParentProps) {
 
 function DesktopCommands() {
   const command = useCommand()
+  const dialog = useDialog()
   const language = useLanguage()
   const platform = usePlatform()
 
@@ -300,6 +303,13 @@ function DesktopCommands() {
         },
       })
     }
+    const companyGuide = createCompanyGuideCommand({
+      enterprise: platform.enterprise,
+      category: language.t("command.category.settings"),
+      open: (guide) => dialog.show(() => <DialogCompanyGuide {...guide} />),
+      reportFailure: () => showToast({ title: language.t("common.requestFailed") }),
+    })
+    if (companyGuide) commands.push(companyGuide)
     return commands
   })
 

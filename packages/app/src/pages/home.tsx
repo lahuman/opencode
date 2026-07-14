@@ -69,6 +69,7 @@ import { archiveHomeSession } from "./home-session-archive"
 import { shouldOpenSessionInBackground } from "./home-session-open"
 import { showToast } from "@/utils/toast"
 import { fileManagerApp } from "@/utils/file-manager"
+import { openEditionHelp } from "@/components/dialog-company-guide"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_SESSION_HEADER_STICKY_TOP = 12
@@ -266,6 +267,13 @@ export function NewHome() {
   const global = useGlobal()
   const tabs = useTabs()
   const command = useCommand()
+  const openHelp = () =>
+    openEditionHelp({
+      enterprise: Boolean(platform.enterprise),
+      href: "https://opencode.ai/desktop-feedback",
+      trigger: command.trigger,
+      openLink: platform.openLink,
+    })
   const notification = useNotification()
   const marked = useMarked()
   const openSettings = useSettingsDialog()
@@ -565,7 +573,7 @@ export function NewHome() {
           clearNotifications={clearNotifications}
           unseenCount={unseenCount}
           openSettings={openSettings}
-          openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+          openHelp={openHelp}
           language={language}
         />
 
@@ -657,7 +665,7 @@ export function NewHome() {
         <HomeUtilityNav
           class="flex lg:hidden"
           openSettings={openSettings}
-          openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+          openHelp={openHelp}
           language={language}
         />
       </div>

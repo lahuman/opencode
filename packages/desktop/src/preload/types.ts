@@ -50,6 +50,7 @@ export type ElectronAPI = {
     credentialStatus: () => Promise<{ configured: boolean }>
     setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
     clearCredentials: () => Promise<{ restartRequired: true }>
+    readGuide: () => Promise<{ version: string; markdown: string }>
   }
   wslServers: WslServersAPI
   updater: UpdaterAPI
@@ -109,4 +110,29 @@ export type ElectronAPI = {
   setBackgroundColor: (color: string) => Promise<void>
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
+}
+
+export function createEnterpriseAPI(
+  enabled: boolean,
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
+): ElectronAPI["enterprise"] {
+  return {
+    enabled,
+    credentialStatus: () =>
+      invoke("enterprise-credential-status") as ReturnType<ElectronAPI["enterprise"]["credentialStatus"]>,
+    setCredentials: (input) =>
+      invoke("enterprise-set-credentials", input) as ReturnType<ElectronAPI["enterprise"]["setCredentials"]>,
+    clearCredentials: () =>
+      invoke("enterprise-clear-credentials") as ReturnType<ElectronAPI["enterprise"]["clearCredentials"]>,
+    readGuide: () => invoke("enterprise-guide-read") as ReturnType<ElectronAPI["enterprise"]["readGuide"]>,
+  }
+}
+
+export function mapEnterpriseAPI(enterprise: ElectronAPI["enterprise"]) {
+  return {
+    credentialStatus: enterprise.credentialStatus,
+    setCredentials: enterprise.setCredentials,
+    clearCredentials: enterprise.clearCredentials,
+    readGuide: enterprise.readGuide,
+  }
 }

@@ -6,7 +6,12 @@ import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 
 import { useCommand } from "@/context/command"
-import { DESKTOP_MENU, desktopMenuVisible, type DesktopMenuAction, type DesktopMenuEntry } from "@/desktop-menu"
+import {
+  desktopMenuForEdition,
+  desktopMenuVisible,
+  type DesktopMenuAction,
+  type DesktopMenuEntry,
+} from "@/desktop-menu"
 import { usePlatform } from "@/context/platform"
 
 export function WindowsAppMenu(props: {
@@ -78,24 +83,26 @@ export function WindowsAppMenu(props: {
         <DropdownMenu.Content class="desktop-app-menu">
           <DropdownMenu.Group>
             <DropdownMenu.GroupLabel class="desktop-app-menu-heading">OpenCode</DropdownMenu.GroupLabel>
-            {DESKTOP_MENU.filter((menu) => desktopMenuVisible(menu, "windows")).map((menu) => (
-              <DesktopMenuSubmenu label={menu.label}>
-                {menu.items
-                  ?.filter((entry) => desktopMenuVisible(entry, "windows"))
-                  .map((entry) =>
-                    entry.type === "separator" ? (
-                      <DropdownMenu.Separator />
-                    ) : (
-                      <DesktopMenuItem
-                        label={entry.label ?? ""}
-                        keybind={entry.command ? props.command.keybind(entry.command) : entry.accelerator?.windows}
-                        disabled={entry.command ? commandDisabled(entry.command) : false}
-                        onSelect={() => runEntry(entry)}
-                      />
-                    ),
-                  )}
-              </DesktopMenuSubmenu>
-            ))}
+            {desktopMenuForEdition(props.platform.enterprise ? "enterprise" : "public")
+              .filter((menu) => desktopMenuVisible(menu, "windows"))
+              .map((menu) => (
+                <DesktopMenuSubmenu label={menu.label}>
+                  {menu.items
+                    ?.filter((entry) => desktopMenuVisible(entry, "windows"))
+                    .map((entry) =>
+                      entry.type === "separator" ? (
+                        <DropdownMenu.Separator />
+                      ) : (
+                        <DesktopMenuItem
+                          label={entry.label ?? ""}
+                          keybind={entry.command ? props.command.keybind(entry.command) : entry.accelerator?.windows}
+                          disabled={entry.command ? commandDisabled(entry.command) : false}
+                          onSelect={() => runEntry(entry)}
+                        />
+                      ),
+                    )}
+                </DesktopMenuSubmenu>
+              ))}
           </DropdownMenu.Group>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

@@ -6,6 +6,8 @@ import { Drawer, DrawerClose, DrawerContent } from "@/components/ui/drawer"
 import { usePlatform } from "@/context/platform"
 import introducingTabsVideo from "@/assets/help/introducing-tabs.mp4"
 import { Persist, persisted } from "@/utils/persist"
+import { useCommand } from "@/context/command"
+import { openEditionHelp } from "./dialog-company-guide"
 
 const helpIcon = (
   <svg
@@ -34,21 +36,45 @@ export function HelpButton() {
   if (import.meta.env.VITE_OPENCODE_CHANNEL !== "dev") return null
 
   const platform = usePlatform()
+  const command = useCommand()
+  const openHelp = () =>
+    openEditionHelp({
+      enterprise: Boolean(platform.enterprise),
+      href: "https://opencode.ai",
+      trigger: command.trigger,
+      openLink: platform.openLink,
+    })
 
   return (
-    <a
-      href="https://opencode.ai"
-      aria-label="Open the OpenCode website"
-      data-component="icon-button-v2"
-      data-size="large"
-      class={`${triggerClass} fixed bottom-5 right-5 z-50 flex items-center justify-center`}
-      onClick={(event) => {
-        event.preventDefault()
-        platform.openLink(event.currentTarget.href)
-      }}
+    <Show
+      when={platform.enterprise}
+      fallback={
+        <a
+          href="https://opencode.ai"
+          aria-label="Open the OpenCode website"
+          data-component="icon-button-v2"
+          data-size="large"
+          class={`${triggerClass} fixed bottom-5 right-5 z-50 flex items-center justify-center`}
+          onClick={(event) => {
+            event.preventDefault()
+            openHelp()
+          }}
+        >
+          {helpIcon}
+        </a>
+      }
     >
-      {helpIcon}
-    </a>
+      <button
+        type="button"
+        aria-label="Open the Company AI Guide"
+        data-component="icon-button-v2"
+        data-size="large"
+        class={`${triggerClass} fixed bottom-5 right-5 z-50 flex items-center justify-center`}
+        onClick={openHelp}
+      >
+        {helpIcon}
+      </button>
+    </Show>
   )
 }
 

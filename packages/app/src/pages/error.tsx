@@ -8,6 +8,8 @@ import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { Icon } from "@opencode-ai/ui/icon"
 import { errorDescriptionKey } from "./error-description"
+import { useCommand } from "@/context/command"
+import { openEditionHelp } from "@/components/dialog-company-guide"
 
 export type InitError = {
   name: string
@@ -221,6 +223,14 @@ interface ErrorPageProps {
 
 export const ErrorPage: Component<ErrorPageProps> = (props) => {
   const platform = usePlatform()
+  // The top-level error boundary can render after CommandProvider has unmounted.
+  const command = (() => {
+    try {
+      return useCommand()
+    } catch {
+      return
+    }
+  })()
   const language = useLanguage()
   const formattedError = () => formatError(props.error, language.t)
   let recordedFatalError: Promise<void> | undefined
@@ -349,17 +359,26 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           {(message) => <p class="text-xs text-text-danger-base text-center max-w-2xl">{message()}</p>}
         </Show>
         <div class="flex flex-col items-center gap-2">
-          <div class="flex items-center justify-center gap-1">
-            {language.t("error.page.report.prefix")}
-            <button
-              type="button"
-              class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-            >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
-            </button>
-          </div>
+          <Show when={!platform.enterprise || command}>
+            <div class="flex items-center justify-center gap-1">
+              {language.t("error.page.report.prefix")}
+              <button
+                type="button"
+                class="flex items-center text-text-interactive-base gap-1"
+                onClick={() =>
+                  openEditionHelp({
+                    enterprise: Boolean(platform.enterprise),
+                    href: "https://opencode.ai/desktop-feedback",
+                    trigger: (id) => command?.trigger(id),
+                    openLink: platform.openLink,
+                  })
+                }
+              >
+                <div>{language.t("error.page.report.discord")}</div>
+                <Icon name="discord" class="text-text-interactive-base" />
+              </button>
+            </div>
+          </Show>
           <Show when={platform.version}>
             {(version) => (
               <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>

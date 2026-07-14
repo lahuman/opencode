@@ -30,6 +30,7 @@ import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseTelemetryEnabled } from "../enterprise"
+import { mapEnterpriseAPI } from "../preload/types"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
@@ -173,11 +174,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     windowID: windowState.id,
     ...(ENTERPRISE_ENABLED
       ? {
-          enterprise: {
-            credentialStatus: window.api.enterprise.credentialStatus,
-            setCredentials: window.api.enterprise.setCredentials,
-            clearCredentials: window.api.enterprise.clearCredentials,
-          },
+          enterprise: mapEnterpriseAPI(window.api.enterprise),
         }
       : {}),
 

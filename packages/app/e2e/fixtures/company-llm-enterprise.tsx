@@ -2,11 +2,13 @@ import "@/index.css"
 import { MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
+import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/components/dialog-connect-provider"
+import { DialogCompanyGuide } from "@/components/dialog-company-guide"
 import { useServerManagementController } from "@/components/dialog-select-server"
 import { GlobalProvider } from "@/context/global"
 import { LanguageProvider } from "@/context/language"
@@ -28,6 +30,17 @@ const DIAGNOSTIC_FAILURE = {
   checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
   failure: { kind: "connection", message: "Install the Company TLS CA certificate and try again." },
 } as const
+const GUIDE_MARKDOWN = [
+  "# Internal AI guide",
+  "",
+  "Use only company-approved data and systems.",
+  "",
+  ...Array.from({ length: 24 }, (_, index) => `${index + 1}. Review generated output before using it in company work.`),
+  "",
+  "## Escalation",
+  "",
+  "Stop work and follow the company security reporting process when sensitive data may be involved.",
+].join("\n")
 
 type RequestRecord = {
   origin: string
@@ -212,6 +225,9 @@ function createHarness() {
       async clearCredentials() {
         behavior.configured = false
         return { restartRequired: behavior.credentialMode === "restart" }
+      },
+      async readGuide() {
+        return { version: "2026.07", markdown: GUIDE_MARKDOWN }
       },
     },
   }
@@ -457,6 +473,16 @@ function CompanyScenario(props: { harness: Harness }) {
   )
 }
 
+function GuideScenario(props: { harness: Harness }) {
+  return (
+    <DialogTree harness={props.harness}>
+      <MarkedProvider>
+        <OpenDialog component={() => <DialogCompanyGuide version="2026.07" markdown={GUIDE_MARKDOWN} />} />
+      </MarkedProvider>
+    </DialogTree>
+  )
+}
+
 function SettingsDiagnosticConsumer() {
   const company = useCompanyProviderSettingsState()
   return (
@@ -500,6 +526,9 @@ function Fixture() {
       </Match>
       <Match when={scenario === "settings"}>
         <SettingsScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "guide"}>
+        <GuideScenario harness={harness} />
       </Match>
     </Switch>
   )
