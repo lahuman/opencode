@@ -4,7 +4,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { APICallError, generateText, jsonSchema, streamText, tool } from "ai"
-import { Cause, Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { Provider } from "./provider"
 
 export const Input = Schema.Struct({
@@ -83,25 +83,26 @@ const timeoutCodes = new Set([
   "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_BODY_TIMEOUT",
 ])
+const modelCodes = new Set(["MODEL_NOT_FOUND", "DEPLOYMENT_NOT_FOUND", "MODEL_DOES_NOT_EXIST"])
 
 export function classify(input: {
   statusCode?: number
   message: string
   codes?: readonly string[]
+  modelCode?: string
   stage?: Stage
 }): typeof FailureKind.Type {
-  const message = input.message.toLowerCase()
+  const message = input.message.trim().toLowerCase()
   const codes = (input.codes ?? []).map((code) => code.trim().toUpperCase())
   if (input.statusCode === 401 || input.statusCode === 403) return "auth"
-  if (message.includes("model not found") || message.includes("unknown model") || message.includes("no such model"))
+  if (input.statusCode === 404 && input.modelCode && modelCodes.has(input.modelCode.trim().toUpperCase()))
     return "model"
   if (input.statusCode === 408 || input.statusCode === 504) return "timeout"
   if (codes.some((code) => dnsCodes.has(code))) return "dns"
   if (codes.some((code) => tlsCodes.has(code))) return "tls"
   if (codes.some((code) => timeoutCodes.has(code))) return "timeout"
-  if (/\brequest (?:timed out|timeout)\b/.test(message)) return "timeout"
+  if (message === "request timed out") return "timeout"
   if (codes.some((code) => connectionCodes.has(code))) return "connection"
-  if (message.includes("cannot connect to api")) return "connection"
   if (input.stage === "streaming") return "stream"
   if (input.stage === "toolCall") return "tool_call"
   return "response"
@@ -143,6 +144,14 @@ function causeChain(error: unknown, seen = new Set<unknown>()): unknown[] {
   return [error, ...nested.flatMap((item) => causeChain(item, seen))]
 }
 
+function modelCode(error: unknown) {
+  if (!APICallError.isInstance(error)) return undefined
+  if (!error.data || typeof error.data !== "object" || !("error" in error.data)) return undefined
+  const detail = error.data.error
+  if (!detail || typeof detail !== "object" || !("code" in detail) || typeof detail.code !== "string") return undefined
+  return detail.code
+}
+
 function failureResult(error: unknown): typeof Result.Type {
   const stage = isProbeError(error) ? error.stage : "basic"
   const chain = causeChain(isProbeError(error) ? error.cause : error)
@@ -160,7 +169,13 @@ function failureResult(error: unknown): typeof Result.Type {
   )
   const kind = chain.some((item) => Provider.ModelNotFoundError.isInstance(item))
     ? "model"
-    : classify({ statusCode: APICallError.isInstance(api) ? api.statusCode : undefined, message, codes, stage })
+    : classify({
+        statusCode: APICallError.isInstance(api) ? api.statusCode : undefined,
+        message,
+        codes,
+        modelCode: modelCode(api),
+        stage,
+      })
   return {
     ok: false,
     checks: {
@@ -172,9 +187,15 @@ function failureResult(error: unknown): typeof Result.Type {
   }
 }
 
+function stageSignal(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(15_000)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
+}
+
 export async function probe(
   model: Parameters<typeof generateText>[0]["model"],
   checkToolCall: boolean,
+  signal?: AbortSignal,
 ): Promise<typeof Result.Type> {
   try {
     await check("basic", async () => {
@@ -183,7 +204,7 @@ export async function probe(
         prompt: "Reply with OK.",
         maxOutputTokens: 8,
         maxRetries: 0,
-        abortSignal: AbortSignal.timeout(15_000),
+        abortSignal: stageSignal(signal),
       })
       if (!result.text.trim()) throw new Error("Basic response was empty")
     })
@@ -194,7 +215,7 @@ export async function probe(
         prompt: "Reply with OK.",
         maxOutputTokens: 8,
         maxRetries: 0,
-        abortSignal: AbortSignal.timeout(15_000),
+        abortSignal: stageSignal(signal),
         onError({ error }) {
           errors.push(error)
         },
@@ -221,7 +242,7 @@ export async function probe(
               }),
             }),
           },
-          abortSignal: AbortSignal.timeout(15_000),
+          abortSignal: stageSignal(signal),
         })
         if (result.toolCalls.length === 0) throw new Error("Tool call was not returned")
       })
@@ -254,8 +275,8 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const model = yield* provider.getModel(providerID, input.modelID)
           const language = yield* provider.getLanguage(model)
-          return yield* Effect.promise(() => probe(language, input.checkToolCall))
-        }).pipe(Effect.catchCause((cause) => Effect.succeed(failureResult(Cause.squash(cause))))),
+          return yield* Effect.promise((signal) => probe(language, input.checkToolCall, signal))
+        }).pipe(Effect.catch((error) => Effect.succeed(failureResult(error)))),
       ),
     })
   }),
