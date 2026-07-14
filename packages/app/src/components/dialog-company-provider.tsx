@@ -176,26 +176,28 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
-  const [apiKey, setApiKey] = createSignal("")
-  const [headers, setHeaders] = createStore([{ key: "", value: "" }])
   const config = createMemo(() => companyProviderConfig(serverSync().data.config))
-  const [modelID, setModelID] = createSignal(config().models[0]?.id ?? "")
-  const [action, setAction] = createSignal<CompanyProviderAction>()
-  const [result, setResult] = createSignal<CompanyProviderDiagnosticResult>()
-  const [error, setError] = createSignal<string>()
+  const [state, setState] = createStore({
+    apiKey: "",
+    headers: [{ key: "", value: "" }],
+    modelID: config().models[0]?.id ?? "",
+    action: undefined as CompanyProviderAction,
+    result: undefined as CompanyProviderDiagnosticResult | undefined,
+    error: undefined as string | undefined,
+  })
   const [status, statusActions] = createResource(
     () => platform.enterprise,
     (enterprise) => enterprise.credentialStatus(),
   )
 
   createEffect(() => {
-    if (config().models.some((model) => model.id === modelID())) return
-    setModelID(config().models[0]?.id ?? "")
+    if (config().models.some((model) => model.id === state.modelID)) return
+    setState("modelID", config().models[0]?.id ?? "")
   })
 
   const resetSecrets = () => {
-    setApiKey("")
-    setHeaders([{ key: "", value: "" }])
+    setState("apiKey", "")
+    setState("headers", [{ key: "", value: "" }])
   }
 
   const mutateCredentials = async (
@@ -203,9 +205,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     mutation: () => Promise<CredentialMutationResult>,
     configured: boolean,
   ) => {
-    if (!companyProviderCanStart(action(), true)) return
-    setAction(nextAction)
-    setError()
+    if (!companyProviderCanStart(state.action, true)) return
+    setState("action", nextAction)
+    setState("error", undefined)
     const response = await applyCompanyProviderCredentialMutation({
       mutation,
       clearLocal: resetSecrets,
@@ -215,21 +217,21 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
       () => ({ error: true as const }),
     )
     if ("error" in response) {
-      setError(language.t("common.requestFailed"))
-      setAction()
+      setState("error", language.t("common.requestFailed"))
+      setState("action", undefined)
       return
     }
 
     statusActions.mutate({ configured })
-    setAction()
+    setState("action", undefined)
   }
 
   const save = async (event: SubmitEvent) => {
     event.preventDefault()
     const enterprise = platform.enterprise
     if (!enterprise) return
-    const input = companyProviderCredentialInput(apiKey(), headers)
-    if (!companyProviderCanStart(action(), Object.keys(input).length > 0)) return
+    const input = companyProviderCredentialInput(state.apiKey, state.headers)
+    if (!companyProviderCanStart(state.action, Object.keys(input).length > 0)) return
     await mutateCredentials("save", () => enterprise.setCredentials(input), true)
   }
 
@@ -240,15 +242,18 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   }
 
   const diagnose = async () => {
-    if (!companyProviderCanStart(action(), Boolean(modelID()))) return
-    setResult()
-    setAction("diagnose")
-    setError()
-    const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), modelID())
+    if (!companyProviderCanStart(state.action, Boolean(state.modelID))) return
+    setState("result", undefined)
+    setState("action", "diagnose")
+    setState("error", undefined)
+    const response = await diagnoseCompanyProvider(
+      (input) => serverSDK().client.provider.diagnose(input),
+      state.modelID,
+    )
       .then((value) => value.data)
       .catch(() => undefined)
-    setResult(companyProviderDiagnosticResult(response, language.t("common.requestFailed")))
-    setAction()
+    setState("result", companyProviderDiagnosticResult(response, language.t("common.requestFailed")))
+    setState("action", undefined)
   }
 
   const statusLabel = () => {
@@ -258,12 +263,12 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     )
   }
 
-  const selectedModel = createMemo(() => config().models.find((model) => model.id === modelID()))
-  const input = createMemo(() => companyProviderCredentialInput(apiKey(), headers))
+  const selectedModel = createMemo(() => config().models.find((model) => model.id === state.modelID))
+  const input = createMemo(() => companyProviderCredentialInput(state.apiKey, state.headers))
   const diagnosticStatus = () => {
-    if (action() === "diagnose") return "Testing Company LLM connection"
-    if (!result()) return "Ready to test Company LLM connection"
-    if (result()?.ok) return "Company LLM connection test completed successfully"
+    if (state.action === "diagnose") return "Testing Company LLM connection"
+    if (!state.result) return "Ready to test Company LLM connection"
+    if (state.result.ok) return "Company LLM connection test completed successfully"
     return ""
   }
 
@@ -282,7 +287,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
               label={(model) => model.name}
               placeholder="No configured models"
               triggerProps={{ "aria-label": "Company LLM model" }}
-              onSelect={(model) => setModelID(model?.id ?? "")}
+              onSelect={(model) => setState("modelID", model?.id ?? "")}
             />
           </div>
         </div>
@@ -298,9 +303,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           label="API key"
           type="password"
           autocomplete="off"
-          value={apiKey()}
-          disabled={action() !== undefined}
-          onChange={setApiKey}
+          value={state.apiKey}
+          disabled={state.action !== undefined}
+          onChange={(value) => setState("apiKey", value)}
         />
 
         <div class="flex min-w-0 flex-col gap-2">
@@ -312,12 +317,12 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                 icon="plus-small"
                 variant="ghost"
                 aria-label="Add secret header"
-                disabled={action() !== undefined}
-                onClick={() => setHeaders(headers.length, { key: "", value: "" })}
+                disabled={state.action !== undefined}
+                onClick={() => setState("headers", state.headers.length, { key: "", value: "" })}
               />
             </Tooltip>
           </div>
-          <For each={headers}>
+          <For each={state.headers}>
             {(header, index) => (
               <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
                 <TextField
@@ -326,8 +331,8 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   placeholder="Header name"
                   autocomplete="off"
                   value={header.key}
-                  disabled={action() !== undefined}
-                  onChange={(value) => setHeaders(index(), "key", value)}
+                  disabled={state.action !== undefined}
+                  onChange={(value) => setState("headers", index(), "key", value)}
                 />
                 <TextField
                   label="Secret value"
@@ -336,8 +341,8 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   placeholder="Secret value"
                   autocomplete="off"
                   value={header.value}
-                  disabled={action() !== undefined}
-                  onChange={(value) => setHeaders(index(), "value", value)}
+                  disabled={state.action !== undefined}
+                  onChange={(value) => setState("headers", index(), "value", value)}
                 />
                 <Tooltip value="Remove secret header" placement="top">
                   <IconButton
@@ -346,8 +351,8 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                     variant="ghost"
                     class="mt-1.5"
                     aria-label="Remove secret header"
-                    disabled={action() !== undefined || headers.length === 1}
-                    onClick={() => setHeaders((rows) => rows.filter((_, row) => row !== index()))}
+                    disabled={state.action !== undefined || state.headers.length === 1}
+                    onClick={() => setState("headers", (rows) => rows.filter((_, row) => row !== index()))}
                   />
                 </Tooltip>
               </div>
@@ -356,21 +361,35 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <Button type="submit" variant="primary" disabled={!Object.keys(input()).length || action() !== undefined}>
-            {action() === "save" ? language.t("common.saving") : language.t("common.save")}
-          </Button>
-          <Button type="button" variant="secondary" disabled={action() !== undefined || !modelID()} onClick={diagnose}>
-            {action() === "diagnose" ? "Testing..." : "Test connection"}
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!Object.keys(input()).length || state.action !== undefined}
+          >
+            {state.action === "save" ? language.t("common.saving") : language.t("common.save")}
           </Button>
           <Button
             type="button"
             variant="secondary"
-            disabled={action() !== undefined || !status.latest?.configured}
+            disabled={state.action !== undefined || !state.modelID}
+            onClick={diagnose}
+          >
+            {state.action === "diagnose" ? "Testing..." : "Test connection"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={state.action !== undefined || !status.latest?.configured}
             onClick={clear}
           >
-            {action() === "clear" ? "Clearing..." : "Clear credentials"}
+            {state.action === "clear" ? "Clearing..." : "Clear credentials"}
           </Button>
-          <Button type="button" variant="ghost" disabled={action() !== undefined} onClick={props.onBack ?? dialog.close}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={state.action !== undefined}
+            onClick={props.onBack ?? dialog.close}
+          >
             {language.t("common.cancel")}
           </Button>
         </div>
@@ -385,7 +404,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           {diagnosticStatus()}
         </span>
 
-        <Show when={error()}>
+        <Show when={state.error}>
           {(message) => (
             <p class="text-12-regular text-text-danger-base" role="alert">
               {message()}
@@ -393,25 +412,33 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           )}
         </Show>
 
-        <Show when={result()}>
+        <Show when={state.result}>
           {(diagnostic) => (
             <div
               data-slot="company-diagnostic-result"
-              class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular"
+              class="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4"
               role={diagnostic().ok ? undefined : "alert"}
               aria-atomic="true"
             >
-              <span class="text-text-weak">Basic response</span>
-              <span class="text-text-strong capitalize">{diagnostic().checks.basic}</span>
-              <span class="text-text-weak">Streaming</span>
-              <span class="text-text-strong capitalize">{diagnostic().checks.streaming}</span>
-              <span class="text-text-weak">Tool calling</span>
-              <span class="text-text-strong capitalize">{diagnostic().checks.toolCall}</span>
+              <span class="min-w-0 break-words text-text-weak">Basic response</span>
+              <span class="min-w-0 break-words text-right text-text-strong capitalize">
+                {diagnostic().checks.basic}
+              </span>
+              <span class="min-w-0 break-words text-text-weak">Streaming</span>
+              <span class="min-w-0 break-words text-right text-text-strong capitalize">
+                {diagnostic().checks.streaming}
+              </span>
+              <span class="min-w-0 break-words text-text-weak">Tool calling</span>
+              <span class="min-w-0 break-words text-right text-text-strong capitalize">
+                {diagnostic().checks.toolCall}
+              </span>
               <Show when={diagnostic().failure}>
                 {(failure) => (
                   <>
-                    <span class="text-text-weak">Failure ({failure().kind})</span>
-                    <span class="max-w-72 text-right text-text-strong">{failure().message}</span>
+                    <span class="min-w-0 break-words text-text-weak">Failure ({failure().kind})</span>
+                    <span class="min-w-0 max-w-72 break-words text-right text-text-strong">
+                      {failure().message}
+                    </span>
                   </>
                 )}
               </Show>

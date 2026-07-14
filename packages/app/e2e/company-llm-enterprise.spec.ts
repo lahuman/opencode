@@ -206,15 +206,49 @@ responsiveViewports.forEach((viewport) => {
       })
     if (!(await remediationVisible())) await remediation.scrollIntoViewIfNeeded()
     expect(await remediationVisible()).toBe(true)
-    const rowGaps = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
+    const rows = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
       const children = [...node.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
       return Array.from({ length: children.length / 2 }, (_, index) => {
-        const label = children[index * 2].getBoundingClientRect()
-        const value = children[index * 2 + 1].getBoundingClientRect()
-        return value.left - label.right
+        const label = children[index * 2]
+        const value = children[index * 2 + 1]
+        const textRects = (element: HTMLElement) => {
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          return [...range.getClientRects()].map((rect) => ({
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left,
+          }))
+        }
+        const labelRects = textRects(label)
+        const valueRects = textRects(value)
+        const sharedLines = labelRects.flatMap((labelRect) =>
+          valueRects
+            .filter((valueRect) => labelRect.top < valueRect.bottom && labelRect.bottom > valueRect.top)
+            .map((valueRect) => valueRect.left - labelRect.right),
+        )
+        return {
+          label: label.textContent,
+          value: value.textContent,
+          labelOverflows: label.scrollWidth > label.clientWidth,
+          valueOverflows: value.scrollWidth > value.clientWidth,
+          textIntersects: sharedLines.some((gap) => gap < 0),
+          sharedLineGap: sharedLines.length ? Math.min(...sharedLines) : undefined,
+        }
       })
     })
-    expect(rowGaps.every((gap) => gap >= 8)).toBe(true)
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Basic response", value: "fail" }),
+        expect.objectContaining({ label: "Streaming", value: "skipped" }),
+        expect.objectContaining({ label: "Tool calling", value: "skipped" }),
+        expect.objectContaining({ label: "Failure (connection)", value: SAFE_REMEDIATION }),
+      ]),
+    )
+    expect(rows.every((row) => !row.labelOverflows && !row.valueOverflows)).toBe(true)
+    expect(rows.every((row) => !row.textIntersects)).toBe(true)
+    expect(rows.every((row) => row.sharedLineGap === undefined || row.sharedLineGap >= 8)).toBe(true)
 
     const box = await dialog.boundingBox()
     expect(box).not.toBeNull()
