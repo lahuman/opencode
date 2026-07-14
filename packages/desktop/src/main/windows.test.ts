@@ -33,7 +33,9 @@ test("production windows enforce one session policy and exact packaged document 
 
   expect(result.productionWindow).toEqual({
     mode: "packaged",
+    title: "Company OpenCode Pilot",
     loadedURL: "oc://renderer/index.html",
+    secondTitle: "Company OpenCode Pilot",
     secondLoadedURL: "oc://renderer/index.html",
     sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
@@ -242,7 +244,9 @@ test.each([
 
   expect(result.productionWindow).toEqual({
     mode,
+    title: "Company OpenCode Pilot",
     loadedURL,
+    secondTitle: "Company OpenCode Pilot",
     secondLoadedURL: loadedURL,
     sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },

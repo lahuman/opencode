@@ -61,7 +61,13 @@ test("public createPlatform preserves openLink and fetch behavior", async () => 
 
 test("real renderer entrypoint creates the policy-enforcing desktop platform", async () => {
   const child = Bun.spawn(
-    [process.execPath, "--conditions=browser", "run", `${import.meta.dir}/../../test/renderer-index-entrypoint.tsx`],
+    [
+      process.execPath,
+      "--conditions=browser",
+      "run",
+      `${import.meta.dir}/../../test/renderer-index-entrypoint.tsx`,
+      "enterprise",
+    ],
     { stdout: "pipe", stderr: "pipe" },
   )
   const [exitCode, stdout, stderr] = await Promise.all([
@@ -73,6 +79,7 @@ test("real renderer entrypoint creates the policy-enforcing desktop platform", a
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
   expect(JSON.parse(stdout)).toEqual({
+    documentTitle: "Company OpenCode Pilot",
     openLinkCalls: ["https://llm.corp.example/docs"],
     fetchCalls: [{ url: "https://llm.corp.example/v1/models", method: "POST" }],
     failures: ["Enterprise offline policy blocked https://cdn.example", "Enterprise offline policy blocked null"],
@@ -85,4 +92,26 @@ test("real renderer entrypoint creates the policy-enforcing desktop platform", a
     expect(stdout).not.toContain(secret)
   }
   expect(stdout).not.toContain("/Users/private")
+})
+
+test("ordinary renderer entrypoint preserves the document title", async () => {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--conditions=browser",
+      "run",
+      `${import.meta.dir}/../../test/renderer-index-entrypoint.tsx`,
+      "ordinary",
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  expect(JSON.parse(stdout)).toEqual({ documentTitle: "OpenCode" })
 })

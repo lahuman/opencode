@@ -91,6 +91,7 @@ class FakeBrowserWindow {
     redirect?: NavigationHandler
   } = {}
   loadedURL = ""
+  title: string | undefined
   zoom = 1
   events = new Map<string, Array<(...args: unknown[]) => void>>()
   webContents = {
@@ -114,7 +115,8 @@ class FakeBrowserWindow {
     send() {},
   }
 
-  constructor() {
+  constructor(options?: { title?: string }) {
+    this.title = options?.title
     windows.push(this)
   }
 
@@ -172,6 +174,7 @@ mock.module("electron", () => ({
   app: {
     dock: undefined,
     exit() {},
+    getName: () => "Company OpenCode Pilot",
     getPath: () => tmpdir(),
     isPackaged: false,
     quit() {},
@@ -407,7 +410,9 @@ try {
     JSON.stringify({
       productionWindow: {
         mode,
+        title: win.title,
         loadedURL: win.loadedURL,
+        secondTitle: second.title,
         secondLoadedURL: second.loadedURL,
         sessionRequestRegistrations,
         registrations: {

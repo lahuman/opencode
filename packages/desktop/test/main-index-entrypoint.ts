@@ -1,8 +1,12 @@
 import { mock } from "bun:test"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
 
+const mode = process.argv[2] ?? "enterprise"
+const enterprise = mode === "enterprise"
 Object.assign(process.env, {
-  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_CHANNEL: "prod",
+  OPENCODE_ENTERPRISE: enterprise ? "1" : "0",
   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
@@ -15,7 +19,12 @@ Object.defineProperty(process, "resourcesPath", { value: tmpdir(), configurable:
 const handlers = new Map<string, (...args: unknown[]) => unknown>()
 const listeners = new Map<string, (...args: unknown[]) => unknown>()
 const shellOpenExternalURLs: string[] = []
+const protocolClients: string[] = []
+const paths = new Map<string, string>()
 let rendererProtocolRegistrations = 0
+let appName = "Electron"
+let appUserModelId = ""
+const appData = join(tmpdir(), "opencode-main-index-app-data")
 
 const app = {
   commandLine: {
@@ -24,18 +33,27 @@ const app = {
   },
   dock: undefined,
   exit() {},
-  getPath: () => tmpdir(),
+  getName: () => appName,
+  getPath: (name: string) => (name === "appData" ? appData : (paths.get(name) ?? tmpdir())),
   getVersion: () => "2.0.0",
-  isPackaged: true,
+  isPackaged: mode !== "ordinary-unpackaged",
   on() {},
   once() {},
   quit() {},
   relaunch() {},
   requestSingleInstanceLock: () => true,
-  setAppUserModelId() {},
-  setAsDefaultProtocolClient() {},
-  setName() {},
-  setPath() {},
+  setAppUserModelId(value: string) {
+    appUserModelId = value
+  },
+  setAsDefaultProtocolClient(value: string) {
+    protocolClients.push(value)
+  },
+  setName(value: string) {
+    appName = value
+  },
+  setPath(name: string, value: string) {
+    paths.set(name, value)
+  },
   whenReady: () => Promise.resolve(),
 }
 
@@ -150,6 +168,20 @@ mock.module("../src/main/wsl/servers", () => ({
 mock.module("../src/main/wsl/ipc", () => ({ registerWslIpcHandlers() {} }))
 mock.module("../src/main/wsl/sidecar", () => ({ spawnWslSidecar: async () => undefined }))
 
+if (mode === "identity") {
+  const { desktopIdentity } = await import("../src/main/constants")
+  console.log(
+    JSON.stringify({
+      enterpriseProd: desktopIdentity({ channel: "prod", enterprise: true }),
+      enterpriseDev: desktopIdentity({ channel: "dev", enterprise: true }),
+      dev: desktopIdentity({ channel: "dev", enterprise: false }),
+      beta: desktopIdentity({ channel: "beta", enterprise: false }),
+      prod: desktopIdentity({ channel: "prod", enterprise: false }),
+    }),
+  )
+  process.exit(0)
+}
+
 await import("../src/main/index")
 
 for (let attempts = 0; attempts < 100 && !listeners.has("open-link"); attempts++) await Bun.sleep(10)
@@ -163,5 +195,11 @@ console.log(
     rendererProtocolRegistrations,
     ipcRegistered: handlers.has("enterprise-guide-read") && listeners.has("open-link"),
     shellOpenExternalURLs,
+    identity: {
+      appId: appUserModelId,
+      name: appName,
+      userData: paths.get("userData"),
+    },
+    protocolClients,
   }),
 )

@@ -1,8 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { enterpriseTelemetryEnabled } from "../enterprise"
 import { forwardInitializationFailure } from "./initialization"
 import { desktopRuntimeFeatures } from "./runtime-features"
+
+async function runMain(mode: "identity" | "enterprise" | "ordinary-packaged" | "ordinary-unpackaged") {
+  const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/main-index-entrypoint.ts`, mode], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  return { result: JSON.parse(stdout), stdout }
+}
 
 test("enterprise profile disables updater and WSL", () => {
   expect(desktopRuntimeFeatures({ packaged: true, channel: "prod", enterprise: true })).toEqual({
@@ -23,26 +41,52 @@ test("enterprise profile disables telemetry even when a DSN is present", () => {
   expect(enterpriseTelemetryEnabled({ enabled: false }, "https://sentry.example/1")).toBe(true)
 })
 
-test("real main entrypoint registers renderer protocol and policy-owned openExternal IPC", async () => {
-  const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/main-index-entrypoint.ts`], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ])
+test("desktop identity covers enterprise and every ordinary channel", async () => {
+  const { result } = await runMain("identity")
 
-  expect(stderr).toBe("")
-  expect(exitCode).toBe(0)
-  expect(JSON.parse(stdout)).toEqual({
+  expect(result).toEqual({
+    enterpriseProd: { appId: "com.company.opencode.pilot", name: "Company OpenCode Pilot" },
+    enterpriseDev: { appId: "com.company.opencode.pilot", name: "Company OpenCode Pilot" },
+    dev: { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" },
+    beta: { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" },
+    prod: { appId: "ai.opencode.desktop", name: "OpenCode" },
+  })
+})
+
+test("real enterprise main entrypoint applies isolated identity without claiming opencode protocol", async () => {
+  const { result, stdout } = await runMain("enterprise")
+
+  expect(result).toEqual({
     rendererProtocolRegistrations: 1,
     ipcRegistered: true,
     shellOpenExternalURLs: ["https://llm.corp.example/docs"],
+    identity: {
+      appId: "com.company.opencode.pilot",
+      name: "Company OpenCode Pilot",
+      userData: join(tmpdir(), "opencode-main-index-app-data", "com.company.opencode.pilot"),
+    },
+    protocolClients: [],
   })
   expect(stdout).not.toContain("main-index-secret")
   expect(stdout).not.toContain("user:secret")
+})
+
+test("ordinary packaged and unpackaged main entrypoints preserve their identities and protocol", async () => {
+  const packaged = await runMain("ordinary-packaged")
+  const unpackaged = await runMain("ordinary-unpackaged")
+
+  expect(packaged.result.identity).toEqual({
+    appId: "ai.opencode.desktop",
+    name: "OpenCode",
+    userData: join(tmpdir(), "opencode-main-index-app-data", "ai.opencode.desktop"),
+  })
+  expect(unpackaged.result.identity).toEqual({
+    appId: "ai.opencode.desktop.dev",
+    name: "OpenCode Dev",
+    userData: join(tmpdir(), "opencode-main-index-app-data", "ai.opencode.desktop.dev"),
+  })
+  expect(packaged.result.protocolClients).toEqual(["opencode"])
+  expect(unpackaged.result.protocolClients).toEqual(["opencode"])
 })
 
 describe("desktop initialization", () => {

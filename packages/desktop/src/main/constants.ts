@@ -8,6 +8,13 @@ export const CHANNEL: Channel = raw === "dev" || raw === "beta" || raw === "prod
 export { ENTERPRISE_ENABLED }
 export { desktopRuntimeFeatures }
 
+export function desktopIdentity(input: { channel: Channel; enterprise: boolean }) {
+  if (input.enterprise) return { appId: "com.company.opencode.pilot", name: "Company OpenCode Pilot" }
+  if (input.channel === "dev") return { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" }
+  if (input.channel === "beta") return { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" }
+  return { appId: "ai.opencode.desktop", name: "OpenCode" }
+}
+
 export const RUNTIME_FEATURES = desktopRuntimeFeatures({
   packaged: app.isPackaged,
   channel: CHANNEL,

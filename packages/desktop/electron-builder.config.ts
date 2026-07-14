@@ -31,6 +31,7 @@ const channel = (() => {
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()
+const enterprise = process.env.OPENCODE_ENTERPRISE === "1"
 
 const APP_IDS = {
   dev: "ai.opencode.desktop.dev",
@@ -111,6 +112,31 @@ const getBase = (appId: string): Configuration => ({
 })
 
 function getConfig() {
+  if (enterprise) {
+    const appId = "com.company.opencode.pilot"
+    const base = getBase(appId)
+    return {
+      ...base,
+      appId,
+      productName: "Company OpenCode Pilot",
+      artifactName: "company-opencode-pilot-${os}-${arch}.${ext}",
+      protocols: undefined,
+      win: {
+        ...base.win,
+        target: ["nsis"],
+        signtoolOptions: undefined,
+      },
+      extraResources: [
+        ...(Array.isArray(base.extraResources)
+          ? base.extraResources
+          : base.extraResources
+            ? [base.extraResources]
+            : []),
+        { from: "../../LICENSE", to: "licenses/OpenCode-LICENSE" },
+      ],
+    } satisfies Configuration
+  }
+
   const appId = APP_IDS[channel]
   const base = getBase(appId)
 

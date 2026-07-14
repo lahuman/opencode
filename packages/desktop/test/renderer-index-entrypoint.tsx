@@ -2,8 +2,10 @@ import "../../app/happydom"
 import "../../app/test-browser/solid-jsx"
 import { mock } from "bun:test"
 
+const mode = process.argv[2] ?? "enterprise"
+const enterprise = mode === "enterprise"
 Object.assign(process.env, {
-  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE: enterprise ? "1" : "0",
   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
@@ -11,6 +13,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
 })
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })
+document.title = "OpenCode"
 document.body.innerHTML = '<div id="root"></div>'
 
 type CapturedPlatform = {
@@ -132,6 +135,11 @@ const timeout = setTimeout(
 )
 const platform = await providedPlatform.promise.finally(() => clearTimeout(timeout))
 
+if (!enterprise) {
+  console.log(JSON.stringify({ documentTitle: document.title }))
+  process.exit(0)
+}
+
 platform.openLink("https://opencode.ai/docs?token=renderer-index-open-secret")
 platform.openLink("https://llm.corp.example/docs")
 
@@ -147,4 +155,4 @@ const failures = await Promise.all(
 )
 await rendererFetch(new Request("https://llm.corp.example/v1/models", { method: "POST" }))
 
-console.log(JSON.stringify({ openLinkCalls, fetchCalls, failures }))
+console.log(JSON.stringify({ documentTitle: document.title, openLinkCalls, fetchCalls, failures }))
