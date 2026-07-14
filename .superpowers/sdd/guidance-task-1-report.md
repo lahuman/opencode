@@ -3,15 +3,17 @@
 ## Range
 
 - Immutable base: `dd9b41ab743346b9706c9718b0b6e15246710dbf`
-- Immutable reviewed end before the packaging correction: `ea99aa7e819d02f3a6392e593229e1e1746ee575`
-- Immutable reviewed range: `dd9b41ab743346b9706c9718b0b6e15246710dbf..ea99aa7e819d02f3a6392e593229e1e1746ee575`
+- Immutable implementation end: `7e62cea0a4e0126167851c9e823678adf775bfe1`
+- Immutable implementation range: `dd9b41ab743346b9706c9718b0b6e15246710dbf..7e62cea0a4e0126167851c9e823678adf775bfe1`
 - Branch: `enterprise-pilot`
 
-Task 1 commits:
+Task 1 implementation commits:
 
 - `fe0d53747408550ca7d5074d3ad4545d585e271a feat(desktop): bundle company ai guide`
 - `ea99aa7e819d02f3a6392e593229e1e1746ee575 test(desktop): verify enterprise version defines`
-- `fix(desktop): package company guide resources` (the commit containing this report; its immutable SHA is recorded in the delivery response because a commit cannot embed its own hash)
+- `7e62cea0a4e0126167851c9e823678adf775bfe1 fix(desktop): package company guide resources`
+
+This report is finalized in a documentation-only commit after the immutable implementation range.
 
 ## Implementation
 
@@ -135,6 +137,14 @@ GREEN:
 Updated test total: 121 passed, 0 failed. Bun 1.3.14 again treated the requested `--filter` form as a full-file run, so the 99-test config suite ran outside the socket-restricted sandbox to allow its localhost regression to bind an ephemeral port.
 
 ## Review Follow-Up: Packaged Enterprise Resources
+
+### Range
+
+- Review base: `ea99aa7e819d02f3a6392e593229e1e1746ee575`
+- Immutable follow-up end: `7e62cea0a4e0126167851c9e823678adf775bfe1`
+- Immutable follow-up range: `ea99aa7e819d02f3a6392e593229e1e1746ee575..7e62cea0a4e0126167851c9e823678adf775bfe1`
+- Immutable cumulative implementation range: `dd9b41ab743346b9706c9718b0b6e15246710dbf..7e62cea0a4e0126167851c9e823678adf775bfe1`
+- Follow-up commit: `7e62cea0a4e0126167851c9e823678adf775bfe1 fix(desktop): package company guide resources`
 
 ### Scope
 
