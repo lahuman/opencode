@@ -1,21 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createEnterpriseCredentialStore } from "./enterprise-credentials"
 
 const dirs: string[] = []
-
-function encryptPadded(value: string) {
-  const payload = Buffer.from(value, "utf8")
-  const length = Buffer.alloc(4)
-  length.writeUInt32BE(payload.length)
-  return Buffer.concat([length, payload, Buffer.alloc(4 * 1024 * 1024)])
-}
-
-function decryptPadded(value: Buffer) {
-  return value.subarray(4, 4 + value.readUInt32BE(0)).toString("utf8")
-}
 
 afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
@@ -137,19 +126,41 @@ describe("enterprise credential store", () => {
     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
     dirs.push(dir)
     const file = join(dir, "credentials.bin")
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const writes: Buffer[] = []
+    const credentials = [
+      { apiKey: "first", headers: { token: "first-header" } },
+      { apiKey: "second", headers: { token: "second-header" } },
+    ]
     const store = createEnterpriseCredentialStore({
       file,
       encryptionAvailable: () => true,
-      encrypt: encryptPadded,
-      decrypt: decryptPadded,
+      encrypt: (value) => Buffer.from(value.split("").reverse().join(""), "utf8"),
+      decrypt: (value) => value.toString("utf8").split("").reverse().join(""),
+      write: async (path, value) => {
+        writes.push(value)
+        if (writes.length === 1) {
+          entered.resolve()
+          await release.promise
+        }
+        await writeFile(path, value, { mode: 0o600 })
+      },
     })
 
-    await Promise.all([
-      store.set({ apiKey: "first", headers: { token: "first-header" } }),
-      store.set({ apiKey: "second", headers: { token: "second-header" } }),
-    ])
+    const first = store.set(credentials[0])
+    expect(await Promise.race([entered.promise.then(() => true), first.then(() => false)])).toBe(true)
+    const second = store.set(credentials[1])
+    await Promise.resolve()
+    expect(writes).toHaveLength(1)
 
-    expect(await store.get()).toEqual({ apiKey: "second", headers: { token: "second-header" } })
+    release.resolve()
+    await Promise.all([first, second])
+
+    expect(writes.map((value) => value.toString("utf8").split("").reverse().join(""))).toEqual(
+      credentials.map((value) => JSON.stringify(value)),
+    )
+    expect(await store.get()).toEqual(credentials[1])
     expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
   })
 
@@ -160,8 +171,8 @@ describe("enterprise credential store", () => {
     const store = createEnterpriseCredentialStore({
       file,
       encryptionAvailable: () => true,
-      encrypt: encryptPadded,
-      decrypt: decryptPadded,
+      encrypt: (value) => Buffer.from(value, "utf8"),
+      decrypt: (value) => value.toString("utf8"),
     })
 
     await Promise.all([store.set({ apiKey: "secret", headers: {} }), store.clear()])

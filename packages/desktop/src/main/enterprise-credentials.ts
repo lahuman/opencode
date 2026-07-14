@@ -11,10 +11,17 @@ type Input = {
   encryptionAvailable: () => boolean
   encrypt: (value: string) => Buffer
   decrypt: (value: Buffer) => string
+  write?: (file: string, value: Buffer) => Promise<void>
 }
 
 export function createEnterpriseCredentialStore(input: Input) {
   const temp = `${input.file}.tmp`
+  const write =
+    input.write ??
+    (async (file: string, value: Buffer) => {
+      await mkdir(dirname(file), { recursive: true })
+      await writeFile(file, value, { mode: 0o600 })
+    })
   let mutations = Promise.resolve()
 
   const mutate = (operation: () => Promise<void>) => {
@@ -51,8 +58,7 @@ export function createEnterpriseCredentialStore(input: Input) {
   const set = (credentials: EnterpriseCredentials) =>
     mutate(async () => {
       if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
-      await mkdir(dirname(input.file), { recursive: true })
-      await writeFile(temp, input.encrypt(JSON.stringify(credentials)), { mode: 0o600 })
+      await write(temp, input.encrypt(JSON.stringify(credentials)))
         .then(() => rename(temp, input.file))
         .finally(() => rm(temp, { force: true }))
     })
