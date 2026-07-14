@@ -87,6 +87,7 @@ test("enterprise public config removes secret provider options without mutation"
         npm: "@ai-sdk/openai-compatible",
         options: {
           baseURL: "https://llm.corp.example/v1",
+          key: "provider-secret-key",
           apiKey: "secret-key",
           headers: { Authorization: "secret-header" },
         },
@@ -94,7 +95,12 @@ test("enterprise public config removes secret provider options without mutation"
           "company-code": {
             name: "Company Code",
             headers: { "X-Model-Token": "model-secret-header" },
-            options: { temperature: 0, apiKey: "model-secret-key", headers: { Authorization: "model-secret" } },
+            options: {
+              temperature: 0,
+              key: "model-secret-key",
+              apiKey: "model-secret-key",
+              headers: { Authorization: "model-secret" },
+            },
           },
         },
       },
@@ -115,4 +121,37 @@ test("enterprise public config removes secret provider options without mutation"
     "X-Model-Token": "model-secret-header",
   })
   expect(ConfigEnterprise.publicInfo(info, { ...policy, enabled: false })).toBe(info)
+})
+
+test("enterprise write sanitizer is non-mutating and leaves ordinary config untouched", () => {
+  const info = {
+    provider: {
+      custom: {
+        options: { baseURL: "https://example.com/v1", key: "secret", apiKey: "secret", timeout: 1_000 },
+        models: {
+          model: {
+            headers: { Authorization: "secret" },
+            options: { temperature: 0, key: "secret", apiKey: "secret", headers: { Authorization: "secret" } },
+          },
+        },
+      },
+    },
+  }
+  const policy = {
+    enabled: true,
+    defaultsPath: undefined,
+    allowedOrigins: new Set<string>(),
+  }
+
+  expect(ConfigEnterprise.sanitizeWrite(info, policy)).toEqual({
+    provider: {
+      custom: {
+        options: { baseURL: "https://example.com/v1", timeout: 1_000 },
+        models: { model: { options: { temperature: 0 } } },
+      },
+    },
+  })
+  expect(info.provider.custom.options.apiKey).toBe("secret")
+  expect(info.provider.custom.models.model.headers).toEqual({ Authorization: "secret" })
+  expect(ConfigEnterprise.sanitizeWrite(info, { ...policy, enabled: false })).toBe(info)
 })

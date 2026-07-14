@@ -15,13 +15,18 @@ export function setCredentials(input: unknown) {
 
 export function options(providerID: ProviderV2.ID, current: Record<string, unknown>) {
   if (providerID !== ProviderV2.ID.make("company-llm")) return current
+  const credentialHeaderNames = new Set(Object.keys(currentCredentials.headers).map((name) => name.toLowerCase()))
   return {
     ...current,
     ...(currentCredentials.apiKey ? { apiKey: currentCredentials.apiKey } : {}),
     ...(Object.keys(currentCredentials.headers).length
       ? {
           headers: {
-            ...(isRecord(current.headers) ? current.headers : {}),
+            ...(isRecord(current.headers)
+              ? Object.fromEntries(
+                  Object.entries(current.headers).filter(([name]) => !credentialHeaderNames.has(name.toLowerCase())),
+                )
+              : {}),
             ...currentCredentials.headers,
           },
         }

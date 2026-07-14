@@ -37,18 +37,22 @@ export function upgradeAllowed(policy: Pick<Policy, "enabled"> = settings()) {
 }
 
 export function publicInfo(info: Info, policy: EnforcementPolicy = settings()): Info {
+  return sanitizeWrite(info, policy)
+}
+
+export function sanitizeWrite(info: Info, policy: EnforcementPolicy = settings()): Info {
   if (!policy.enabled) return info
   if (!info.provider) return { ...info }
   return {
     ...info,
     provider: mapValues(info.provider, (provider) => ({
       ...provider,
-      ...(provider.options ? { options: omit(provider.options, ["apiKey", "headers"]) } : {}),
+      ...(provider.options ? { options: omit(provider.options, ["key", "apiKey", "headers"]) } : {}),
       ...(provider.models
         ? {
             models: mapValues(provider.models, (model) => ({
               ...omit(model, ["headers"]),
-              ...(model.options ? { options: omit(model.options, ["apiKey", "headers"]) } : {}),
+              ...(model.options ? { options: omit(model.options, ["key", "apiKey", "headers"]) } : {}),
             })),
           }
         : {}),

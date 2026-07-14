@@ -17,9 +17,10 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
     })
 
     const update = Effect.fn("ConfigHttpApi.update")(function* (ctx) {
-      yield* configSvc.update(ctx.payload)
+      const payload = ConfigEnterprise.sanitizeWrite(ctx.payload)
+      yield* configSvc.update(payload)
       yield* markInstanceForDisposal(yield* InstanceState.context)
-      return ConfigEnterprise.publicInfo(ctx.payload)
+      return ConfigEnterprise.publicInfo(payload)
     })
 
     const providers = Effect.fn("ConfigHttpApi.providers")(function* () {
