@@ -2121,6 +2121,61 @@ it.effect("loads enterprise defaults below global, project, and managed settings
   }),
 )
 
+it.effect("loads bundled enterprise permission harness defaults in precedence order", () =>
+  Effect.gen(function* () {
+    const emptyGlobal = yield* tmpdirScoped()
+    const project = yield* tmpdirScoped()
+
+    yield* withProcessEnvs(
+      {
+        OPENCODE_ENTERPRISE_OFFLINE: "1",
+        OPENCODE_ENTERPRISE_DEFAULTS_PATH: path.resolve(
+          import.meta.dir,
+          "../../../desktop/resources/enterprise/opencode.jsonc",
+        ),
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+        OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+        OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+        OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      },
+      withGlobalConfigDir(
+        emptyGlobal,
+        withInstanceDir(
+          project,
+          Effect.gen(function* () {
+            const config = yield* Config.use.get()
+
+            expect(config.permission).toMatchObject({
+              webfetch: "deny",
+              websearch: "deny",
+              external_directory: "ask",
+            })
+            expect(Object.keys(config.permission ?? {})).toEqual([
+              "webfetch",
+              "websearch",
+              "external_directory",
+              "read",
+              "bash",
+            ])
+            expect(Object.keys(config.permission?.read ?? {})).toEqual([
+              "*",
+              "*.env",
+              "*.env.*",
+              "*.env.example",
+            ])
+            expect(Object.keys(config.permission?.bash ?? {})).toEqual([
+              "*",
+              "rm -rf *",
+              "git reset --hard*",
+              "git clean -fd*",
+            ])
+          }),
+        ),
+      ),
+    )
+  }),
+)
+
 it.effect("prepends the bundled guide before project instructions and deduplicates it", () =>
   Effect.gen(function* () {
     const enterprise = yield* tmpdirScoped()

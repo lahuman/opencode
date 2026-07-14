@@ -106,6 +106,54 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBeUndefined()
   })
 
+  test("enterprise request preparation selects the offline provider prompt", async () => {
+    const result = await Effect.runPromise(
+      LLMRequestPrep.prepare({
+        user: {
+          id: "msg_enterprise-test",
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "test",
+          model: { providerID: "company-llm", modelID: "company-code" },
+        },
+        sessionID,
+        model: {
+          ...mockModel,
+          id: "company-llm/company-code",
+          providerID: "company-llm",
+          api: {
+            id: "company-code",
+            url: "https://llm.corp.example/v1",
+            npm: "@ai-sdk/openai-compatible",
+          },
+        },
+        agent: {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [],
+        },
+        system: ["Project-local instructions"],
+        messages: [{ role: "user", content: "Hello" }],
+        tools: {},
+        provider: { id: "company-llm", options: {} },
+        auth: undefined,
+        plugin: {
+          trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output),
+          list: () => Effect.succeed([]),
+          init: () => Effect.void,
+        },
+        flags: { outputTokenMax: 32_000, client: "test", enterpriseOffline: true },
+        isWorkflow: false,
+      } as unknown as Parameters<typeof LLMRequestPrep.prepare>[0]),
+    )
+
+    expect(result.system[0]).toContain("company-provided instructions")
+    expect(result.system[0]).toContain("Project-local instructions")
+    expect(result.system[0]).not.toContain("https://opencode.ai")
+  })
+
   test("should set promptCacheKey for the xAI SDK by default regardless of provider ID", () => {
     const xaiModel = {
       ...mockModel,

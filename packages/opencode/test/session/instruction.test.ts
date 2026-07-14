@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import path from "path"
 import { Effect, FileSystem, Layer } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 import { Instruction } from "../../src/session/instruction"
@@ -30,19 +33,40 @@ const it = testEffect(
   ]),
 )
 
-const configLayer = Layer.succeed(Config.Service, TestConfig.make())
+const unexpectedHttp = HttpClient.make((request) =>
+  Effect.die(`unexpected http request: ${request.method} ${request.url}`),
+)
 
-const instructionLayer = (global: Partial<Global.Interface>, flags: Partial<RuntimeFlags.Info> = {}) =>
+const instructionLayer = (
+  global: Partial<Global.Interface>,
+  flags: Partial<RuntimeFlags.Info> = {},
+  config: ConfigV1.Info = {},
+  client: HttpClient.HttpClient = unexpectedHttp,
+) =>
   AppNodeBuilder.build(Instruction.node, [
-    [Config.node, configLayer],
+    [
+      Config.node,
+      Layer.succeed(
+        Config.Service,
+        TestConfig.make({
+          get: () => Effect.succeed(config),
+        }),
+      ),
+    ],
     [Global.node, Global.layerWith(global)],
     [RuntimeFlags.node, RuntimeFlags.layer(flags)],
+    [httpClient, Layer.succeed(HttpClient.HttpClient, client)],
   ])
 
 const provideInstruction =
-  (global: Partial<Global.Interface>, flags?: Partial<RuntimeFlags.Info>) =>
+  (
+    global: Partial<Global.Interface>,
+    flags?: Partial<RuntimeFlags.Info>,
+    config?: ConfigV1.Info,
+    client?: HttpClient.HttpClient,
+  ) =>
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
-    self.pipe(Effect.provide(instructionLayer(global, flags)))
+    self.pipe(Effect.provide(instructionLayer(global, flags, config, client)))
 
 const write = (filepath: string, content: string) =>
   Effect.gen(function* () {
@@ -243,6 +267,43 @@ describe("Instruction.system", () => {
       }).pipe(
         provideInstance(projectTmp),
         provideInstruction({ home: globalTmp, config: globalTmp }, { disableClaudeCodePrompt: true }),
+      )
+    }),
+  )
+
+  it.live("enterprise mode ignores URL instructions and retains local instructions", () =>
+    Effect.gen(function* () {
+      const globalTmp = yield* tmpdirScoped()
+      const projectTmp = yield* tmpWithFiles({
+        "AGENTS.md": "# Project Instructions",
+        "company.md": "# Company Instructions",
+      })
+      const requests: string[] = []
+      const client = HttpClient.make((request) => {
+        requests.push(request.url)
+        return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("# Remote Instructions")))
+      })
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const rules = yield* svc.system()
+
+        expect(requests).toEqual([])
+        expect(rules).toContain(
+          `Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`,
+        )
+        expect(rules).toContain(
+          `Instructions from: ${path.join(projectTmp, "company.md")}\n# Company Instructions`,
+        )
+        expect(rules.join("\n")).not.toContain("Remote Instructions")
+      }).pipe(
+        provideInstance(projectTmp),
+        provideInstruction(
+          { home: globalTmp, config: globalTmp },
+          { enterpriseOffline: true },
+          { instructions: ["https://public.example/instructions.md", "company.md"] },
+          client,
+        ),
       )
     }),
   )

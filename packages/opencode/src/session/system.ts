@@ -5,6 +5,7 @@ import { InstanceState } from "@/effect/instance-state"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
+import PROMPT_ENTERPRISE from "./prompt/enterprise.txt"
 import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
@@ -24,7 +25,8 @@ import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
-export function provider(model: Provider.Model) {
+export function provider(model: Provider.Model, enterpriseOffline = false) {
+  if (enterpriseOffline) return [PROMPT_ENTERPRISE]
   if (model.api.id.includes("muse-spark")) return [PROMPT_META]
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]

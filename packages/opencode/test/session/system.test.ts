@@ -90,6 +90,21 @@ describe("session.system", () => {
     )
   })
 
+  test("enterprise provider prompt contains no public URLs or web-fetch instruction", () => {
+    const prompt = SystemPrompt.provider({ api: { id: "company-code" } } as Provider.Model, true).join("\n")
+
+    expect(prompt).not.toContain("https://")
+    expect(prompt).not.toContain("WebFetch")
+    expect(prompt).toContain("company-provided instructions")
+  })
+
+  test("ordinary provider prompt selection remains unchanged outside enterprise mode", () => {
+    const model = { api: { id: "meta/muse-spark-preview" } } as Provider.Model
+
+    expect(SystemPrompt.provider(model, false)).toEqual(SystemPrompt.provider(model))
+    expect(SystemPrompt.provider(model, false)[0]).toContain("Meta Muse Spark")
+  })
+
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

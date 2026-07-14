@@ -155,9 +155,11 @@ const layer: Layer.Layer<
     const system = Effect.fn("Instruction.system")(function* () {
       const config = yield* cfg.get()
       const paths = yield* systemPaths()
-      const urls = (config.instructions ?? []).filter(
-        (item) => item.startsWith("https://") || item.startsWith("http://"),
-      )
+      const urls = flags.enterpriseOffline
+        ? []
+        : (config.instructions ?? []).filter(
+            (item) => item.startsWith("https://") || item.startsWith("http://"),
+          )
 
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })

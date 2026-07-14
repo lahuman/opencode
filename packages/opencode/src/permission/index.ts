@@ -111,6 +111,11 @@ const layer = Layer.effect(
       const existing = pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
 
+      yield* Effect.logInfo("permission replied", {
+        permission: existing.info.permission,
+        reply: input.reply,
+        patternCount: existing.info.patterns.length,
+      })
       pending.delete(input.requestID)
       yield* events.publish(Event.Replied, {
         sessionID: existing.info.sessionID,

@@ -1,7 +1,7 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { test, expect } from "bun:test"
 import os from "os"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Logger } from "effect"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Permission } from "../../src/permission"
@@ -164,6 +164,44 @@ test("fromConfig - sub-pattern insertion order inside a tool key is preserved", 
   expect(ruleset.map((r) => r.pattern)).toEqual(["*", "git *"])
   expect(Permission.evaluate("bash", "rm foo", ruleset).action).toBe("deny")
   expect(Permission.evaluate("bash", "git status", ruleset).action).toBe("allow")
+})
+
+test("enterprise harness patterns keep safe operations allowed and ask on sensitive operations", () => {
+  const rules = Permission.fromConfig({
+    read: {
+      "*": "allow",
+      "*.env": "ask",
+      "*.env.*": "ask",
+      "*.env.example": "allow",
+    },
+    bash: {
+      "*": "allow",
+      "rm -rf *": "ask",
+      "git reset --hard*": "ask",
+      "git clean -fd*": "ask",
+    },
+  })
+
+  expect(Permission.evaluate("bash", "git status", rules).action).toBe("allow")
+  expect(Permission.evaluate("bash", "rm -rf build", rules).action).toBe("ask")
+  expect(Permission.evaluate("bash", "git reset --hard HEAD", rules).action).toBe("ask")
+  expect(Permission.evaluate("bash", "git clean -fd", rules).action).toBe("ask")
+  expect(Permission.evaluate("read", "README.md", rules).action).toBe("allow")
+  expect(Permission.evaluate("read", ".env", rules).action).toBe("ask")
+  expect(Permission.evaluate("read", ".env.production", rules).action).toBe("ask")
+  expect(Permission.evaluate("read", ".env.example", rules).action).toBe("allow")
+  expect(rules.filter((rule) => rule.permission === "read").map((rule) => rule.pattern)).toEqual([
+    "*",
+    "*.env",
+    "*.env.*",
+    "*.env.example",
+  ])
+  expect(rules.filter((rule) => rule.permission === "bash").map((rule) => rule.pattern)).toEqual([
+    "*",
+    "rm -rf *",
+    "git reset --hard*",
+    "git clean -fd*",
+  ])
 })
 
 test("fromConfig - documented fallback-first example", () => {
@@ -714,6 +752,48 @@ it.instance(
       yield* reply({ requestID: PermissionV1.ID.make("per_test1"), reply: "once" })
       yield* Fiber.join(fiber)
     }),
+  { git: true },
+)
+
+it.instance(
+  "enterprise permission reply log contains metadata-safe fields only",
+  () => {
+    const logs: unknown[] = []
+    const logger = Logger.make((options) => logs.push(options.message))
+
+    return Effect.gen(function* () {
+      const fiber = yield* ask({
+        id: PermissionV1.ID.make("per_enterprise-log"),
+        sessionID: SessionID.make("session_enterprise-log"),
+        permission: "bash",
+        patterns: ["secret-pattern", "second-pattern"],
+        metadata: { credential: "metadata-secret", input: "tool-input-secret" },
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(1)
+      yield* reply({
+        requestID: PermissionV1.ID.make("per_enterprise-log"),
+        reply: "reject",
+        message: "feedback-secret",
+      })
+      yield* Fiber.await(fiber)
+
+      const entry = logs
+        .filter((item): item is ReadonlyArray<unknown> => Array.isArray(item))
+        .find((item) => item[0] === "permission replied")
+      expect(entry).toEqual([
+        "permission replied",
+        {
+          permission: "bash",
+          reply: "reject",
+          patternCount: 2,
+        },
+      ])
+      expect(JSON.stringify(entry)).not.toContain("secret")
+    }).pipe(Effect.provide(Logger.layer([logger])))
+  },
   { git: true },
 )
 
