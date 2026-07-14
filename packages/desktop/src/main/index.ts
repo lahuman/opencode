@@ -4,7 +4,6 @@ import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
 import { app, safeStorage, shell } from "electron"
 
@@ -173,6 +172,8 @@ const main = Effect.gen(function* () {
     })
   }
 
+  // Electron's Node exposes this newer API; defer resolution so other runtimes can load the entrypoint.
+  const { getCACertificates, setDefaultCACertificates } = yield* Effect.promise(() => import("node:tls"))
   try {
     setDefaultCACertificates([...new Set([...getCACertificates("default"), ...getCACertificates("system")])])
   } catch (error) {

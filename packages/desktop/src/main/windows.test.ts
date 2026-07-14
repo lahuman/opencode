@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test"
 
-test("production window and packaged protocol enforce enterprise boundaries", async () => {
-  const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/windows-policy-entrypoint.ts`], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+async function run(mode: "packaged" | "dev-origin" | "dev-slash" | "dev-index") {
+  const child = Bun.spawn(
+    [process.execPath, "run", `${import.meta.dir}/../../test/windows-policy-entrypoint.ts`, mode],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -13,10 +16,17 @@ test("production window and packaged protocol enforce enterprise boundaries", as
 
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
-  const result = JSON.parse(stdout)
+  return JSON.parse(stdout)
+}
+
+test("production windows enforce one session policy and exact packaged document navigation", async () => {
+  const result = await run("packaged")
 
   expect(result.productionWindow).toEqual({
+    mode: "packaged",
     loadedURL: "oc://renderer/index.html",
+    secondLoadedURL: "oc://renderer/index.html",
+    sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
   })
   expect(result.requests).toEqual({
@@ -31,8 +41,26 @@ test("production window and packaged protocol enforce enterprise boundaries", as
   })
   expect(result.loggerFailure).toEqual({ value: { cancel: true }, error: "logger failed" })
   expect(result.windowOpen).toEqual({ public: { action: "deny" }, provider: { action: "deny" } })
-  expect(result.navigation).toEqual({ trusted: false, provider: true, loopback: true, external: true })
-  expect(result.redirects).toEqual({ trusted: false, provider: true, loopback: true, external: true })
+  const navigation = {
+    trusted: false,
+    trustedHash: false,
+    alternateDocument: true,
+    asset: true,
+    query: true,
+    credentialed: true,
+    packagedAlternate: true,
+    provider: true,
+    loopback: true,
+    external: true,
+    malformed: true,
+  }
+  expect(result.navigation).toEqual(navigation)
+  expect(result.redirects).toEqual(navigation)
+  expect(result.secondWindowHandlers).toEqual({
+    windowOpen: { action: "deny" },
+    navigation: false,
+    redirect: true,
+  })
   expect(result.protocol.registered).toBe(true)
   expect(result.protocol.partitions).toEqual(["opencode-renderer-assets"])
   expect(result.protocol.assetFetches).toHaveLength(7)
@@ -52,11 +80,12 @@ test("production window and packaged protocol enforce enterprise boundaries", as
     fetchError: 404,
   })
   expect(result.ordinaryRegistrations).toEqual({
-    request: false,
+    requestRegistrations: 1,
     windowOpen: false,
     navigation: false,
     redirect: false,
   })
+  expect(result.conflictingPolicyError).toBe("Enterprise session policy cannot change after installation")
 
   const protocolLogs = result.logs.filter((entry: { service: string }) => entry.service === "protocol")
   expect(
@@ -81,9 +110,9 @@ test("production window and packaged protocol enforce enterprise boundaries", as
     "file-secret",
     "logger-secret",
     "navigation-secret",
-    "redirect-provider-secret",
-    "redirect-loopback-secret",
-    "redirect-external-secret",
+    "navigation-query-secret",
+    "navigation-credential-secret",
+    "navigation-malformed-secret",
     "asset-query-secret",
     "host-secret",
     "protocol-malformed-secret",
@@ -100,4 +129,40 @@ test("production window and packaged protocol enforce enterprise boundaries", as
   }
   expect(serializedLogs).not.toContain("request.url")
   expect(serializedLogs).not.toContain("file://")
+})
+
+test.each([
+  ["dev-origin", "http://localhost:5173/index.html"],
+  ["dev-slash", "http://localhost:5173/index.html"],
+  ["dev-index", "http://localhost:5173/index.html"],
+] as const)("production window trusts only the exact %s startup document", async (mode, loadedURL) => {
+  const result = await run(mode)
+
+  expect(result.productionWindow).toEqual({
+    mode,
+    loadedURL,
+    secondLoadedURL: loadedURL,
+    sessionRequestRegistrations: 1,
+    registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
+  })
+  expect(result.navigation).toEqual({
+    trusted: false,
+    trustedHash: false,
+    alternateDocument: true,
+    asset: true,
+    query: true,
+    credentialed: true,
+    packagedAlternate: true,
+    provider: true,
+    loopback: true,
+    external: true,
+    malformed: true,
+  })
+  expect(result.redirects).toEqual(result.navigation)
+  expect(result.secondWindowHandlers).toEqual({
+    windowOpen: { action: "deny" },
+    navigation: false,
+    redirect: true,
+  })
+  expect(result.conflictingPolicyError).toBe("Enterprise session policy cannot change after installation")
 })

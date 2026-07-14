@@ -12,7 +12,11 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
 })
-delete process.env.ELECTRON_RENDERER_URL
+const mode = process.argv[2] ?? "packaged"
+if (mode === "dev-origin") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
+if (mode === "dev-slash") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/"
+if (mode === "dev-index") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/index.html"
+if (mode === "packaged") delete process.env.ELECTRON_RENDERER_URL
 
 type RequestResult = { cancel: boolean }
 type RequestDetails = { url: string; resourceType: string; requestHeaders?: Record<string, string> }
@@ -41,6 +45,8 @@ const contentTypes: Record<string, string> = {
   ".woff2": "font/woff2",
 }
 let throwWindowLog = false
+let sessionRequest: RequestHandler | undefined
+let sessionRequestRegistrations = 0
 
 const assetSession = {
   async fetch(url: string) {
@@ -52,6 +58,19 @@ const assetSession = {
     return new Response(await body.arrayBuffer(), {
       headers: { "content-type": contentTypes[extname(file)] ?? "application/octet-stream" },
     })
+  },
+}
+
+const rendererSession = {
+  setPermissionRequestHandler() {},
+  setPermissionCheckHandler() {},
+  webRequest: {
+    onBeforeRequest(callback: RequestHandler) {
+      sessionRequestRegistrations++
+      sessionRequest = callback
+    },
+    onBeforeSendHeaders() {},
+    onHeadersReceived() {},
   },
 }
 
@@ -74,17 +93,7 @@ class FakeBrowserWindow {
   webContents = {
     id: windows.length + 1,
     mainFrame: { collectJavaScriptCallStack: () => Promise.resolve("") },
-    session: {
-      setPermissionRequestHandler() {},
-      setPermissionCheckHandler() {},
-      webRequest: {
-        onBeforeRequest: (callback: RequestHandler) => {
-          this.callbacks.request = callback
-        },
-        onBeforeSendHeaders() {},
-        onHeadersReceived() {},
-      },
-    },
+    session: rendererSession,
     setWindowOpenHandler: (callback: WindowOpenHandler) => {
       this.callbacks.windowOpen = callback
     },
@@ -235,48 +244,51 @@ try {
     "../src/main/windows"
   )
   createMainWindow("security-review")
-  const win = windows.at(-1)
+  createMainWindow("security-review-second")
+  const win = windows[0]
+  const second = windows[1]
   if (!win) throw new Error("production window was not created")
+  if (!second) throw new Error("second production window was not created")
   registerRendererProtocol({ rendererRoot: assetRoot })
 
   const requests = {
-    markdownImage: request(win.callbacks.request, {
+    markdownImage: request(sessionRequest, {
       url: "https://cdn.example/private.png?token=renderer-secret",
       resourceType: "image",
       requestHeaders: { Authorization: "Bearer hidden" },
     }),
-    providerStylesheet: request(win.callbacks.request, {
+    providerStylesheet: request(sessionRequest, {
       url: "https://llm.corp.example/app.css",
       resourceType: "stylesheet",
     }),
-    dataFont: request(win.callbacks.request, {
+    dataFont: request(sessionRequest, {
       url: "data:font/woff2;base64,AA==",
       resourceType: "font",
     }),
-    publicStylesheet: request(win.callbacks.request, {
+    publicStylesheet: request(sessionRequest, {
       url: "https://cdn.example/private.css?token=style-secret",
       resourceType: "stylesheet",
     }),
-    publicFont: request(win.callbacks.request, {
+    publicFont: request(sessionRequest, {
       url: "https://fonts.example/private.woff2?token=font-secret",
       resourceType: "font",
     }),
-    rawFetch: request(win.callbacks.request, {
+    rawFetch: request(sessionRequest, {
       url: "https://opencode.ai/changelog.json?token=fetch-secret",
       resourceType: "xhr",
     }),
-    malformed: request(win.callbacks.request, {
+    malformed: request(sessionRequest, {
       url: "not a URL?token=malformed-secret",
       resourceType: "other",
     }),
-    rendererFile: request(win.callbacks.request, {
+    rendererFile: request(sessionRequest, {
       url: "file:///Users/private/credential?token=file-secret",
       resourceType: "script",
     }),
   }
 
   throwWindowLog = true
-  const loggerFailure = request(win.callbacks.request, {
+  const loggerFailure = request(sessionRequest, {
     url: "https://logger.example/private?token=logger-secret",
     resourceType: "xhr",
   })
@@ -286,17 +298,33 @@ try {
     public: win.callbacks.windowOpen?.({ url: "https://opencode.ai/docs?token=window-secret" }),
     provider: win.callbacks.windowOpen?.({ url: "https://llm.corp.example/docs" }),
   }
-  const navigation = {
-    trusted: navigate(win.callbacks.navigation, "oc://renderer/index.html"),
-    provider: navigate(win.callbacks.navigation, "https://llm.corp.example/docs?token=navigation-secret"),
-    loopback: navigate(win.callbacks.navigation, "http://127.0.0.1:4096/redirect"),
-    external: navigate(win.callbacks.navigation, "https://external.example/redirect"),
+  const startup = win.loadedURL
+  const credentialed = new URL(startup)
+  credentialed.username = "user"
+  credentialed.password = "navigation-credential-secret"
+  const navigationURLs = {
+    trusted: startup,
+    trustedHash: `${startup}#workspace`,
+    alternateDocument: new URL("other.html", startup).toString(),
+    asset: new URL("assets/app.js", startup).toString(),
+    query: `${startup}?token=navigation-query-secret`,
+    credentialed: credentialed.toString(),
+    packagedAlternate: "oc://renderer/alternate.html",
+    provider: "https://llm.corp.example/docs?token=navigation-secret",
+    loopback: "http://127.0.0.1:4096/redirect",
+    external: "https://external.example/redirect",
+    malformed: "not a URL?token=navigation-malformed-secret",
   }
-  const redirects = {
-    trusted: navigate(win.callbacks.redirect, "oc://renderer/index.html"),
-    provider: navigate(win.callbacks.redirect, "https://llm.corp.example/docs?token=redirect-provider-secret"),
-    loopback: navigate(win.callbacks.redirect, "http://localhost:4096/redirect?token=redirect-loopback-secret"),
-    external: navigate(win.callbacks.redirect, "https://external.example/redirect?token=redirect-external-secret"),
+  const navigation = Object.fromEntries(
+    Object.entries(navigationURLs).map(([key, url]) => [key, navigate(win.callbacks.navigation, url)]),
+  )
+  const redirects = Object.fromEntries(
+    Object.entries(navigationURLs).map(([key, url]) => [key, navigate(win.callbacks.redirect, url)]),
+  )
+  const secondWindowHandlers = {
+    windowOpen: second.callbacks.windowOpen?.({ url: "https://external.example/second" }),
+    navigation: navigate(second.callbacks.navigation, startup),
+    redirect: navigate(second.callbacks.redirect, "https://llm.corp.example/second"),
   }
 
   const assets = await Promise.all(
@@ -317,13 +345,38 @@ try {
 
   const ordinary = new FakeBrowserWindow()
   Reflect.apply(installEnterpriseWindowPolicy, undefined, [ordinary, { profile: { enabled: false } }])
+  const conflicting = new FakeBrowserWindow()
+  const conflictingPolicyError = (() => {
+    try {
+      Reflect.apply(installEnterpriseWindowPolicy, undefined, [
+        conflicting,
+        {
+          profile: {
+            enabled: true,
+            baseURL: "https://other.example/v1",
+            modelID: "other",
+            modelName: "Other",
+            defaultsVersion: "other",
+            guideVersion: "other",
+            allowedOrigins: ["https://other.example"],
+          },
+        },
+      ])
+      return undefined
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  })()
 
   console.log(
     JSON.stringify({
       productionWindow: {
+        mode,
         loadedURL: win.loadedURL,
+        secondLoadedURL: second.loadedURL,
+        sessionRequestRegistrations,
         registrations: {
-          request: Boolean(win.callbacks.request),
+          request: Boolean(sessionRequest),
           windowOpen: Boolean(win.callbacks.windowOpen),
           navigation: Boolean(win.callbacks.navigation),
           redirect: Boolean(win.callbacks.redirect),
@@ -334,6 +387,7 @@ try {
       windowOpen,
       navigation,
       redirects,
+      secondWindowHandlers,
       protocol: {
         registered: Boolean(protocolState.handler),
         partitions,
@@ -343,11 +397,12 @@ try {
       },
       logs,
       ordinaryRegistrations: {
-        request: Boolean(ordinary.callbacks.request),
+        requestRegistrations: sessionRequestRegistrations,
         windowOpen: Boolean(ordinary.callbacks.windowOpen),
         navigation: Boolean(ordinary.callbacks.navigation),
         redirect: Boolean(ordinary.callbacks.redirect),
       },
+      conflictingPolicyError,
     }),
   )
 } finally {

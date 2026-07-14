@@ -58,3 +58,31 @@ test("public createPlatform preserves openLink and fetch behavior", async () => 
     failures: [null, null, null],
   })
 })
+
+test("real renderer entrypoint creates the policy-enforcing desktop platform", async () => {
+  const child = Bun.spawn(
+    [process.execPath, "--conditions=browser", "run", `${import.meta.dir}/../../test/renderer-index-entrypoint.tsx`],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  expect(JSON.parse(stdout)).toEqual({
+    openLinkCalls: ["https://llm.corp.example/docs"],
+    fetchCalls: [{ url: "https://llm.corp.example/v1/models", method: "POST" }],
+    failures: ["Enterprise offline policy blocked https://cdn.example", "Enterprise offline policy blocked null"],
+  })
+  for (const secret of [
+    "renderer-index-open-secret",
+    "renderer-index-string-secret",
+    "renderer-index-request-secret",
+  ]) {
+    expect(stdout).not.toContain(secret)
+  }
+  expect(stdout).not.toContain("/Users/private")
+})

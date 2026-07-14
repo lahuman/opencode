@@ -56,6 +56,7 @@ let relaunchHandler = () => {
 const titlebarThemes = new WeakMap<BrowserWindow, Partial<TitlebarTheme>>()
 const pinchZoomEnabled = new WeakMap<BrowserWindow, boolean>()
 const windowIDs = new WeakMap<BrowserWindow, string>()
+const enterpriseSessionPolicies = new WeakMap<Electron.Session, string>()
 const registry = createWindowRegistry<BrowserWindow>({
   read: () => getStore().get(WINDOW_IDS_KEY),
   write: (ids) => getStore().set(WINDOW_IDS_KEY, ids),
@@ -225,7 +226,7 @@ export function createMainWindow(id: string = randomUUID()) {
 
   state.manage(win)
   registerWindow(win, id)
-  loadWindow(win, "index.html")
+  loadWindow(win)
   wireZoom(win)
 
   win.once("ready-to-show", () => {
@@ -239,7 +240,6 @@ export function installEnterpriseWindowPolicy(
   win: BrowserWindow,
   options: {
     profile?: EnterpriseProfile
-    trustedRendererURL?: (url: string) => boolean
     write?: (
       service: string,
       message: string,
@@ -250,23 +250,30 @@ export function installEnterpriseWindowPolicy(
 ) {
   const profile = options.profile ?? ENTERPRISE_PROFILE
   if (!profile.enabled) return
-  const trustedRendererURL = options.trustedRendererURL ?? isTrustedRendererUrl
   const write = options.write ?? writeLog
   const blocked = (url: string, resourceType: string) => {
     write("window", "blocked enterprise renderer request", { origin: enterpriseURLOrigin(url), resourceType }, "warn")
   }
 
-  win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
-    const allowed = enterpriseRendererRequestAllowed(profile, details.url)
-    callback({ cancel: !allowed })
-    if (!allowed) blocked(details.url, details.resourceType)
-  })
+  const policy = JSON.stringify(profile.allowedOrigins)
+  const installed = enterpriseSessionPolicies.get(win.webContents.session)
+  if (installed !== undefined && installed !== policy) {
+    throw new Error("Enterprise session policy cannot change after installation")
+  }
+  if (installed === undefined) {
+    win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+      const allowed = enterpriseRendererRequestAllowed(profile, details.url)
+      callback({ cancel: !allowed })
+      if (!allowed) blocked(details.url, details.resourceType)
+    })
+    enterpriseSessionPolicies.set(win.webContents.session, policy)
+  }
   win.webContents.setWindowOpenHandler((details) => {
     blocked(details.url, "windowOpen")
     return { action: "deny" }
   })
   const guardNavigation = (event: Electron.Event, url: string) => {
-    if (trustedRendererURL(url)) return
+    if (isTrustedRendererDocument(url)) return
     event.preventDefault()
     blocked(url, "mainFrame")
   }
@@ -353,15 +360,25 @@ function rejectRendererRequest(reason: "invalid-url" | "invalid-host" | "invalid
   return new Response("Not found", { status: 404 })
 }
 
-function loadWindow(win: BrowserWindow, html: string) {
-  const devUrl = process.env.ELECTRON_RENDERER_URL
-  if (devUrl) {
-    const url = new URL(html, devUrl)
-    void win.loadURL(url.toString())
-    return
-  }
+function loadWindow(win: BrowserWindow) {
+  void win.loadURL(trustedRendererDocumentURL())
+}
 
-  void win.loadURL(`${rendererProtocol}://${rendererHost}/${html}`)
+function trustedRendererDocumentURL() {
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  if (!devUrl) return `${rendererProtocol}://${rendererHost}/index.html`
+
+  const url = new URL("index.html", devUrl)
+  if (url.username || url.password) throw new Error("Electron renderer URL must not contain credentials")
+  return url.toString()
+}
+
+function isTrustedRendererDocument(value: string) {
+  if (!URL.canParse(value)) return false
+  const url = new URL(value)
+  if (url.username || url.password) return false
+  url.hash = ""
+  return url.toString() === trustedRendererDocumentURL()
 }
 
 function wireWindowRecovery(win: BrowserWindow, name: string) {
