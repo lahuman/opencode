@@ -4,7 +4,7 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import path from "path"
 import { Effect, FileSystem, Layer } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 import { Instruction } from "../../src/session/instruction"
@@ -41,7 +41,7 @@ const instructionLayer = (
   global: Partial<Global.Interface>,
   flags: Partial<RuntimeFlags.Info> = {},
   config: ConfigV1.Info = {},
-  client: HttpClient.HttpClient = unexpectedHttp,
+  client: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(HttpClient.HttpClient, unexpectedHttp),
 ) =>
   AppNodeBuilder.build(Instruction.node, [
     [
@@ -55,7 +55,7 @@ const instructionLayer = (
     ],
     [Global.node, Global.layerWith(global)],
     [RuntimeFlags.node, RuntimeFlags.layer(flags)],
-    [httpClient, Layer.succeed(HttpClient.HttpClient, client)],
+    [httpClient, client],
   ])
 
 const provideInstruction =
@@ -63,7 +63,7 @@ const provideInstruction =
     global: Partial<Global.Interface>,
     flags?: Partial<RuntimeFlags.Info>,
     config?: ConfigV1.Info,
-    client?: HttpClient.HttpClient,
+    client?: Layer.Layer<HttpClient.HttpClient>,
   ) =>
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
     self.pipe(Effect.provide(instructionLayer(global, flags, config, client)))
@@ -230,7 +230,6 @@ describe("Instruction.resolve", () => {
     ),
   )
 
-  test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
 })
 
 describe("Instruction.system", () => {
@@ -271,42 +270,78 @@ describe("Instruction.system", () => {
     }),
   )
 
-  it.live("enterprise mode ignores URL instructions and retains local instructions", () =>
-    Effect.gen(function* () {
-      const globalTmp = yield* tmpdirScoped()
-      const projectTmp = yield* tmpWithFiles({
-        "AGENTS.md": "# Project Instructions",
-        "company.md": "# Company Instructions",
-      })
-      const requests: string[] = []
-      const client = HttpClient.make((request) => {
-        requests.push(request.url)
-        return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("# Remote Instructions")))
-      })
+  it.live("fetches URL instructions outside enterprise mode and suppresses them in enterprise mode", () => {
+    const requests: string[] = []
+    return Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch(request) {
+            requests.push(new URL(request.url).pathname)
+            return new Response("# Remote Instructions")
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const globalTmp = yield* tmpdirScoped()
+          const ordinaryProject = yield* tmpWithFiles({
+            "AGENTS.md": "# Ordinary Project Instructions",
+            "company.md": "# Ordinary Company Instructions",
+          })
+          const enterpriseProject = yield* tmpWithFiles({
+            "AGENTS.md": "# Enterprise Project Instructions",
+            "company.md": "# Enterprise Company Instructions",
+          })
+          const url = new URL("/instructions.md", server.url).toString()
+          const client = FetchHttpClient.layer as Layer.Layer<HttpClient.HttpClient>
 
-      yield* Effect.gen(function* () {
-        const svc = yield* Instruction.Service
-        const rules = yield* svc.system()
+          const ordinary = yield* Effect.gen(function* () {
+            return yield* (yield* Instruction.Service).system()
+          }).pipe(
+            provideInstance(ordinaryProject),
+            provideInstruction(
+              { home: globalTmp, config: globalTmp },
+              {},
+              { instructions: [url, "company.md"] },
+              client,
+            ),
+          )
 
-        expect(requests).toEqual([])
-        expect(rules).toContain(
-          `Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`,
-        )
-        expect(rules).toContain(
-          `Instructions from: ${path.join(projectTmp, "company.md")}\n# Company Instructions`,
-        )
-        expect(rules.join("\n")).not.toContain("Remote Instructions")
-      }).pipe(
-        provideInstance(projectTmp),
-        provideInstruction(
-          { home: globalTmp, config: globalTmp },
-          { enterpriseOffline: true },
-          { instructions: ["https://public.example/instructions.md", "company.md"] },
-          client,
-        ),
-      )
-    }),
-  )
+          expect(requests).toEqual(["/instructions.md"])
+          expect(ordinary).toContain(`Instructions from: ${url}\n# Remote Instructions`)
+          expect(ordinary).toContain(
+            `Instructions from: ${path.join(ordinaryProject, "AGENTS.md")}\n# Ordinary Project Instructions`,
+          )
+          expect(ordinary).toContain(
+            `Instructions from: ${path.join(ordinaryProject, "company.md")}\n# Ordinary Company Instructions`,
+          )
+
+          const enterprise = yield* Effect.gen(function* () {
+            return yield* (yield* Instruction.Service).system()
+          }).pipe(
+            provideInstance(enterpriseProject),
+            provideInstruction(
+              { home: globalTmp, config: globalTmp },
+              { enterpriseOffline: true },
+              { instructions: [url, "company.md"] },
+              client,
+            ),
+          )
+
+          expect(requests).toEqual(["/instructions.md"])
+          expect(enterprise.join("\n")).not.toContain("Remote Instructions")
+          expect(enterprise).toContain(
+            `Instructions from: ${path.join(enterpriseProject, "AGENTS.md")}\n# Enterprise Project Instructions`,
+          )
+          expect(enterprise).toContain(
+            `Instructions from: ${path.join(enterpriseProject, "company.md")}\n# Enterprise Company Instructions`,
+          )
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    )
+  })
 })
 
 describe("Instruction.systemPaths global config", () => {

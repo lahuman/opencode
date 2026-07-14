@@ -8,6 +8,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable
 import { Config } from "@/config/config"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
+import { Permission } from "@/permission"
 import { Npm } from "@opencode-ai/core/npm"
 
 import { InstanceRef } from "../../src/effect/instance-ref"
@@ -2124,7 +2125,17 @@ it.effect("loads enterprise defaults below global, project, and managed settings
 it.effect("loads bundled enterprise permission harness defaults in precedence order", () =>
   Effect.gen(function* () {
     const emptyGlobal = yield* tmpdirScoped()
-    const project = yield* tmpdirScoped()
+    const defaultsProject = yield* tmpdirScoped()
+    const overrideProject = yield* tmpdirScoped()
+    yield* writeConfigEffect(
+      overrideProject,
+      schemaConfig({
+        permission: {
+          webfetch: "allow",
+          bash: { "rm -rf *": "deny" },
+        },
+      }),
+    )
 
     yield* withProcessEnvs(
       {
@@ -2138,40 +2149,64 @@ it.effect("loads bundled enterprise permission harness defaults in precedence or
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
       },
-      withGlobalConfigDir(
-        emptyGlobal,
-        withInstanceDir(
-          project,
-          Effect.gen(function* () {
-            const config = yield* Config.use.get()
+      Effect.gen(function* () {
+        yield* withGlobalConfigDir(
+          emptyGlobal,
+          withInstanceDir(
+            defaultsProject,
+            Effect.gen(function* () {
+              const config = yield* Config.use.get()
+              const rules = Permission.fromConfig(config.permission ?? {})
 
-            expect(config.permission).toMatchObject({
-              webfetch: "deny",
-              websearch: "deny",
-              external_directory: "ask",
-            })
-            expect(Object.keys(config.permission ?? {})).toEqual([
-              "webfetch",
-              "websearch",
-              "external_directory",
-              "read",
-              "bash",
-            ])
-            expect(Object.keys(config.permission?.read ?? {})).toEqual([
-              "*",
-              "*.env",
-              "*.env.*",
-              "*.env.example",
-            ])
-            expect(Object.keys(config.permission?.bash ?? {})).toEqual([
-              "*",
-              "rm -rf *",
-              "git reset --hard*",
-              "git clean -fd*",
-            ])
-          }),
-        ),
-      ),
+              expect(Object.keys(config.permission ?? {})).toEqual([
+                "webfetch",
+                "websearch",
+                "external_directory",
+                "read",
+                "bash",
+              ])
+              expect(Object.keys(config.permission?.read ?? {})).toEqual([
+                "*",
+                "*.env",
+                "*.env.*",
+                "*.env.example",
+              ])
+              expect(Object.keys(config.permission?.bash ?? {})).toEqual([
+                "*",
+                "rm -rf *",
+                "git reset --hard*",
+                "git clean -fd*",
+              ])
+              expect(Permission.evaluate("webfetch", "https://public.example", rules).action).toBe("deny")
+              expect(Permission.evaluate("websearch", "company news", rules).action).toBe("deny")
+              expect(Permission.evaluate("external_directory", "/outside/project", rules).action).toBe("ask")
+              expect(Permission.evaluate("read", "README.md", rules).action).toBe("allow")
+              expect(Permission.evaluate("read", ".env", rules).action).toBe("ask")
+              expect(Permission.evaluate("read", ".env.production", rules).action).toBe("ask")
+              expect(Permission.evaluate("read", ".env.example", rules).action).toBe("allow")
+              expect(Permission.evaluate("bash", "git status", rules).action).toBe("allow")
+              expect(Permission.evaluate("bash", "rm -rf build", rules).action).toBe("ask")
+              expect(Permission.evaluate("bash", "git reset --hard HEAD", rules).action).toBe("ask")
+              expect(Permission.evaluate("bash", "git clean -fd", rules).action).toBe("ask")
+            }),
+          ),
+        )
+
+        yield* withGlobalConfigDir(
+          emptyGlobal,
+          withInstanceDir(
+            overrideProject,
+            Effect.gen(function* () {
+              const rules = Permission.fromConfig((yield* Config.use.get()).permission ?? {})
+
+              expect(Permission.evaluate("webfetch", "https://public.example", rules).action).toBe("allow")
+              expect(Permission.evaluate("bash", "rm -rf build", rules).action).toBe("deny")
+              expect(Permission.evaluate("websearch", "company news", rules).action).toBe("deny")
+              expect(Permission.evaluate("read", ".env.production", rules).action).toBe("ask")
+            }),
+          ),
+        )
+      }),
     )
   }),
 )
