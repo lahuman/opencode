@@ -27,8 +27,10 @@ import { Link } from "@/components/link"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { CustomProviderForm } from "./dialog-custom-provider"
+import { DialogCompanyProvider } from "./dialog-company-provider"
 
 const CUSTOM_ID = "_custom"
 
@@ -47,6 +49,8 @@ export const DialogConnectProvider: Component<{
   directory?: Accessor<string | undefined>
   controller?: ReturnType<typeof useProviderConnectController>
 }> = (props) => {
+  const platform = usePlatform()
+  if (platform.enterprise) return <DialogCompanyProvider />
   const fallback = useProviderConnectController()
   const controller = props.controller ?? fallback
   const language = useLanguage()

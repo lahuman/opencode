@@ -6,12 +6,14 @@ import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsListV2 } from "./parts/list"
 import "./settings-v2.css"
+import { DialogCompanyProvider, useCompanyProviderSettingsState } from "../dialog-company-provider"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -30,6 +32,8 @@ const PROVIDER_NOTES = [
 const PROVIDER_ICON_SIZE = 16
 
 export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) => {
+  const platform = usePlatform()
+  if (platform.enterprise) return <SettingsCompanyProviderV2 />
   const dialog = useDialog()
   const language = useLanguage()
   const serverSdk = useServerSDK()
@@ -250,6 +254,56 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
           <button type="button" class="settings-v2-providers-view-all" onClick={() => connect()}>
             {language.t("dialog.provider.viewAll")}
           </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function SettingsCompanyProviderV2() {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const company = useCompanyProviderSettingsState()
+  const model = () => company.config().models[0]?.name ?? "No configured model"
+
+  return (
+    <>
+      <div class="settings-v2-tab-header">
+        <h2 class="settings-v2-tab-title">{language.t("settings.providers.title")}</h2>
+      </div>
+      <div class="settings-v2-tab-body settings-v2-providers">
+        <div class="settings-v2-section">
+          <SettingsListV2>
+            <div class="settings-v2-provider-row">
+              <div class="settings-v2-provider-lead">
+                <div class="settings-v2-provider-copy">
+                  <div class="settings-v2-provider-main">
+                    <span class="settings-v2-provider-name">Company LLM</span>
+                  </div>
+                  <p class="settings-v2-provider-description">
+                    {model()} - {company.status()}
+                  </p>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <ButtonV2
+                  size="normal"
+                  variant="neutral"
+                  onClick={() => dialog.show(() => <DialogCompanyProvider />, company.refreshStatus)}
+                >
+                  Configure
+                </ButtonV2>
+                <ButtonV2
+                  size="normal"
+                  variant="neutral"
+                  disabled={company.checking() || !company.config().models[0]}
+                  onClick={company.testConnection}
+                >
+                  {company.checking() ? "Testing..." : "Test connection"}
+                </ButtonV2>
+              </div>
+            </div>
+          </SettingsListV2>
         </div>
       </div>
     </>

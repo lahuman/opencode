@@ -22,6 +22,11 @@ import { useTabs } from "@/context/tabs"
 
 const DEFAULT_USERNAME = "opencode"
 
+export function serverConnectionsForMode(enterprise: boolean, connections: ServerConnection.Any[]) {
+  if (!enterprise) return connections
+  return connections.filter(ServerConnection.builtin).slice(0, 1)
+}
+
 interface ServerFormProps {
   value: string
   name: string
@@ -176,6 +181,8 @@ function ServerForm(props: ServerFormProps) {
 
 export function DialogSelectServer() {
   const dialog = useDialog()
+  const platform = usePlatform()
+  if (platform.enterprise) return <EnterpriseServerConnectionList />
   const controller = useServerManagementController({ onSelect: dialog.close })
 
   return (
@@ -184,6 +191,46 @@ export function DialogSelectServer() {
         <Show when={controller.isFormMode()} fallback={<ServerConnectionList controller={controller} />}>
           <ServerConnectionForm controller={controller} />
         </Show>
+      </div>
+    </Dialog>
+  )
+}
+
+function EnterpriseServerConnectionList() {
+  const global = useGlobal()
+  const language = useLanguage()
+  const server = useServer()
+  const connections = createMemo(() =>
+    serverConnectionsForMode(true, server.current ? [server.current, ...server.list] : server.list),
+  )
+
+  return (
+    <Dialog title={language.t("dialog.server.title")}>
+      <div class="flex min-h-0 flex-1 flex-col px-5 pb-5">
+        <div class="rounded-md bg-surface-base px-3">
+          <Show
+            when={connections()[0]}
+            fallback={<div class="py-4 text-14-regular text-text-weak">{language.t("dialog.server.empty")}</div>}
+          >
+            {(connection) => {
+              const key = ServerConnection.key(connection())
+              return (
+                <div class="flex min-h-14 min-w-0 items-center gap-3 py-3">
+                  <div class="flex h-full w-5 items-center">
+                    <ServerHealthIndicator health={global.servers.health[key]} />
+                  </div>
+                  <ServerRow
+                    conn={connection()}
+                    status={global.servers.health[key]}
+                    dimmed={global.servers.health[key]?.healthy === false}
+                    class="flex min-w-0 flex-1 items-center gap-3"
+                  />
+                  <Icon name="check" class="h-6 shrink-0" />
+                </div>
+              )
+            }}
+          </Show>
+        </div>
       </div>
     </Dialog>
   )

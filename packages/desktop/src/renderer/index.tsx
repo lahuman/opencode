@@ -276,12 +276,14 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     getDefaultServer: async () => {
+      if (ENTERPRISE_ENABLED) return ServerConnection.Key.make("sidecar")
       const url = await window.api.getDefaultServerUrl().catch(() => null)
       if (!url) return null
       return ServerConnection.Key.make(url)
     },
 
     setDefaultServer: async (url: string | null) => {
+      if (ENTERPRISE_ENABLED) throw new Error("Remote servers are disabled in this build")
       await window.api.setDefaultServerUrl(url)
     },
 
@@ -406,12 +408,14 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
           },
         })
       }
+      if (ENTERPRISE_ENABLED) return list.filter(ServerConnection.builtin)
       list.push(...readyWslConnections(wslServers.data))
       return list
     })
-    const effectiveDefaultServer = createMemo(() =>
-      ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data)),
-    )
+    const effectiveDefaultServer = createMemo(() => {
+      if (ENTERPRISE_ENABLED) return ServerConnection.Key.make("sidecar")
+      return ServerConnection.Key.make(availableStartupServer(defaultServer.latest, wslServers.data))
+    })
     return (
       <Show when={ready()} fallback={<LoadingSplash />}>
         <Show when={effectiveDefaultServer()} keyed>

@@ -73,8 +73,8 @@ type PlatformBase = {
   /** Enterprise credential management through desktop secure storage */
   enterprise?: {
     credentialStatus(): Promise<{ configured: boolean }>
-    setCredentials(input: { apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: true }>
-    clearCredentials(): Promise<{ restartRequired: true }>
+    setCredentials(input: { apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
+    clearCredentials(): Promise<{ restartRequired: boolean }>
   }
 
   /** Fetch override */

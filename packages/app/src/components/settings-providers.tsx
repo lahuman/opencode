@@ -6,12 +6,14 @@ import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "./dialog-connect-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
 import { SettingsList } from "./settings-list"
 import { SettingsServerPicker, SettingsServerScope } from "./settings-server-picker"
+import { DialogCompanyProvider, useCompanyProviderSettingsState } from "./dialog-company-provider"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
@@ -28,10 +30,59 @@ const PROVIDER_NOTES = [
 ] as const
 
 export const SettingsProviders: Component<{ onBack?: () => void }> = (props) => {
+  const platform = usePlatform()
+  if (platform.enterprise) return <SettingsCompanyProvider />
   return (
     <SettingsServerScope>
       <SettingsProvidersContent onBack={props.onBack} />
     </SettingsServerScope>
+  )
+}
+
+function SettingsCompanyProvider() {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const company = useCompanyProviderSettingsState()
+  const model = () => company.config().models[0]?.name ?? "No configured model"
+
+  return (
+    <div class="flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10">
+      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+        <div class="flex max-w-[720px] items-center pt-6 pb-8">
+          <h2 class="text-16-medium text-text-strong">{language.t("settings.providers.title")}</h2>
+        </div>
+      </div>
+      <div class="flex max-w-[720px] flex-col gap-1">
+        <SettingsList>
+          <div class="flex min-h-16 flex-wrap items-center justify-between gap-4 py-3">
+            <div class="flex min-w-0 flex-col gap-1">
+              <span class="text-14-medium text-text-strong">Company LLM</span>
+              <div class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-12-regular text-text-weak">
+                <span class="truncate">{model()}</span>
+                <span>{company.status()}</span>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => dialog.show(() => <DialogCompanyProvider />, company.refreshStatus)}
+              >
+                Configure
+              </Button>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={company.checking() || !company.config().models[0]}
+                onClick={company.testConnection}
+              >
+                {company.checking() ? "Testing..." : "Test connection"}
+              </Button>
+            </div>
+          </div>
+        </SettingsList>
+      </div>
+    </div>
   )
 }
 
