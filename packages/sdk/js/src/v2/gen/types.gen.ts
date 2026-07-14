@@ -9358,7 +9358,7 @@ export type ProviderAuthResponses = {
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
 
 export type ProviderDiagnoseData = {
-  body?: {
+  body: {
     modelID: string
     checkToolCall: boolean
   }

@@ -25,7 +25,10 @@ type OpenApiOperation = {
     readonly schema?: { readonly type?: string }
   }>
   readonly responses?: Record<string, OpenApiResponse>
-  readonly requestBody?: { readonly required?: boolean }
+  readonly requestBody?: {
+    readonly required?: boolean
+    readonly content?: Record<string, { readonly schema?: OpenApiSchema }>
+  }
   readonly security?: unknown
 }
 type OpenApiPathItem = Partial<Record<Method, OpenApiOperation>>
@@ -144,6 +147,14 @@ describe("PublicApi OpenAPI v2 errors", () => {
     ]) {
       expect(spec.paths[path]?.post?.requestBody?.required, path).toBe(true)
     }
+  })
+
+  test("preserves the required legacy provider diagnostic payload", () => {
+    const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
+    const body = spec.paths["/provider/{providerID}/diagnostics"]?.post?.requestBody
+
+    expect(body?.required).toBe(true)
+    expect(body?.content?.["application/json"]?.schema?.required).toEqual(["modelID", "checkToolCall"])
   })
 
   test("documents integration discovery and connection routes", () => {

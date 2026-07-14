@@ -85,7 +85,37 @@ if (historyTypesPatched === generatedTypes) {
 await Bun.write("./src/v2/gen/types.gen.ts", historyTypesPatched)
 
 const generatedSdk = await Bun.file("./src/v2/gen/sdk.gen.ts").text()
-const historySdkPatched = generatedSdk.replace(
+const diagnosticData = generatedTypes.match(
+  /export type ProviderDiagnoseData = \{[\s\S]*?export type ProviderDiagnoseErrors/,
+)
+if (
+  !diagnosticData ||
+  diagnosticData[0].includes("body?:") ||
+  !diagnosticData[0].includes("modelID: string") ||
+  !diagnosticData[0].includes("checkToolCall: boolean")
+) {
+  throw new Error("Provider diagnose body must be required in the generated TypeScript client")
+}
+// @hey-api/sdk's flat parameter mode currently loses requiredness when it
+// flattens object request bodies. Preserve the OpenAPI contract at call sites.
+const diagnosticSdkPatched = generatedSdk.replace(
+  /(public diagnose[\s\S]*?)(modelID)\?: string([\s\S]*?)(checkToolCall)\?: boolean([\s\S]*?options\?: Options)/,
+  "$1$2: string$3$4: boolean$5",
+)
+if (diagnosticSdkPatched === generatedSdk) {
+  throw new Error("Provider diagnose required SDK patch did not apply")
+}
+const diagnosticSignature = diagnosticSdkPatched.match(/public diagnose[\s\S]*?options\?: Options/)
+if (
+  !diagnosticSignature ||
+  diagnosticSignature[0].includes("modelID?: string") ||
+  diagnosticSignature[0].includes("checkToolCall?: boolean") ||
+  !diagnosticSignature[0].includes("modelID: string") ||
+  !diagnosticSignature[0].includes("checkToolCall: boolean")
+) {
+  throw new Error("Provider diagnose parameters must be required in the generated TypeScript client")
+}
+const historySdkPatched = diagnosticSdkPatched.replace(
   /(Get session history[\s\S]*?parameters: \{\s*sessionID: string[;,]\s*limit\?: )string([;,]\s*after\?: )string/,
   "$1number$2number",
 )

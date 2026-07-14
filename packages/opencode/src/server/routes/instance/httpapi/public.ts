@@ -108,9 +108,10 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
       if (!operation) continue
       const isV2Api = isV2ApiPath(path)
       if (operation.requestBody) {
-        // The legacy OpenAPI surface never marked request bodies as required.
-        // Keep that SDK surface stable while the HttpApi spec is tightened.
-        if (!isV2Api) delete operation.requestBody.required
+        // Keep the established optional legacy body shape except where a new
+        // endpoint explicitly requires its payload at generated call sites.
+        if (!isV2Api && (path !== "/provider/{providerID}/diagnostics" || method !== "post"))
+          delete operation.requestBody.required
         const body = operation.requestBody.content?.["application/json"]
         if (body?.schema) body.schema = stripOptionalNull(structuredClone(body.schema))
         if (path === "/experimental/workspace" && method === "post") {

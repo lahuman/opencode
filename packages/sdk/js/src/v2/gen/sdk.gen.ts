@@ -3365,8 +3365,8 @@ export class Provider extends HeyApiClient {
       providerID: string
       directory?: string
       workspace?: string
-      modelID?: string
-      checkToolCall?: boolean
+      modelID: string
+      checkToolCall: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
