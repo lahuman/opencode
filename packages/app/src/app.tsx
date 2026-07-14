@@ -1,16 +1,6 @@
 import "@/index.css"
-import * as Sentry from "@sentry/solid"
-import { I18nProvider } from "@opencode-ai/ui/context"
-import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
-import { FileComponentProvider } from "@opencode-ai/ui/context/file"
-import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import { File } from "@opencode-ai/session-ui/file"
-import { Font } from "@opencode-ai/ui/font"
 import { Splash } from "@opencode-ai/ui/logo"
-import { ThemeProvider } from "@opencode-ai/ui/theme/context"
-import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useNavigate, useParams, useSearchParams } from "@solidjs/router"
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { Effect } from "effect"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import {
@@ -20,7 +10,6 @@ import {
   createRenderEffect,
   createResource,
   createSignal,
-  ErrorBoundary,
   For,
   type JSX,
   lazy,
@@ -29,14 +18,14 @@ import {
   Show,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import { CommandProvider, useCommand, type CommandOption } from "@/context/command"
+import { CommandProvider } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
 import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider, useServerSync } from "@/context/server-sync"
 import { GlobalProvider, useGlobal } from "@/context/global"
 import { HighlightsProvider } from "@/context/highlights"
-import { LanguageProvider, type Locale, useLanguage } from "@/context/language"
+import { useLanguage } from "@/context/language"
 import { LayoutProvider } from "@/context/layout"
 import { ModelsProvider } from "@/context/models"
 import { NotificationProvider } from "@/context/notification"
@@ -47,23 +36,19 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
 import { SDKProvider, useSDK } from "@/context/sdk"
-import { WslServersProvider } from "@/wsl/context"
 import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout"
 import LegacyLayout from "@/pages/layout"
 import NewLayout from "@/pages/layout-new"
-import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
 import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome, LegacyHome } from "@/pages/home"
-import {
-  createCompanyGuideCommand,
-  DialogCompanyGuide,
-  restoreCompanyGuideFocus,
-} from "@/components/dialog-company-guide"
-import { showToast } from "@/utils/toast"
+import { AppBaseProviders, QueryProvider } from "@/app-base-providers"
+import { DesktopCommands } from "@/desktop-commands"
+
+export { AppBaseProviders, DesktopCommands }
 
 const NewSession = lazy(() => import("@/pages/new-session"))
 
@@ -228,36 +213,6 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
   )
 }
 
-function UiI18nBridge(props: ParentProps) {
-  const language = useLanguage()
-  return <I18nProvider value={{ locale: language.intl, t: language.t }}>{props.children}</I18nProvider>
-}
-
-declare global {
-  interface Window {
-    __OPENCODE__?: {
-      deepLinks?: string[]
-    }
-    api?: {
-      setTitlebar?: (theme: { mode: "light" | "dark"; scheme?: "system" | "light" | "dark" }) => Promise<void>
-      exportDebugLogs?: () => Promise<string>
-    }
-  }
-}
-
-function QueryProvider(props: ParentProps) {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: {
-        refetchOnReconnect: false,
-        refetchOnMount: false,
-        refetchOnWindowFocus: false,
-      },
-    },
-  })
-  return <QueryClientProvider client={client}>{props.children}</QueryClientProvider>
-}
-
 function BodyDesignClass() {
   const settings = useSettings()
 
@@ -287,38 +242,6 @@ function SharedProviders(props: ParentProps) {
       </CommandProvider>
     </>
   )
-}
-
-export function DesktopCommands() {
-  const command = useCommand()
-  const dialog = useDialog()
-  const language = useLanguage()
-  const platform = usePlatform()
-
-  command.register("desktop", () => {
-    const commands: CommandOption[] = []
-    if (platform.platform === "desktop" && platform.exportDebugLogs) {
-      commands.push({
-        id: "logs.export",
-        title: "Export logs",
-        category: language.t("command.category.settings"),
-        onSelect: () => {
-          void platform.exportDebugLogs?.()
-        },
-      })
-    }
-    const companyGuide = createCompanyGuideCommand({
-      enterprise: platform.enterprise,
-      category: language.t("command.category.settings"),
-      open: (guide, origin) =>
-        dialog.show(() => <DialogCompanyGuide {...guide} />, () => restoreCompanyGuideFocus(origin)),
-      reportFailure: () => showToast({ title: language.t("common.requestFailed") }),
-    })
-    if (companyGuide) commands.push(companyGuide)
-    return commands
-  })
-
-  return null
 }
 
 // Server-scoped providers shared by the legacy shell and the top-level new shell.
@@ -374,40 +297,6 @@ function DraftProviders(props: ParentProps) {
         <CommentsProvider>{props.children}</CommentsProvider>
       </PromptProvider>
     </FileProvider>
-  )
-}
-
-export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
-  return (
-    <MetaProvider>
-      <Font />
-      <ThemeProvider
-        onThemeApplied={(_, mode, scheme) => {
-          void window.api?.setTitlebar?.({ mode, scheme })
-        }}
-      >
-        <LanguageProvider locale={props.locale}>
-          <UiI18nBridge>
-            <DialogProvider>
-              <MarkedProvider>
-                <FileComponentProvider component={File}>
-                  <ErrorBoundary
-                    fallback={(error) => {
-                      Sentry.captureException(error)
-                      return <ErrorPage error={error} />
-                    }}
-                  >
-                    <QueryProvider>
-                      <WslServersProvider>{props.children}</WslServersProvider>
-                    </QueryProvider>
-                  </ErrorBoundary>
-                </FileComponentProvider>
-              </MarkedProvider>
-            </DialogProvider>
-          </UiI18nBridge>
-        </LanguageProvider>
-      </ThemeProvider>
-    </MetaProvider>
   )
 }
 
