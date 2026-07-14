@@ -43,27 +43,43 @@ export const Result = Schema.Struct({
 type Stage = "basic" | "streaming" | "toolCall"
 type ProbeError = { stage: Stage; cause: unknown }
 
-export function classify(input: { statusCode?: number; message: string; stage?: Stage }): typeof FailureKind.Type {
+export function classify(input: {
+  statusCode?: number
+  message: string
+  codes?: readonly string[]
+  stage?: Stage
+}): typeof FailureKind.Type {
   const message = input.message.toLowerCase()
+  const transport = [message, ...(input.codes ?? []).map((code) => code.toLowerCase())].join(" ")
   if (input.statusCode === 401 || input.statusCode === 403) return "auth"
   if (message.includes("model not found") || message.includes("unknown model") || message.includes("no such model"))
     return "model"
-  if (message.includes("enotfound") || message.includes("eai_again")) return "dns"
+  if (transport.includes("enotfound") || transport.includes("eai_again")) return "dns"
   if (
-    message.includes("cert_") ||
-    message.includes("certificate") ||
-    message.includes("self signed") ||
-    message.includes("unable_to_verify") ||
-    message.includes("unable to verify")
+    transport.includes("cert_") ||
+    transport.includes("certificate") ||
+    transport.includes("self signed") ||
+    transport.includes("unable_to_verify") ||
+    transport.includes("unable to verify")
   )
     return "tls"
-  if (message.includes("timed out") || message.includes("timeout") || message.includes("aborted")) return "timeout"
   if (
-    message.includes("econnrefused") ||
-    message.includes("econnreset") ||
-    message.includes("ehostunreach") ||
-    message.includes("fetch failed") ||
-    message.includes("socket hang up")
+    transport.includes("timed out") ||
+    transport.includes("timeout") ||
+    transport.includes("etimedout") ||
+    transport.includes("abort_err") ||
+    transport.includes("aborted")
+  )
+    return "timeout"
+  if (
+    transport.includes("failedtoopensocket") ||
+    transport.includes("connectionrefused") ||
+    transport.includes("econnrefused") ||
+    transport.includes("econnreset") ||
+    transport.includes("ehostunreach") ||
+    transport.includes("fetch failed") ||
+    transport.includes("socket hang up") ||
+    transport.includes("cannot connect to api")
   )
     return "connection"
   if (input.stage === "streaming") return "stream"
@@ -114,9 +130,12 @@ function failureResult(error: unknown): typeof Result.Type {
   const message = chain
     .flatMap((item) => (item instanceof Error ? [item.message] : typeof item === "string" ? [item] : []))
     .join(" ")
+  const codes = chain.flatMap((item) =>
+    item && typeof item === "object" && "code" in item && typeof item.code === "string" ? [item.code] : [],
+  )
   const kind = chain.some((item) => Provider.ModelNotFoundError.isInstance(item))
     ? "model"
-    : classify({ statusCode: APICallError.isInstance(api) ? api.statusCode : undefined, message, stage })
+    : classify({ statusCode: APICallError.isInstance(api) ? api.statusCode : undefined, message, codes, stage })
   return {
     ok: false,
     checks: {
@@ -144,16 +163,20 @@ export async function probe(
       if (!result.text.trim()) throw new Error("Basic response was empty")
     })
     await check("streaming", async () => {
+      const errors: unknown[] = []
       const stream = streamText({
         model,
         prompt: "Reply with OK.",
         maxOutputTokens: 8,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(15_000),
-        onError() {},
+        onError({ error }) {
+          errors.push(error)
+        },
       })
       const chunks: string[] = []
       for await (const chunk of stream.textStream) chunks.push(chunk)
+      if (errors.length) throw errors[0]
       if (!chunks.join("").trim()) throw new Error("Streaming response was empty")
     })
     if (checkToolCall) {

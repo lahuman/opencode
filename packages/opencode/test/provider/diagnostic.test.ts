@@ -16,7 +16,7 @@ import { resetDatabase } from "../fixture/db"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, request } from "../server/httpapi-layer"
 
-type Mode = "pass" | "auth" | "stream" | "tool"
+type Mode = "pass" | "auth" | "stream" | "partial-stream" | "stream-auth" | "tool"
 type RequestBody = { stream?: boolean; tools?: unknown }
 
 const endpointRequests: Headers[] = []
@@ -65,6 +65,28 @@ describe("provider diagnostics", () => {
     expect(ProviderDiagnostic.classify({ message: "Tool call was not returned", stage: "toolCall" })).toBe("tool_call")
   })
 
+  test("classifies structured transport codes before generic API wrappers", () => {
+    for (const code of ["FailedToOpenSocket", "ConnectionRefused", "ECONNREFUSED"]) {
+      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("connection")
+    }
+    for (const code of ["ENOTFOUND", "EAI_AGAIN"]) {
+      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("dns")
+    }
+    for (const code of ["CERT_AUTHORITY_INVALID", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"]) {
+      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("tls")
+    }
+    for (const code of ["ETIMEDOUT", "ABORT_ERR"]) {
+      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("timeout")
+    }
+    expect(ProviderDiagnostic.classify({ message: "Cannot connect to API" })).toBe("connection")
+    expect(
+      ProviderDiagnostic.classify({ statusCode: 401, message: "Cannot connect to API", codes: ["ENOTFOUND"] }),
+    ).toBe("auth")
+    expect(
+      ProviderDiagnostic.classify({ message: "model not found; Cannot connect to API", codes: ["ENOTFOUND"] }),
+    ).toBe("model")
+  })
+
   test("checks basic response and streaming through the real adapter", async () => {
     using server = diagnosticServer("pass")
     const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "test" })
@@ -87,6 +109,29 @@ describe("provider diagnostics", () => {
       ok: true,
       checks: { basic: "pass", streaming: "pass", toolCall: "pass" },
     })
+  })
+
+  test("classifies a real adapter request to a closed Bun port as connection failure", async () => {
+    using server = diagnosticServer("pass")
+    const baseURL = `${server.url}v1`
+    await server.stop(true)
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL, apiKey: "closed-port-secret" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), false)
+    const serialized = JSON.stringify(Schema.encodeSync(ProviderDiagnostic.Result)(result))
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+      failure: {
+        kind: "connection",
+        message: "Cannot reach the Company LLM endpoint. Check the service and network route.",
+      },
+    })
+    expect(serialized).not.toContain(baseURL)
+    expect(serialized).not.toContain("closed-port-secret")
+    expect(serialized).not.toContain("FailedToOpenSocket")
+    expect(serialized).not.toContain("Cannot connect to API")
   })
 
   test("returns only a fixed safe message and skips later checks after basic failure", async () => {
@@ -128,6 +173,42 @@ describe("provider diagnostics", () => {
         message: "The endpoint did not return a compatible streaming response.",
       },
     })
+  })
+
+  test("fails streaming when an SSE error follows partial text", async () => {
+    using server = diagnosticServer("partial-stream")
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "test" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), true)
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "fail", toolCall: "skipped" },
+      failure: {
+        kind: "stream",
+        message: "The endpoint did not return a compatible streaming response.",
+      },
+    })
+  })
+
+  test("preserves streaming HTTP auth failures without exposing raw response details", async () => {
+    using server = diagnosticServer("stream-auth")
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "stream-secret" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), true)
+    const serialized = JSON.stringify(Schema.encodeSync(ProviderDiagnostic.Result)(result))
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "fail", toolCall: "skipped" },
+      failure: {
+        kind: "auth",
+        message: "Authentication failed (HTTP 401/403). Update the stored company credentials.",
+      },
+    })
+    expect(serialized).not.toContain("stream-secret")
+    expect(serialized).not.toContain("STREAM_RAW_RESPONSE_BODY")
+    expect(serialized).not.toContain("stream-secret-header")
   })
 
   test("marks tool-call failure after passing basic and streaming checks", async () => {
@@ -241,6 +322,12 @@ function diagnosticServer(mode: Mode, headers: Headers[] = []) {
     async fetch(request) {
       headers.push(request.headers)
       const body = (await request.json()) as RequestBody
+      if (mode === "stream-auth" && body.stream) {
+        return Response.json(
+          { error: { message: "STREAM_RAW_RESPONSE_BODY", type: "stream-secret-header" } },
+          { status: 401, headers: { "x-secret-response-header": "stream-secret-header" } },
+        )
+      }
       if (mode === "auth") {
         return Response.json(
           {
@@ -257,6 +344,9 @@ function diagnosticServer(mode: Mode, headers: Headers[] = []) {
           return new Response("data: not-json\n\ndata: [DONE]\n\n", {
             headers: { "content-type": "text/event-stream" },
           })
+        }
+        if (mode === "partial-stream") {
+          return new Response(partialStreamResponse(), { headers: { "content-type": "text/event-stream" } })
         }
         return new Response(streamResponse(), { headers: { "content-type": "text/event-stream" } })
       }
@@ -308,6 +398,15 @@ function streamResponse() {
   return [
     'data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1,"model":"company-code","choices":[{"index":0,"delta":{"content":"O"},"finish_reason":null}]}',
     'data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1,"model":"company-code","choices":[{"index":0,"delta":{"content":"K"},"finish_reason":"stop"}]}',
+    "data: [DONE]",
+    "",
+  ].join("\n\n")
+}
+
+function partialStreamResponse() {
+  return [
+    'data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":1,"model":"company-code","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}',
+    "data: not-json",
     "data: [DONE]",
     "",
   ].join("\n\n")
