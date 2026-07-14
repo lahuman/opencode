@@ -33,3 +33,14 @@ export function createSidecarEnv(overrides: Record<string, string> = {}, runtime
 export function createSidecarStartCommand(input: StartInput) {
   return { type: "start" as const, ...input }
 }
+
+export function postSidecarStartCommand(
+  input: Omit<StartInput, "credentials">,
+  owner: Pick<StartInput, "credentials">,
+  postMessage: (command: ReturnType<typeof createSidecarStartCommand>) => void,
+) {
+  const command = createSidecarStartCommand({ ...input, credentials: owner.credentials })
+  postMessage(command)
+  owner.credentials = undefined
+  command.credentials = undefined
+}
