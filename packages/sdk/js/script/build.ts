@@ -119,7 +119,7 @@ const historySdkPatched = diagnosticSdkPatched.replace(
   /(Get session history[\s\S]*?parameters: \{\s*sessionID: string[;,]\s*limit\?: )string([;,]\s*after\?: )string/,
   "$1number$2number",
 )
-if (historySdkPatched === generatedSdk) {
+if (historySdkPatched === diagnosticSdkPatched) {
   throw new Error("Session history numeric SDK patch did not apply")
 }
 await Bun.write("./src/v2/gen/sdk.gen.ts", historySdkPatched)
