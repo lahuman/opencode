@@ -23,7 +23,8 @@ test("returns only normalized non-secret enterprise build metadata", () => {
       OPENCODE_ENTERPRISE_MODEL_NAME: "  Company Code  ",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "  pilot-1  ",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "  guide-1  ",
-      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "  https://LLM.corp.example:443/path, http://localhost:3000/ignored  ",
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
+        "  https://LLM.corp.example:443/, http://localhost:3000/, https://llm.corp.example  ",
       OPENAI_API_KEY: "set",
       OPENCODE_ENTERPRISE_SECRET_HEADERS: "set",
     }),
@@ -96,6 +97,24 @@ test("rejects malformed base URLs without exposing parser input or native errors
   expect(message).not.toContain("Invalid URL")
 })
 
+test("rejects base URL query and fragment markers without returning or exposing them", () => {
+  for (const baseURL of [
+    "https://llm.corp.example/v1?api_key=query-secret-marker",
+    "https://llm.corp.example/v1#fragment-secret-marker",
+  ]) {
+    const message = errorMessage(() =>
+      validateEnterpriseBuild({
+        ...valid,
+        OPENCODE_ENTERPRISE_BASE_URL: baseURL,
+      }),
+    )
+
+    expect(message).toBe("OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment")
+    expect(message).not.toContain("query-secret-marker")
+    expect(message).not.toContain("fragment-secret-marker")
+  }
+})
+
 test("rejects non-HTTP, credentialed, and malformed allowed origins with generic safe errors", () => {
   expect(
     errorMessage(() =>
@@ -124,6 +143,26 @@ test("rejects non-HTTP, credentialed, and malformed allowed origins with generic
   expect(message).toBe("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs")
   expect(message).not.toContain("parser-marker")
   expect(message).not.toContain("Invalid URL")
+})
+
+test("rejects allowed-origin paths, queries, and fragments with fixed input-free errors", () => {
+  for (const origin of [
+    "https://llm.corp.example/v1/path-secret-marker",
+    "https://llm.corp.example/?key=query-secret-marker",
+    "https://llm.corp.example/#fragment-secret-marker",
+  ]) {
+    const message = errorMessage(() =>
+      validateEnterpriseBuild({
+        ...valid,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: origin,
+      }),
+    )
+
+    expect(message).toBe("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins")
+    expect(message).not.toContain("path-secret-marker")
+    expect(message).not.toContain("query-secret-marker")
+    expect(message).not.toContain("fragment-secret-marker")
+  }
 })
 
 function errorMessage(run: () => unknown) {

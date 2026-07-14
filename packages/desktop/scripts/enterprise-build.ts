@@ -8,18 +8,18 @@ export function validateEnterpriseBuild(env: Env) {
     "OPENCODE_ENTERPRISE_BASE_URL",
     "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL",
   )
-  const allowedOrigins = requireValue(env, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map(
-      (value) =>
-        parseHTTPURL(
-          value,
-          "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
-          "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs",
-        ).origin,
-    )
+  if (base.search || base.hash) {
+    throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment")
+  }
+  const allowedOrigins = Array.from(
+    new Set(
+      requireValue(env, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value) => parseAllowedOrigin(value).origin),
+    ),
+  )
 
   if (!allowedOrigins.includes(base.origin)) {
     throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must include the OPENCODE_ENTERPRISE_BASE_URL origin")
@@ -50,5 +50,17 @@ function parseHTTPURL(value: string, key: string, invalid: string) {
   const url = new URL(value)
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(invalid)
   if (url.username || url.password) throw new Error(`${key} must not contain credentials`)
+  return url
+}
+
+function parseAllowedOrigin(value: string) {
+  const url = parseHTTPURL(
+    value,
+    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
+    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs",
+  )
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins")
+  }
   return url
 }

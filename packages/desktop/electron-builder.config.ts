@@ -6,6 +6,7 @@ import { promisify } from "node:util"
 import type { Configuration } from "electron-builder"
 
 import { validateEnterpriseBuild } from "./scripts/enterprise-build"
+import { stageEnterpriseCertificate } from "./scripts/enterprise-certificate"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
@@ -114,32 +115,7 @@ const getBase = (appId: string): Configuration => ({
 })
 
 function getConfig() {
-  if (enterprise) {
-    validateEnterpriseBuild(process.env)
-
-    const appId = "com.company.opencode.pilot"
-    const base = getBase(appId)
-    return {
-      ...base,
-      appId,
-      productName: "Company OpenCode Pilot",
-      artifactName: "company-opencode-pilot-${os}-${arch}.${ext}",
-      protocols: undefined,
-      win: {
-        ...base.win,
-        target: ["nsis"],
-        signtoolOptions: undefined,
-      },
-      extraResources: [
-        ...(Array.isArray(base.extraResources)
-          ? base.extraResources
-          : base.extraResources
-            ? [base.extraResources]
-            : []),
-        { from: "../../LICENSE", to: "licenses/OpenCode-LICENSE" },
-      ],
-    } satisfies Configuration
-  }
+  if (enterprise) return getEnterpriseConfig()
 
   const appId = APP_IDS[channel]
   const base = getBase(appId)
@@ -175,6 +151,31 @@ function getConfig() {
       }
     }
   }
+  throw new Error("Unsupported release channel")
+}
+
+async function getEnterpriseConfig() {
+  validateEnterpriseBuild(process.env)
+  const certificate = await stageEnterpriseCertificate(process.env)
+  const appId = "com.company.opencode.pilot"
+  const base = getBase(appId)
+  return {
+    ...base,
+    appId,
+    productName: "Company OpenCode Pilot",
+    artifactName: "company-opencode-pilot-${os}-${arch}.${ext}",
+    protocols: undefined,
+    beforePack: certificate.beforePack,
+    win: {
+      ...base.win,
+      target: ["nsis"],
+      signtoolOptions: undefined,
+    },
+    extraResources: [
+      ...(Array.isArray(base.extraResources) ? base.extraResources : base.extraResources ? [base.extraResources] : []),
+      { from: "../../LICENSE", to: "licenses/OpenCode-LICENSE" },
+    ],
+  } satisfies Configuration
 }
 
 export default getConfig()

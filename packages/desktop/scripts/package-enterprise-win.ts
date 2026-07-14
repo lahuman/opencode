@@ -1,6 +1,7 @@
 import path from "node:path"
 
 import { validateEnterpriseBuild } from "./enterprise-build"
+import { stageEnterpriseCertificate } from "./enterprise-certificate"
 
 type Env = Record<string, string | undefined>
 type Spawn = (
@@ -12,22 +13,34 @@ type Spawn = (
     stderr: "inherit"
   },
 ) => { exited: Promise<number> }
+type Stage = (env: Env) => Promise<{ cleanup: () => Promise<void> }>
 
-export async function runEnterpriseWindowsPackage(input: { platform: string; arch: string; env: Env; spawn: Spawn }) {
+export async function runEnterpriseWindowsPackage(input: {
+  platform: string
+  arch: string
+  env: Env
+  spawn: Spawn
+  stage: Stage
+}) {
   if (input.platform !== "win32") throw new Error("Enterprise pilot packaging must run on Windows x64")
   if (input.arch !== "x64") throw new Error("Enterprise pilot packaging requires Windows x64")
 
   validateEnterpriseBuild(input.env)
+  const certificate = await input.stage(input.env)
 
-  const options = {
-    cwd: path.resolve(import.meta.dir, ".."),
-    env: input.env,
-    stdout: "inherit" as const,
-    stderr: "inherit" as const,
+  try {
+    const options = {
+      cwd: path.resolve(import.meta.dir, ".."),
+      env: input.env,
+      stdout: "inherit" as const,
+      stderr: "inherit" as const,
+    }
+    const buildCode = await input.spawn(["bun", "run", "build"], options).exited
+    if (buildCode !== 0) return buildCode
+    return await input.spawn(["bun", "run", "package:win", "--x64"], options).exited
+  } finally {
+    await certificate.cleanup()
   }
-  const buildCode = await input.spawn(["bun", "run", "build"], options).exited
-  if (buildCode !== 0) return buildCode
-  return input.spawn(["bun", "run", "package:win", "--x64"], options).exited
 }
 
 if (import.meta.main) {
@@ -35,6 +48,7 @@ if (import.meta.main) {
     platform: process.platform,
     arch: process.arch,
     env: process.env,
+    stage: stageEnterpriseCertificate,
     spawn: (command, options) => Bun.spawn(command, options),
   })
   if (code !== 0) process.exit(code)
