@@ -2,6 +2,7 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import * as Sentry from "@sentry/solid"
 import { Logo } from "@opencode-ai/ui/logo"
 import { Button } from "@opencode-ai/ui/button"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Component, createSignal, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
@@ -9,7 +10,12 @@ import { useLanguage } from "@/context/language"
 import { Icon } from "@opencode-ai/ui/icon"
 import { errorDescriptionKey } from "./error-description"
 import { useCommand } from "@/context/command"
-import { openEditionHelp } from "@/components/dialog-company-guide"
+import {
+  createCompanyGuideCommand,
+  DialogCompanyGuide,
+  openEditionHelp,
+  restoreCompanyGuideFocus,
+} from "@/components/dialog-company-guide"
 
 export type InitError = {
   name: string
@@ -223,6 +229,7 @@ interface ErrorPageProps {
 
 export const ErrorPage: Component<ErrorPageProps> = (props) => {
   const platform = usePlatform()
+  const dialog = useDialog()
   // The top-level error boundary can render after CommandProvider has unmounted.
   const command = (() => {
     try {
@@ -237,6 +244,18 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
   const [store, setStore] = createStore({
     actionError: undefined as string | undefined,
   })
+  const companyGuide = createCompanyGuideCommand({
+    enterprise: platform.enterprise,
+    category: language.t("command.category.settings"),
+    open: (guide, origin) =>
+      dialog.show(() => <DialogCompanyGuide {...guide} />, () => restoreCompanyGuideFocus(origin)),
+    reportFailure: () => setStore("actionError", language.t("common.requestFailed")),
+  })
+
+  function openCompanyGuide(origin: HTMLElement) {
+    if (command) return command.trigger("company.guide.open", undefined, origin)
+    void companyGuide?.onSelect?.(undefined, origin)
+  }
 
   function ensureFatalErrorRecorded() {
     recordedFatalError ??=
@@ -382,17 +401,15 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
               </div>
             }
           >
-            <Show when={command}>
-              <button
-                type="button"
-                class="flex items-center text-text-interactive-base gap-1"
-                aria-label="Open Company AI Guide"
-                onClick={() => command?.trigger("company.guide.open")}
-              >
-                <div>Company AI Guide</div>
-                <Icon name="help" class="text-text-interactive-base" />
-              </button>
-            </Show>
+            <button
+              type="button"
+              class="flex items-center text-text-interactive-base gap-1"
+              aria-label="Open Company AI Guide"
+              onClick={(event) => openCompanyGuide(event.currentTarget)}
+            >
+              <div>Company AI Guide</div>
+              <Icon name="help" class="text-text-interactive-base" />
+            </button>
           </Show>
           <Show when={platform.version}>
             {(version) => (

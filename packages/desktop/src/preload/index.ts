@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
-import { createEnterpriseAPI, exposeElectronAPI, type ElectronAPI, type WslServersEvent } from "./types"
+import { createEnterpriseAPI, type ElectronAPI, type WslServersEvent } from "./types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import { ENTERPRISE_ENABLED } from "../enterprise"
 
@@ -124,4 +124,4 @@ const api: ElectronAPI = {
   recordFatalRendererError: (error) => ipcRenderer.invoke("record-fatal-renderer-error", error),
 }
 
-exposeElectronAPI((key, value) => contextBridge.exposeInMainWorld(key, value), api)
+contextBridge.exposeInMainWorld("api", api)

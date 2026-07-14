@@ -58,7 +58,11 @@ import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
 import { NewHome, LegacyHome } from "@/pages/home"
-import { createCompanyGuideCommand, DialogCompanyGuide } from "@/components/dialog-company-guide"
+import {
+  createCompanyGuideCommand,
+  DialogCompanyGuide,
+  restoreCompanyGuideFocus,
+} from "@/components/dialog-company-guide"
 import { showToast } from "@/utils/toast"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
@@ -285,7 +289,7 @@ function SharedProviders(props: ParentProps) {
   )
 }
 
-function DesktopCommands() {
+export function DesktopCommands() {
   const command = useCommand()
   const dialog = useDialog()
   const language = useLanguage()
@@ -306,7 +310,8 @@ function DesktopCommands() {
     const companyGuide = createCompanyGuideCommand({
       enterprise: platform.enterprise,
       category: language.t("command.category.settings"),
-      open: (guide) => dialog.show(() => <DialogCompanyGuide {...guide} />),
+      open: (guide, origin) =>
+        dialog.show(() => <DialogCompanyGuide {...guide} />, () => restoreCompanyGuideFocus(origin)),
       reportFailure: () => showToast({ title: language.t("common.requestFailed") }),
     })
     if (companyGuide) commands.push(companyGuide)
@@ -383,22 +388,22 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
       >
         <LanguageProvider locale={props.locale}>
           <UiI18nBridge>
-            <ErrorBoundary
-              fallback={(error) => {
-                Sentry.captureException(error)
-                return <ErrorPage error={error} />
-              }}
-            >
-              <QueryProvider>
-                <WslServersProvider>
-                  <DialogProvider>
-                    <MarkedProvider>
-                      <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                    </MarkedProvider>
-                  </DialogProvider>
-                </WslServersProvider>
-              </QueryProvider>
-            </ErrorBoundary>
+            <DialogProvider>
+              <MarkedProvider>
+                <FileComponentProvider component={File}>
+                  <ErrorBoundary
+                    fallback={(error) => {
+                      Sentry.captureException(error)
+                      return <ErrorPage error={error} />
+                    }}
+                  >
+                    <QueryProvider>
+                      <WslServersProvider>{props.children}</WslServersProvider>
+                    </QueryProvider>
+                  </ErrorBoundary>
+                </FileComponentProvider>
+              </MarkedProvider>
+            </DialogProvider>
           </UiI18nBridge>
         </LanguageProvider>
       </ThemeProvider>

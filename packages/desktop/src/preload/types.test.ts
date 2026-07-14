@@ -1,22 +1,26 @@
 import { expect, test } from "bun:test"
-import { createEnterpriseAPI, exposeElectronAPI, mapEnterpriseAPI, type ElectronAPI } from "./types"
+import { createEnterpriseAPI, mapEnterpriseAPI } from "./types"
 
-test("exposes enterprise guide reads through the preload entrypoint", async () => {
-  const invocations: string[] = []
-  const exposed = new Map<string, { enterprise: ElectronAPI["enterprise"] }>()
-  const enterprise = createEnterpriseAPI(true, (channel) => {
-    invocations.push(channel)
-    return Promise.resolve({ version: "2026.08", markdown: "# Exposed guide" })
+test("the preload entrypoint exposes the concrete API with enterprise guide wiring", async () => {
+  const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/preload-entrypoint.ts`], {
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
 
-  exposeElectronAPI((key, value) => exposed.set(key, value), { enterprise })
-
-  await expect(exposed.get("api")?.enterprise.readGuide()).resolves.toEqual({
-    version: "2026.08",
-    markdown: "# Exposed guide",
-  })
-  expect([...exposed.keys()]).toEqual(["api"])
-  expect(invocations).toEqual(["enterprise-guide-read"])
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  expect(stdout.trim()).toBe(
+    JSON.stringify({
+      key: "api",
+      guide: { version: "2026.08", markdown: "# Concrete guide" },
+      invocations: [{ channel: "enterprise-guide-read", args: [] }],
+    }),
+  )
 })
 
 test("maps enterprise guide reads to the main IPC channel", async () => {

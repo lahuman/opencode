@@ -112,10 +112,6 @@ export type ElectronAPI = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
 }
 
-export function exposeElectronAPI<T>(expose: (key: string, api: T) => void, api: T) {
-  expose("api", api)
-}
-
 export function createEnterpriseAPI(
   enabled: boolean,
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,

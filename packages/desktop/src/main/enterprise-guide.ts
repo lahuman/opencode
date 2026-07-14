@@ -15,10 +15,3 @@ export async function readEnterpriseGuide(input: EnterpriseGuideConfig) {
     markdown,
   }
 }
-
-export function registerEnterpriseGuideIpc(
-  register: (channel: string, handler: () => unknown) => void,
-  guide: EnterpriseGuideConfig,
-) {
-  register("enterprise-guide-read", () => readEnterpriseGuide(guide))
-}

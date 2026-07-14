@@ -6,9 +6,9 @@ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
+import { AppBaseProviders, DesktopCommands } from "@/app"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/components/dialog-connect-provider"
-import { createCompanyGuideCommand, DialogCompanyGuide } from "@/components/dialog-company-guide"
 import { useServerManagementController } from "@/components/dialog-select-server"
 import { WindowsAppMenu } from "@/components/windows-app-menu"
 import { CommandProvider, useCommand } from "@/context/command"
@@ -20,7 +20,6 @@ import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider } from "@/context/server-sync"
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs } from "@/context/tabs"
-import { ErrorPage } from "@/pages/error"
 import { ToastRegion } from "@/utils/toast"
 import { useServerHealth } from "@/utils/server-health"
 
@@ -501,24 +500,6 @@ function GuideMenu() {
   )
 }
 
-function CompanyGuideCommands() {
-  const command = useCommand()
-  const dialog = useDialog()
-  const platform = usePlatform()
-
-  command.register("company-guide-fixture", () => {
-    const guide = createCompanyGuideCommand({
-      enterprise: platform.enterprise,
-      category: "Settings",
-      open: (value) => dialog.show(() => <DialogCompanyGuide {...value} />),
-      reportFailure() {},
-    })
-    return guide ? [guide] : []
-  })
-
-  return null
-}
-
 function CompanyGuideTree(props: ParentProps<{ harness: Harness; platform?: Platform }>) {
   return (
     <ServerTree harness={props.harness} platform={props.platform}>
@@ -528,7 +509,7 @@ function CompanyGuideTree(props: ParentProps<{ harness: Harness; platform?: Plat
             <SettingsProvider>
               <CommandProvider>
                 <MarkedProvider>
-                  <CompanyGuideCommands />
+                  <DesktopCommands />
                   {props.children}
                 </MarkedProvider>
               </CommandProvider>
@@ -544,12 +525,18 @@ function ErrorScenario(props: { harness: Harness; enterprise: boolean }) {
   const platform = props.enterprise ? props.harness.platform : { ...props.harness.platform, enterprise: undefined }
   return (
     <>
-      <CompanyGuideTree harness={props.harness} platform={platform}>
-        <ErrorPage error={new Error("Fixture failure")} />
-      </CompanyGuideTree>
+      <PlatformProvider value={platform}>
+        <AppBaseProviders locale="en">
+          <TopLevelFailure />
+        </AppBaseProviders>
+      </PlatformProvider>
       <Observations harness={props.harness} />
     </>
   )
+}
+
+function TopLevelFailure(): JSX.Element {
+  throw new Error("Fixture top-level failure")
 }
 
 function SettingsDiagnosticConsumer() {

@@ -20,10 +20,12 @@ export function WindowsAppMenu(props: {
   variant?: "legacy" | "v2"
 }) {
   let lastFocused: HTMLElement | undefined
+  let commandOrigin: HTMLElement | undefined
 
-  const rememberFocus = () => {
+  const rememberFocus = (event: Event) => {
     const active = document.activeElement
     lastFocused = active instanceof HTMLElement ? active : undefined
+    commandOrigin = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined
   }
   const commandDisabled = (id: string) => {
     const option = props.command.options.find((option) => option.id === id)
@@ -32,7 +34,7 @@ export function WindowsAppMenu(props: {
   }
   const runCommand = (id: string) => {
     if (commandDisabled(id)) return
-    props.command.trigger(id)
+    props.command.trigger(id, undefined, commandOrigin)
   }
   const runAction = (action: DesktopMenuAction) => {
     if (action.startsWith("edit.") && lastFocused?.isConnected) lastFocused.focus({ preventScroll: true })

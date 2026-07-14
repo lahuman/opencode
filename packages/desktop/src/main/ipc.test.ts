@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { readEnterpriseGuide, registerEnterpriseGuideIpc } from "./enterprise-guide"
+import { readEnterpriseGuide } from "./enterprise-guide"
 
 const directories: string[] = []
 
@@ -30,24 +30,25 @@ describe("enterprise guide IPC", () => {
     expect(Object.keys(guide)).toEqual(["version", "markdown"])
   })
 
-  test("registers and dispatches the enterprise guide read handler", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "enterprise-guide-"))
-    directories.push(directory)
-    const path = join(directory, "company-guide.md")
-    await writeFile(path, "# Registered guide\n", "utf8")
-    const handlers = new Map<string, () => unknown>()
-
-    registerEnterpriseGuideIpc((channel, handler) => handlers.set(channel, handler), {
-      enabled: true,
-      path,
-      version: "2026.08",
+  test("registerIpcHandlers registers and dispatches the enterprise guide read handler", async () => {
+    const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/ipc-entrypoint.ts`], {
+      stdout: "pipe",
+      stderr: "pipe",
     })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
 
-    expect([...handlers.keys()]).toEqual(["enterprise-guide-read"])
-    await expect(Promise.resolve(handlers.get("enterprise-guide-read")?.())).resolves.toEqual({
-      version: "2026.08",
-      markdown: "# Registered guide\n",
-    })
+    expect(stderr).toBe("")
+    expect(exitCode).toBe(0)
+    expect(stdout.trim()).toBe(
+      JSON.stringify({
+        registered: true,
+        guide: { version: "2026.08", markdown: "# Registered guide\n" },
+      }),
+    )
   })
 
   test("rejects read failures without exposing the resolved guide path", async () => {

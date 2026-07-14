@@ -26,6 +26,12 @@ async function invokeFixtureControl(page: Page, name: string) {
   await button.evaluate((node: HTMLButtonElement) => node.click())
 }
 
+async function openCompanyGuideFromMenu(page: Page) {
+  await page.getByRole("button", { name: "OpenCode menu" }).click()
+  await page.getByRole("menuitem", { name: "Help" }).hover()
+  await page.getByRole("menuitem", { name: "Company AI Guide" }).click()
+}
+
 test("mounted ServerProvider excludes persisted remotes before health polling", async ({ page }) => {
   await page.goto(fixture("server"))
 
@@ -213,13 +219,26 @@ test("public fatal error preserves the localized Discord reporting action", asyn
   await expect.poll(() => output<string[]>(page, "external-links")).toEqual(["https://opencode.ai/desktop-feedback"])
 })
 
+test("Company AI Guide restores the Windows menu trigger after both close paths", async ({ page }) => {
+  await page.goto(fixture("guide"))
+  const trigger = page.getByRole("button", { name: "OpenCode menu" })
+
+  await openCompanyGuideFromMenu(page)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await expect(trigger).toBeFocused()
+
+  await openCompanyGuideFromMenu(page)
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click()
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await expect(trigger).toBeFocused()
+})
+
 responsiveViewports.forEach((viewport) => {
   test(`Company AI Guide dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(fixture("guide"))
-    await page.getByRole("button", { name: "OpenCode menu" }).click()
-    await page.getByRole("menuitem", { name: "Help" }).hover()
-    await page.getByRole("menuitem", { name: "Company AI Guide" }).click()
+    await openCompanyGuideFromMenu(page)
 
     const dialog = page.getByRole("dialog")
     const body = dialog.getByRole("region", { name: "Company AI Guide content" })

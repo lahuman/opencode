@@ -26,7 +26,7 @@ export function openEditionHelp(input: {
 export function createCompanyGuideCommand(input: {
   enterprise: Platform["enterprise"]
   category: string
-  open: (guide: CompanyGuide) => void
+  open: (guide: CompanyGuide, origin?: HTMLElement) => void
   reportFailure: () => void
 }): CommandOption | undefined {
   if (!input.enterprise) return
@@ -34,12 +34,20 @@ export function createCompanyGuideCommand(input: {
     id: "company.guide.open",
     title: "Company AI Guide",
     category: input.category,
-    onSelect: async () => {
+    onSelect: async (_source, origin) => {
       const guide = await input.enterprise?.readGuide().catch(() => undefined)
       if (!guide) return input.reportFailure()
-      input.open(guide)
+      input.open(guide, origin)
     },
   }
+}
+
+export function restoreCompanyGuideFocus(origin?: HTMLElement) {
+  requestAnimationFrame(() => {
+    if (!origin?.isConnected) return
+    if (origin.matches(":disabled, [aria-disabled='true']")) return
+    origin.focus()
+  })
 }
 
 export function DialogCompanyGuide(props: CompanyGuide) {

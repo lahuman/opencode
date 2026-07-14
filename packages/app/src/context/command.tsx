@@ -83,7 +83,7 @@ export interface CommandOption {
   disabled?: boolean
   hidden?: boolean
   when?: (event: KeyboardEvent) => boolean
-  onSelect?: (source?: "palette" | "keybind" | "slash") => void
+  onSelect?: (source?: "palette" | "keybind" | "slash", origin?: HTMLElement) => void
   onHighlight?: () => (() => void) | void
 }
 
@@ -369,9 +369,9 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
       return map
     })
 
-    const run = (id: string, source?: CommandSource) => {
+    const run = (id: string, source?: CommandSource, origin?: HTMLElement) => {
       const option = optionMap().get(id)
-      option?.onSelect?.(source)
+      option?.onSelect?.(source, origin)
     }
 
     const showPalette = () => {
@@ -432,8 +432,8 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
 
     return {
       register,
-      trigger(id: string, source?: CommandSource) {
-        run(id, source)
+      trigger(id: string, source?: CommandSource, origin?: HTMLElement) {
+        run(id, source, origin)
       },
       keybind(id: string) {
         const config = keybindConfig(id)
