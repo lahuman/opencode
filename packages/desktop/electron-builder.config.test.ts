@@ -46,3 +46,25 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   expect(desktop).toContain("StartupWMClass=ai.opencode.desktop")
   expect(desktop).toContain("NoDisplay=true")
 })
+
+test("packages enterprise defaults and guide beside app.asar", async () => {
+  const module = await import("./electron-builder.config.ts?enterprise=resources")
+  const config = module.default as Configuration
+
+  expect(config.extraResources).toContainEqual({
+    from: "resources/enterprise",
+    to: "enterprise",
+  })
+  expect(config.extraResources).toContainEqual(
+    expect.objectContaining({
+      from: "native/",
+      to: "native/",
+    }),
+  )
+  expect(config.extraResources).toHaveLength(2)
+  expect(
+    await Promise.all(
+      ["opencode.jsonc", "company-guide.md"].map((file) => Bun.file(`resources/enterprise/${file}`).exists()),
+    ),
+  ).toEqual([true, true])
+})
