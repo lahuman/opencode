@@ -56,26 +56,39 @@ describe("provider diagnostics", () => {
     expect(ProviderDiagnostic.classify({ statusCode: 401, message: "Unauthorized" })).toBe("auth")
     expect(ProviderDiagnostic.classify({ statusCode: 403, message: "Forbidden" })).toBe("auth")
     expect(ProviderDiagnostic.classify({ statusCode: 404, message: "model not found" })).toBe("model")
-    expect(ProviderDiagnostic.classify({ message: "fetch failed: ENOTFOUND llm.corp" })).toBe("dns")
-    expect(ProviderDiagnostic.classify({ message: "CERT_AUTHORITY_INVALID" })).toBe("tls")
+    expect(ProviderDiagnostic.classify({ message: "fetch failed", codes: ["ENOTFOUND"] })).toBe("dns")
+    expect(ProviderDiagnostic.classify({ message: "TLS failed", codes: ["CERT_AUTHORITY_INVALID"] })).toBe("tls")
     expect(ProviderDiagnostic.classify({ message: "request timed out" })).toBe("timeout")
-    expect(ProviderDiagnostic.classify({ message: "ECONNREFUSED" })).toBe("connection")
+    expect(ProviderDiagnostic.classify({ message: "Cannot connect to API" })).toBe("connection")
     expect(ProviderDiagnostic.classify({ message: "invalid JSON response" })).toBe("response")
     expect(ProviderDiagnostic.classify({ message: "invalid stream chunk", stage: "streaming" })).toBe("stream")
     expect(ProviderDiagnostic.classify({ message: "Tool call was not returned", stage: "toolCall" })).toBe("tool_call")
   })
 
   test("classifies structured transport codes before generic API wrappers", () => {
-    for (const code of ["FailedToOpenSocket", "ConnectionRefused", "ECONNREFUSED"]) {
+    for (const code of [
+      "FailedToOpenSocket",
+      "ConnectionRefused",
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "EPIPE",
+    ]) {
       expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("connection")
     }
     for (const code of ["ENOTFOUND", "EAI_AGAIN"]) {
       expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("dns")
     }
-    for (const code of ["CERT_AUTHORITY_INVALID", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"]) {
+    for (const code of [
+      "CERT_AUTHORITY_INVALID",
+      "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "DEPTH_ZERO_SELF_SIGNED_CERT",
+      "ERR_TLS_CERT_ALTNAME_INVALID",
+    ]) {
       expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("tls")
     }
-    for (const code of ["ETIMEDOUT", "ABORT_ERR"]) {
+    for (const code of ["ETIMEDOUT", "ABORT_ERR", "AbortError", "TimeoutError", "UND_ERR_CONNECT_TIMEOUT"]) {
       expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("timeout")
     }
     expect(ProviderDiagnostic.classify({ message: "Cannot connect to API" })).toBe("connection")
@@ -85,6 +98,30 @@ describe("provider diagnostics", () => {
     expect(
       ProviderDiagnostic.classify({ message: "model not found; Cannot connect to API", codes: ["ENOTFOUND"] }),
     ).toBe("model")
+  })
+
+  test("uses exact transport codes and timeout statuses without matching provider policy text", () => {
+    expect(ProviderDiagnostic.classify({ message: "Tool execution aborted by model policy", stage: "streaming" })).toBe(
+      "stream",
+    )
+    expect(ProviderDiagnostic.classify({ message: "Tool execution aborted by model policy" })).toBe("response")
+    expect(ProviderDiagnostic.classify({ statusCode: 408, message: "", stage: "streaming" })).toBe("timeout")
+    expect(ProviderDiagnostic.classify({ statusCode: 504, message: "", stage: "streaming" })).toBe("timeout")
+
+    for (const code of [
+      "PROVIDER_ABORTED_BY_POLICY",
+      "NOT_ETIMEDOUT",
+      "ENOTFOUND_POLICY",
+      "CERT_AUTHORITY_INVALID_POLICY",
+      "ECONNREFUSED_BY_POLICY",
+    ]) {
+      expect(ProviderDiagnostic.classify({ message: "provider policy", codes: [code], stage: "streaming" }), code).toBe(
+        "stream",
+      )
+    }
+    expect(ProviderDiagnostic.classify({ message: "provider policy", codes: [" econnrefused "] })).toBe("connection")
+    expect(ProviderDiagnostic.classify({ statusCode: 401, message: "", codes: ["ABORT_ERR"] })).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 504, message: "model not found" })).toBe("model")
   })
 
   test("checks basic response and streaming through the real adapter", async () => {

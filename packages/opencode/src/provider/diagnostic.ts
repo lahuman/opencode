@@ -43,6 +43,47 @@ export const Result = Schema.Struct({
 type Stage = "basic" | "streaming" | "toolCall"
 type ProbeError = { stage: Stage; cause: unknown }
 
+const connectionCodes = new Set([
+  "FAILEDTOOPENSOCKET",
+  "CONNECTIONREFUSED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "ENETDOWN",
+  "ENETUNREACH",
+  "EHOSTDOWN",
+  "EHOSTUNREACH",
+  "UND_ERR_CONNECT",
+  "UND_ERR_SOCKET",
+])
+const dnsCodes = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "EAI_NODATA", "EAI_NONAME"])
+const tlsCodes = new Set([
+  "CERT_AUTHORITY_INVALID",
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "CERT_REVOKED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+])
+const timeoutCodes = new Set([
+  "ETIMEDOUT",
+  "ESOCKETTIMEDOUT",
+  "ECONNABORTED",
+  "ABORT_ERR",
+  "ABORTERROR",
+  "TIMEOUTERROR",
+  "ERR_OPERATION_TIMED_OUT",
+  "ERR_HTTP_REQUEST_TIMEOUT",
+  "ERR_TLS_HANDSHAKE_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+])
+
 export function classify(input: {
   statusCode?: number
   message: string
@@ -50,38 +91,17 @@ export function classify(input: {
   stage?: Stage
 }): typeof FailureKind.Type {
   const message = input.message.toLowerCase()
-  const transport = [message, ...(input.codes ?? []).map((code) => code.toLowerCase())].join(" ")
+  const codes = (input.codes ?? []).map((code) => code.trim().toUpperCase())
   if (input.statusCode === 401 || input.statusCode === 403) return "auth"
   if (message.includes("model not found") || message.includes("unknown model") || message.includes("no such model"))
     return "model"
-  if (transport.includes("enotfound") || transport.includes("eai_again")) return "dns"
-  if (
-    transport.includes("cert_") ||
-    transport.includes("certificate") ||
-    transport.includes("self signed") ||
-    transport.includes("unable_to_verify") ||
-    transport.includes("unable to verify")
-  )
-    return "tls"
-  if (
-    transport.includes("timed out") ||
-    transport.includes("timeout") ||
-    transport.includes("etimedout") ||
-    transport.includes("abort_err") ||
-    transport.includes("aborted")
-  )
-    return "timeout"
-  if (
-    transport.includes("failedtoopensocket") ||
-    transport.includes("connectionrefused") ||
-    transport.includes("econnrefused") ||
-    transport.includes("econnreset") ||
-    transport.includes("ehostunreach") ||
-    transport.includes("fetch failed") ||
-    transport.includes("socket hang up") ||
-    transport.includes("cannot connect to api")
-  )
-    return "connection"
+  if (input.statusCode === 408 || input.statusCode === 504) return "timeout"
+  if (codes.some((code) => dnsCodes.has(code))) return "dns"
+  if (codes.some((code) => tlsCodes.has(code))) return "tls"
+  if (codes.some((code) => timeoutCodes.has(code))) return "timeout"
+  if (/\brequest (?:timed out|timeout)\b/.test(message)) return "timeout"
+  if (codes.some((code) => connectionCodes.has(code))) return "connection"
+  if (message.includes("cannot connect to api")) return "connection"
   if (input.stage === "streaming") return "stream"
   if (input.stage === "toolCall") return "tool_call"
   return "response"
@@ -131,7 +151,12 @@ function failureResult(error: unknown): typeof Result.Type {
     .flatMap((item) => (item instanceof Error ? [item.message] : typeof item === "string" ? [item] : []))
     .join(" ")
   const codes = chain.flatMap((item) =>
-    item && typeof item === "object" && "code" in item && typeof item.code === "string" ? [item.code] : [],
+    item && typeof item === "object"
+      ? [
+          ...("code" in item && typeof item.code === "string" ? [item.code] : []),
+          ...(item instanceof Error ? [item.name] : []),
+        ]
+      : [],
   )
   const kind = chain.some((item) => Provider.ModelNotFoundError.isInstance(item))
     ? "model"
