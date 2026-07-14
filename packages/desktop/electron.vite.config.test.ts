@@ -15,7 +15,17 @@ function evaluateConfig(env: Record<string, string> = {}) {
       "node",
       "--input-type=module",
       "--eval",
-      'import { loadConfigFromFile } from "electron-vite"; const config = await loadConfigFromFile({ command: "build", mode: "production" }, "./electron.vite.config.ts"); if (!config) process.exitCode = 1',
+      `
+        import { loadConfigFromFile } from "electron-vite"
+        const loaded = await loadConfigFromFile(
+          { command: "build", mode: "production" },
+          "./electron.vite.config.ts",
+        )
+        process.stdout.write(JSON.stringify({
+          main: loaded.config.main?.define,
+          renderer: loaded.config.renderer?.define,
+        }))
+      `,
     ],
     {
       cwd: import.meta.dirname,
@@ -32,12 +42,35 @@ function evaluateConfig(env: Record<string, string> = {}) {
       },
     },
   )
-  return { exitCode: result.exitCode, stderr: new TextDecoder().decode(result.stderr) }
+  const stdout = new TextDecoder().decode(result.stdout)
+  return {
+    exitCode: result.exitCode,
+    stderr: new TextDecoder().decode(result.stderr),
+    ...(stdout
+      ? { defines: JSON.parse(stdout) as Record<"main" | "renderer", Record<string, string>> }
+      : {}),
+  }
 }
 
 describe("enterprise Vite configuration", () => {
   test("loads ordinary configuration through Electron Vite's Node loader", () => {
     expect(evaluateConfig().exitCode).toBe(0)
+  })
+
+  test("defines enterprise versions for main and renderer", () => {
+    expect(evaluateConfig(enabledProfile)).toMatchObject({
+      exitCode: 0,
+      defines: {
+        main: {
+          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+        },
+        renderer: {
+          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+        },
+      },
+    })
   })
 
   test("rejects a credentialed base URL before producing defines", () => {
