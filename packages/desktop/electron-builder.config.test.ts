@@ -31,8 +31,12 @@ for (const channel of channels) {
   test(`uses one Linux desktop identity for ${channel.channel}`, async () => {
     const previous = process.env.OPENCODE_CHANNEL
     const previousEnterprise = process.env.OPENCODE_ENTERPRISE
+    const previousCSCLink = process.env.CSC_LINK
+    const previousCSCKeyPassword = process.env.CSC_KEY_PASSWORD
     process.env.OPENCODE_CHANNEL = channel.channel
     process.env.OPENCODE_ENTERPRISE = "0"
+    delete process.env.CSC_LINK
+    delete process.env.CSC_KEY_PASSWORD
 
     const module = await import(`./electron-builder.config.ts?channel=${channel.channel}`)
     const config = module.default as Configuration
@@ -41,6 +45,10 @@ for (const channel of channels) {
     else process.env.OPENCODE_CHANNEL = previous
     if (previousEnterprise === undefined) delete process.env.OPENCODE_ENTERPRISE
     else process.env.OPENCODE_ENTERPRISE = previousEnterprise
+    if (previousCSCLink === undefined) delete process.env.CSC_LINK
+    else process.env.CSC_LINK = previousCSCLink
+    if (previousCSCKeyPassword === undefined) delete process.env.CSC_KEY_PASSWORD
+    else process.env.CSC_KEY_PASSWORD = previousCSCKeyPassword
 
     expect(config.appId).toBe(channel.appId)
     expect(config.productName).toBe(channel.productName)
@@ -106,6 +114,45 @@ test("packages enterprise defaults and guide beside app.asar", async () => {
   ).toEqual([true, true])
 })
 
+test("direct enterprise builder imports cannot bypass package preflight", async () => {
+  const keys = [
+    "OPENCODE_ENTERPRISE",
+    "OPENCODE_ENTERPRISE_BASE_URL",
+    "OPENCODE_ENTERPRISE_MODEL_ID",
+    "OPENCODE_ENTERPRISE_MODEL_NAME",
+    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
+    "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
+    "OPENCODE_ENTERPRISE_GUIDE_VERSION",
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    OPENCODE_ENTERPRISE: "1",
+    OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+    OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+    OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+    OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+    CSC_KEY_PASSWORD: "set",
+  })
+  delete process.env.CSC_LINK
+
+  await expect(
+    import("./electron-builder.config.ts?enterprise=preflight").finally(() => {
+      for (const key of keys) {
+        const value = previous[key]
+        if (value === undefined) {
+          delete process.env[key]
+          continue
+        }
+        process.env[key] = value
+      }
+    }),
+  ).rejects.toThrow("CSC_LINK")
+})
+
 test("enterprise pilot uses an isolated signed Windows identity without a publisher", async () => {
   const keys = [
     "OPENCODE_CHANNEL",
@@ -130,7 +177,7 @@ test("enterprise pilot uses an isolated signed Windows identity without a publis
     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
     OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
     CSC_LINK: "C:/signing/company.pfx",
-    CSC_KEY_PASSWORD: "secret",
+    CSC_KEY_PASSWORD: "set",
   })
 
   const config = await import("./electron-builder.config.ts?enterprise=pilot")

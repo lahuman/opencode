@@ -5,6 +5,8 @@ import { promisify } from "node:util"
 
 import type { Configuration } from "electron-builder"
 
+import { validateEnterpriseBuild } from "./scripts/enterprise-build"
+
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(packageDir, "../..")
@@ -113,6 +115,8 @@ const getBase = (appId: string): Configuration => ({
 
 function getConfig() {
   if (enterprise) {
+    validateEnterpriseBuild(process.env)
+
     const appId = "com.company.opencode.pilot"
     const base = getBase(appId)
     return {
