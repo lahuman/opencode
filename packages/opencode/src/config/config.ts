@@ -664,19 +664,15 @@ const layer = Layer.effect(
         const serialized = JSON.stringify(next, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
+      } else if (!ConfigEnterprise.settings().enabled) {
+        const serialized = patchJsonc(before, patch)
+        next = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(serialized, file), file)
+        changed = serialized !== before
+        if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
       } else {
-        const updated = patchJsonc(before, patch)
-        const merged = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(updated, file), file)
-        next = ConfigEnterprise.sanitizeWrite(merged)
-        const serialized =
-          next === merged
-            ? updated
-            : applyEdits(
-                updated,
-                modify(updated, ["provider"], next.provider, {
-                  formattingOptions: { insertSpaces: true, tabSize: 2 },
-                }),
-              )
+        const existing = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(before, file), file)
+        next = ConfigEnterprise.sanitizeWrite(mergeDeep(writable(existing), patch))
+        const serialized = JSON.stringify(next, null, 2)
         changed = serialized !== before
         if (changed) yield* fs.writeFileString(file, serialized).pipe(Effect.orDie)
       }

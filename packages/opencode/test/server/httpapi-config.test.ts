@@ -3,7 +3,7 @@ import path from "path"
 import { Server } from "../../src/server/server"
 import { Effect, Fiber } from "effect"
 import { Global } from "@opencode-ai/core/global"
-import { parse } from "jsonc-parser"
+import { parse, parseTree } from "jsonc-parser"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 import { it } from "../lib/effect"
@@ -192,9 +192,6 @@ const globalPersistenceTest = (filename: "opencode.json" | "opencode.jsonc") =>
           const secondResponse = yield* patchGlobal(replacementSecretPatch())
           expectSanitizedEnterpriseConfig(yield* readConfig(file), 3_456, 0.5)
           expectSanitizedEnterpriseConfig(secondResponse, 3_456, 0.5)
-          if (filename.endsWith(".jsonc")) {
-            expect(yield* Effect.promise(() => Bun.file(file).text())).toContain("// keep-comment")
-          }
         }),
       (previous) =>
         Effect.sync(() => {
@@ -237,6 +234,111 @@ describe("config HttpApi", () => {
   it.live(
     "removes stale and replacement secrets from merged enterprise global JSONC config",
     globalPersistenceTest("opencode.jsonc"),
+  )
+
+  it.live(
+    "canonicalizes duplicate enterprise global JSONC provider properties",
+    Effect.gen(function* () {
+      process.env.OPENCODE_ENTERPRISE_OFFLINE = "1"
+      const tmp = yield* tmpdirEffect({})
+      const file = path.join(tmp.path, "opencode.jsonc")
+      const trailing = JSON.stringify(legacyEnterpriseConfig().provider, null, 2)
+      yield* Effect.promise(() =>
+        Bun.write(
+          file,
+          [
+            "{",
+            '  "formatter": false,',
+            '  "lsp": false,',
+            '  "username": "outside-provider-kept",',
+            '  "provider": { "ignored-first": { "options": { "baseURL": "https://ignored.example/v1" } } },',
+            `  "provider": ${trailing}`,
+            "}",
+          ].join("\n"),
+        ),
+      )
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const previous = Global.Path.config
+          ;(Global.Path as { config: string }).config = tmp.path
+          return previous
+        }),
+        () =>
+          Effect.gen(function* () {
+            const response = yield* patchGlobal(replacementSecretPatch())
+            const text = yield* Effect.promise(() => Bun.file(file).text())
+            const persisted = parse(text)
+            const providerProperties =
+              parseTree(text)?.children?.filter(
+                (node) => node.type === "property" && node.children?.[0]?.value === "provider",
+              ) ?? []
+
+            expect(text).not.toContain("legacy-")
+            expect(text).not.toContain("replacement-")
+            expect(providerProperties).toHaveLength(1)
+            expect(persisted).toMatchObject({
+              formatter: false,
+              lsp: false,
+              username: "outside-provider-kept",
+              provider: {
+                "company-llm": {
+                  options: {
+                    baseURL: "https://llm.corp.example/v1",
+                    timeout: 3_456,
+                    providerSetting: "kept-provider-setting",
+                  },
+                  models: {
+                    "company-code": {
+                      name: "Company Code",
+                      options: {
+                        temperature: 0.5,
+                        modelSetting: "kept-model-setting",
+                      },
+                    },
+                  },
+                },
+              },
+            })
+            expect(JSON.stringify(persisted)).not.toContain('"key"')
+            expect(JSON.stringify(persisted)).not.toContain("apiKey")
+            expect(JSON.stringify(persisted)).not.toContain("headers")
+            expect(response).toEqual(persisted)
+          }),
+        (previous) =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }),
+      )
+    }),
+  )
+
+  it.live(
+    "preserves ordinary global JSONC comments",
+    Effect.gen(function* () {
+      delete process.env.OPENCODE_ENTERPRISE_OFFLINE
+      const tmp = yield* tmpdirEffect({})
+      const file = path.join(tmp.path, "opencode.jsonc")
+      yield* Effect.promise(() => Bun.write(file, '// keep-comment\n{ "formatter": false, "username": 42 }\n'))
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const previous = Global.Path.config
+          ;(Global.Path as { config: string }).config = tmp.path
+          return previous
+        }),
+        () =>
+          Effect.gen(function* () {
+            const response = yield* patchGlobal({ username: "ordinary-user" })
+            const text = yield* Effect.promise(() => Bun.file(file).text())
+            expect(text).toContain("// keep-comment")
+            expect(parse(text)).toEqual({ formatter: false, username: "ordinary-user" })
+            expect(response).toEqual({ formatter: false, username: "ordinary-user" })
+          }),
+        (previous) =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }),
+      )
+    }),
   )
 
   it.live(
