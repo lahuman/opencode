@@ -22,11 +22,16 @@ type Mode =
   | "pass"
   | "auth"
   | "model"
+  | "timeout-message"
+  | "timeout-408"
+  | "timeout-504"
   | "stream"
   | "partial-stream"
   | "stream-auth"
   | "policy-stream"
   | "policy-tool"
+  | "wrong-tool"
+  | "invalid-tool"
   | "tool"
 type RequestBody = { stream?: boolean; tools?: unknown }
 
@@ -64,21 +69,19 @@ describe("provider diagnostics", () => {
   })
 
   test("classifies transport, HTTP, and compatibility failures", () => {
-    expect(ProviderDiagnostic.classify({ statusCode: 401, message: "Unauthorized" })).toBe("auth")
-    expect(ProviderDiagnostic.classify({ statusCode: 403, message: "Forbidden" })).toBe("auth")
-    expect(
-      ProviderDiagnostic.classify({ statusCode: 404, message: "model does not exist", modelCode: "model_not_found" }),
-    ).toBe("model")
-    expect(ProviderDiagnostic.classify({ message: "fetch failed", codes: ["ENOTFOUND"] })).toBe("dns")
-    expect(ProviderDiagnostic.classify({ message: "TLS failed", codes: ["CERT_AUTHORITY_INVALID"] })).toBe("tls")
-    expect(ProviderDiagnostic.classify({ message: "request timed out" })).toBe("timeout")
-    expect(ProviderDiagnostic.classify({ message: "Cannot connect to API" })).toBe("response")
-    expect(ProviderDiagnostic.classify({ message: "invalid JSON response" })).toBe("response")
-    expect(ProviderDiagnostic.classify({ message: "invalid stream chunk", stage: "streaming" })).toBe("stream")
-    expect(ProviderDiagnostic.classify({ message: "Tool call was not returned", stage: "toolCall" })).toBe("tool_call")
+    expect(ProviderDiagnostic.classify({ statusCode: 401 })).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 403 })).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 404, modelCode: "model_not_found" })).toBe("model")
+    expect(ProviderDiagnostic.classify({ codes: ["ENOTFOUND"] })).toBe("dns")
+    expect(ProviderDiagnostic.classify({ codes: ["CERT_AUTHORITY_INVALID"] })).toBe("tls")
+    expect(ProviderDiagnostic.classify({ codes: ["ETIMEDOUT"] })).toBe("timeout")
+    expect(ProviderDiagnostic.classify({ codes: ["ECONNREFUSED"] })).toBe("connection")
+    expect(ProviderDiagnostic.classify({})).toBe("response")
+    expect(ProviderDiagnostic.classify({ stage: "streaming" })).toBe("stream")
+    expect(ProviderDiagnostic.classify({ stage: "toolCall" })).toBe("tool_call")
   })
 
-  test("classifies structured transport codes before generic API wrappers", () => {
+  test("classifies exact structured transport codes", () => {
     for (const code of [
       "FailedToOpenSocket",
       "ConnectionRefused",
@@ -88,10 +91,10 @@ describe("provider diagnostics", () => {
       "ENETUNREACH",
       "EPIPE",
     ]) {
-      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("connection")
+      expect(ProviderDiagnostic.classify({ codes: [code] }), code).toBe("connection")
     }
     for (const code of ["ENOTFOUND", "EAI_AGAIN"]) {
-      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("dns")
+      expect(ProviderDiagnostic.classify({ codes: [code] }), code).toBe("dns")
     }
     for (const code of [
       "CERT_AUTHORITY_INVALID",
@@ -99,31 +102,26 @@ describe("provider diagnostics", () => {
       "DEPTH_ZERO_SELF_SIGNED_CERT",
       "ERR_TLS_CERT_ALTNAME_INVALID",
     ]) {
-      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("tls")
+      expect(ProviderDiagnostic.classify({ codes: [code] }), code).toBe("tls")
     }
     for (const code of ["ETIMEDOUT", "ABORT_ERR", "AbortError", "TimeoutError", "UND_ERR_CONNECT_TIMEOUT"]) {
-      expect(ProviderDiagnostic.classify({ message: "Cannot connect to API", codes: [code] }), code).toBe("timeout")
+      expect(ProviderDiagnostic.classify({ codes: [code] }), code).toBe("timeout")
     }
-    expect(
-      ProviderDiagnostic.classify({ statusCode: 401, message: "Cannot connect to API", codes: ["ENOTFOUND"] }),
-    ).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 401, codes: ["ENOTFOUND"] })).toBe("auth")
     expect(
       ProviderDiagnostic.classify({
         statusCode: 404,
-        message: "Cannot connect to API",
         modelCode: "model_not_found",
         codes: ["ENOTFOUND"],
       }),
     ).toBe("model")
   })
 
-  test("uses exact transport codes and timeout statuses without matching provider policy text", () => {
-    expect(ProviderDiagnostic.classify({ message: "Tool execution aborted by model policy", stage: "streaming" })).toBe(
-      "stream",
-    )
-    expect(ProviderDiagnostic.classify({ message: "Tool execution aborted by model policy" })).toBe("response")
-    expect(ProviderDiagnostic.classify({ statusCode: 408, message: "", stage: "streaming" })).toBe("timeout")
-    expect(ProviderDiagnostic.classify({ statusCode: 504, message: "", stage: "streaming" })).toBe("timeout")
+  test("uses exact transport codes and timeout statuses without partial code matches", () => {
+    expect(ProviderDiagnostic.classify({ stage: "streaming" })).toBe("stream")
+    expect(ProviderDiagnostic.classify({})).toBe("response")
+    expect(ProviderDiagnostic.classify({ statusCode: 408, stage: "streaming" })).toBe("timeout")
+    expect(ProviderDiagnostic.classify({ statusCode: 504, stage: "streaming" })).toBe("timeout")
 
     for (const code of [
       "PROVIDER_ABORTED_BY_POLICY",
@@ -132,34 +130,22 @@ describe("provider diagnostics", () => {
       "CERT_AUTHORITY_INVALID_POLICY",
       "ECONNREFUSED_BY_POLICY",
     ]) {
-      expect(ProviderDiagnostic.classify({ message: "provider policy", codes: [code], stage: "streaming" }), code).toBe(
-        "stream",
-      )
+      expect(ProviderDiagnostic.classify({ codes: [code], stage: "streaming" }), code).toBe("stream")
     }
-    expect(ProviderDiagnostic.classify({ message: "provider policy", codes: [" econnrefused "] })).toBe("connection")
-    expect(ProviderDiagnostic.classify({ statusCode: 401, message: "", codes: ["ABORT_ERR"] })).toBe("auth")
-    expect(ProviderDiagnostic.classify({ statusCode: 504, message: "", modelCode: "model_not_found" })).toBe("timeout")
-  })
-
-  test("does not trust transport phrases embedded in provider policy messages", () => {
-    const message = "Provider policy: request timeout; cannot connect to API while tool execution is restricted"
-
-    expect(ProviderDiagnostic.classify({ message, stage: "streaming" })).toBe("stream")
-    expect(ProviderDiagnostic.classify({ message, stage: "toolCall" })).toBe("tool_call")
-    expect(ProviderDiagnostic.classify({ message: "request timed out" })).toBe("timeout")
+    expect(ProviderDiagnostic.classify({ codes: [" econnrefused "] })).toBe("connection")
+    expect(ProviderDiagnostic.classify({ statusCode: 401, codes: ["ABORT_ERR"] })).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 504, modelCode: "model_not_found" })).toBe("timeout")
   })
 
   test("requires HTTP 404 and an exact structured model error code", () => {
     for (const modelCode of ["model_not_found", "deployment_not_found", "model_does_not_exist"]) {
-      expect(ProviderDiagnostic.classify({ statusCode: 404, message: "", modelCode }), modelCode).toBe("model")
+      expect(ProviderDiagnostic.classify({ statusCode: 404, modelCode }), modelCode).toBe("model")
     }
-    expect(ProviderDiagnostic.classify({ statusCode: 401, message: "", modelCode: "model_not_found" })).toBe("auth")
-    expect(
-      ProviderDiagnostic.classify({ statusCode: 404, message: "", modelCode: "ETIMEDOUT", stage: "streaming" }),
-    ).toBe("stream")
-    expect(
-      ProviderDiagnostic.classify({ statusCode: 400, message: "", modelCode: "model_not_found", stage: "toolCall" }),
-    ).toBe("tool_call")
+    expect(ProviderDiagnostic.classify({ statusCode: 401, modelCode: "model_not_found" })).toBe("auth")
+    expect(ProviderDiagnostic.classify({ statusCode: 404, modelCode: "ETIMEDOUT", stage: "streaming" })).toBe("stream")
+    expect(ProviderDiagnostic.classify({ statusCode: 400, modelCode: "model_not_found", stage: "toolCall" })).toBe(
+      "tool_call",
+    )
   })
 
   test("checks basic response and streaming through the real adapter", async () => {
@@ -184,6 +170,45 @@ describe("provider diagnostics", () => {
       ok: true,
       checks: { basic: "pass", streaming: "pass", toolCall: "pass" },
     })
+  })
+
+  test("rejects a wrong tool name through the real adapter", async () => {
+    using server = diagnosticServer("wrong-tool")
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "wrong-tool-key" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), true)
+    const serialized = JSON.stringify(Schema.encodeSync(ProviderDiagnostic.Result)(result))
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "pass", toolCall: "fail" },
+      failure: {
+        kind: "tool_call",
+        message: "The configured model did not return the requested tool call.",
+      },
+    })
+    expect(serialized).not.toContain("wrong_tool")
+    expect(serialized).not.toContain("WRONG_TOOL_SECRET")
+    expect(serialized).not.toContain("wrong-tool-key")
+  })
+
+  test("rejects a schema-invalid enterprise_probe call through the real adapter", async () => {
+    using server = diagnosticServer("invalid-tool")
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "invalid-tool-key" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), true)
+    const serialized = JSON.stringify(Schema.encodeSync(ProviderDiagnostic.Result)(result))
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "pass", streaming: "pass", toolCall: "fail" },
+      failure: {
+        kind: "tool_call",
+        message: "The configured model did not return the requested tool call.",
+      },
+    })
+    expect(serialized).not.toContain("INVALID_TOOL_SECRET")
+    expect(serialized).not.toContain("invalid-tool-key")
   })
 
   test("classifies a real adapter request to a closed Bun port as connection failure", async () => {
@@ -251,6 +276,52 @@ describe("provider diagnostics", () => {
     })
     expect(serialized).not.toContain("MODEL_SECRET_MARKER")
     expect(serialized).not.toContain("model-secret")
+  })
+
+  test("does not trust an HTTP 400 provider timeout message", async () => {
+    using server = diagnosticServer("timeout-message")
+    const sdk = createOpenAICompatible({ name: "company-llm", baseURL: `${server.url}v1`, apiKey: "timeout-secret" })
+
+    const result = await ProviderDiagnostic.probe(sdk("company-code"), true)
+    const serialized = JSON.stringify(Schema.encodeSync(ProviderDiagnostic.Result)(result))
+
+    expect(result).toEqual({
+      ok: false,
+      checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+      failure: {
+        kind: "response",
+        message: "The endpoint returned an incompatible OpenAI-style response.",
+      },
+    })
+    expect(serialized).not.toContain("request timed out")
+    expect(serialized).not.toContain("provider_timeout_marker")
+    expect(serialized).not.toContain("timeout-secret")
+  })
+
+  test("classifies real HTTP 408 and 504 responses as timeout failures", async () => {
+    using requestTimeoutServer = diagnosticServer("timeout-408")
+    using gatewayTimeoutServer = diagnosticServer("timeout-504")
+    const requestTimeout = createOpenAICompatible({
+      name: "company-llm",
+      baseURL: `${requestTimeoutServer.url}v1`,
+      apiKey: "test",
+    })
+    const gatewayTimeout = createOpenAICompatible({
+      name: "company-llm",
+      baseURL: `${gatewayTimeoutServer.url}v1`,
+      apiKey: "test",
+    })
+
+    for (const model of [requestTimeout("company-code"), gatewayTimeout("company-code")]) {
+      expect(await ProviderDiagnostic.probe(model, true)).toEqual({
+        ok: false,
+        checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+        failure: {
+          kind: "timeout",
+          message: "The Company LLM request timed out. Check service load and network latency.",
+        },
+      })
+    }
   })
 
   test("interrupts a blocked basic provider request without starting later stages", async () => {
@@ -567,6 +638,24 @@ function diagnosticServer(mode: Mode, headers: Headers[] = []) {
           { status: 404 },
         )
       }
+      if (mode === "timeout-message") {
+        return Response.json(
+          {
+            error: {
+              message: "request timed out",
+              type: "provider_error",
+              code: "provider_timeout_marker",
+            },
+          },
+          { status: 400 },
+        )
+      }
+      if (mode === "timeout-408" || mode === "timeout-504") {
+        return Response.json(
+          { error: { message: "provider unavailable", type: "provider_error" } },
+          { status: mode === "timeout-408" ? 408 : 504 },
+        )
+      }
       if (body.stream) {
         if (mode === "stream") {
           return new Response("data: not-json\n\ndata: [DONE]\n\n", {
@@ -596,6 +685,12 @@ function diagnosticServer(mode: Mode, headers: Headers[] = []) {
           { status: 400 },
         )
       }
+      if (body.tools && mode === "wrong-tool") {
+        return Response.json(toolResponse("wrong_tool", '{"secret":"WRONG_TOOL_SECRET"}'))
+      }
+      if (body.tools && mode === "invalid-tool") {
+        return Response.json(toolResponse("enterprise_probe", '{"unexpected":"INVALID_TOOL_SECRET"}'))
+      }
       if (body.tools && mode === "pass") return Response.json(toolResponse())
       return Response.json(textResponse())
     },
@@ -613,7 +708,7 @@ function textResponse() {
   }
 }
 
-function toolResponse() {
+function toolResponse(name = "enterprise_probe", input = "{}") {
   return {
     id: "chatcmpl-tool",
     object: "chat.completion",
@@ -630,7 +725,7 @@ function toolResponse() {
             {
               id: "call-enterprise-probe",
               type: "function",
-              function: { name: "enterprise_probe", arguments: "{}" },
+              function: { name, arguments: input },
             },
           ],
         },

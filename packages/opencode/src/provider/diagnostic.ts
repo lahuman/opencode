@@ -87,12 +87,10 @@ const modelCodes = new Set(["MODEL_NOT_FOUND", "DEPLOYMENT_NOT_FOUND", "MODEL_DO
 
 export function classify(input: {
   statusCode?: number
-  message: string
   codes?: readonly string[]
   modelCode?: string
   stage?: Stage
 }): typeof FailureKind.Type {
-  const message = input.message.trim().toLowerCase()
   const codes = (input.codes ?? []).map((code) => code.trim().toUpperCase())
   if (input.statusCode === 401 || input.statusCode === 403) return "auth"
   if (input.statusCode === 404 && input.modelCode && modelCodes.has(input.modelCode.trim().toUpperCase()))
@@ -101,7 +99,6 @@ export function classify(input: {
   if (codes.some((code) => dnsCodes.has(code))) return "dns"
   if (codes.some((code) => tlsCodes.has(code))) return "tls"
   if (codes.some((code) => timeoutCodes.has(code))) return "timeout"
-  if (message === "request timed out") return "timeout"
   if (codes.some((code) => connectionCodes.has(code))) return "connection"
   if (input.stage === "streaming") return "stream"
   if (input.stage === "toolCall") return "tool_call"
@@ -156,9 +153,6 @@ function failureResult(error: unknown): typeof Result.Type {
   const stage = isProbeError(error) ? error.stage : "basic"
   const chain = causeChain(isProbeError(error) ? error.cause : error)
   const api = chain.find((item) => APICallError.isInstance(item))
-  const message = chain
-    .flatMap((item) => (item instanceof Error ? [item.message] : typeof item === "string" ? [item] : []))
-    .join(" ")
   const codes = chain.flatMap((item) =>
     item && typeof item === "object"
       ? [
@@ -171,7 +165,6 @@ function failureResult(error: unknown): typeof Result.Type {
     ? "model"
     : classify({
         statusCode: APICallError.isInstance(api) ? api.statusCode : undefined,
-        message,
         codes,
         modelCode: modelCode(api),
         stage,
@@ -234,17 +227,32 @@ export async function probe(
           toolChoice: "required",
           tools: {
             enterprise_probe: tool({
-              inputSchema: jsonSchema({
-                type: "object",
-                properties: {},
-                required: [],
-                additionalProperties: false,
-              }),
+              inputSchema: jsonSchema(
+                {
+                  type: "object",
+                  properties: {},
+                  required: [],
+                  additionalProperties: false,
+                },
+                {
+                  validate(value) {
+                    if (
+                      typeof value === "object" &&
+                      value !== null &&
+                      !Array.isArray(value) &&
+                      Object.keys(value).length === 0
+                    )
+                      return { success: true, value: {} }
+                    return { success: false, error: new Error("Diagnostic tool input must be an empty object") }
+                  },
+                },
+              ),
             }),
           },
           abortSignal: stageSignal(signal),
         })
-        if (result.toolCalls.length === 0) throw new Error("Tool call was not returned")
+        if (!result.toolCalls.some((call) => call.toolName === "enterprise_probe" && call.invalid !== true))
+          throw new Error("Tool call was not returned")
       })
     }
     return {
