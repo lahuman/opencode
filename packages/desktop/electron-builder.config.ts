@@ -159,8 +159,9 @@ async function getEnterpriseConfig() {
   const certificate = await stageEnterpriseCertificate(process.env)
   const appId = "com.company.opencode.pilot"
   const base = getBase(appId)
-  return {
+  const config = {
     ...base,
+    cscLink: certificate.cscLink,
     appId,
     productName: "Company OpenCode Pilot",
     artifactName: "company-opencode-pilot-${os}-${arch}.${ext}",
@@ -168,6 +169,7 @@ async function getEnterpriseConfig() {
     beforePack: certificate.beforePack,
     win: {
       ...base.win,
+      cscLink: certificate.cscLink,
       target: ["nsis"],
       signtoolOptions: undefined,
     },
@@ -176,6 +178,15 @@ async function getEnterpriseConfig() {
       { from: "../../LICENSE", to: "licenses/OpenCode-LICENSE" },
     ],
   } satisfies Configuration
+  Object.defineProperty(config, "beforePack", {
+    configurable: false,
+    enumerable: true,
+    get: () => certificate.beforePack,
+    set: () => {
+      throw new Error("Enterprise signing configuration is invalid")
+    },
+  })
+  return config
 }
 
 export default getConfig()

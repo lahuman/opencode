@@ -55,6 +55,27 @@ test("requires enterprise mode and every enterprise package input", () => {
   }
 })
 
+test("rejects alternate electron-builder signing environment inputs without disclosing values", () => {
+  for (const key of [
+    "WIN_CSC_LINK",
+    "WIN_CSC_KEY_PASSWORD",
+    "CSC_NAME",
+    "CSC_INSTALLER_LINK",
+    "CSC_INSTALLER_KEY_PASSWORD",
+    "CSC_KEYCHAIN",
+    "CSC_IDENTITY_AUTO_DISCOVERY",
+    "CSC_FOR_PULL_REQUEST",
+  ]) {
+    const message = errorMessage(() => validateEnterpriseBuild({ ...valid, [key]: "alternate-signing-value" }))
+
+    expect(message).toBe(`${key} is not supported for an enterprise Windows package`)
+    expect(message).not.toContain("alternate-signing-value")
+    expect(errorMessage(() => validateEnterpriseBuild({ ...valid, [key]: "" }))).toBe(
+      `${key} is not supported for an enterprise Windows package`,
+    )
+  }
+})
+
 test("requires the declared origins to include the base URL origin", () => {
   expect(() =>
     validateEnterpriseBuild({
@@ -101,6 +122,8 @@ test("rejects base URL query and fragment markers without returning or exposing 
   for (const baseURL of [
     "https://llm.corp.example/v1?api_key=query-secret-marker",
     "https://llm.corp.example/v1#fragment-secret-marker",
+    "https://llm.corp.example/v1?",
+    "https://llm.corp.example/v1#",
   ]) {
     const message = errorMessage(() =>
       validateEnterpriseBuild({
@@ -148,8 +171,12 @@ test("rejects non-HTTP, credentialed, and malformed allowed origins with generic
 test("rejects allowed-origin paths, queries, and fragments with fixed input-free errors", () => {
   for (const origin of [
     "https://llm.corp.example/v1/path-secret-marker",
+    "https://llm.corp.example/segment/..",
+    "https://llm.corp.example/%2e",
     "https://llm.corp.example/?key=query-secret-marker",
     "https://llm.corp.example/#fragment-secret-marker",
+    "https://llm.corp.example?",
+    "https://llm.corp.example#",
   ]) {
     const message = errorMessage(() =>
       validateEnterpriseBuild({
@@ -162,6 +189,24 @@ test("rejects allowed-origin paths, queries, and fragments with fixed input-free
     expect(message).not.toContain("path-secret-marker")
     expect(message).not.toContain("query-secret-marker")
     expect(message).not.toContain("fragment-secret-marker")
+  }
+})
+
+test("rejects deceptive allowed-origin authorities before normalization", () => {
+  for (const origin of [
+    "https://llm.corp.example@deceptive.example",
+    "https://llm.corp.example%2edeceptive.example",
+    "https://llm.corp.example\\@deceptive.example",
+  ]) {
+    const message = errorMessage(() =>
+      validateEnterpriseBuild({
+        ...valid,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: origin,
+      }),
+    )
+
+    expect(message).toMatch(/^OPENCODE_ENTERPRISE_ALLOWED_ORIGINS /)
+    expect(message).not.toContain("deceptive.example")
   }
 })
 

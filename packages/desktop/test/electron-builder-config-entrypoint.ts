@@ -3,24 +3,20 @@ import path from "node:path"
 import { stat } from "node:fs/promises"
 
 const require = createRequire(import.meta.url)
+const resultPrefix = "OPENCODE_TEST_RESULT:"
 const electronBuilder = require.resolve("electron-builder")
-const loaderPath = require.resolve("app-builder-lib/out/util/config/load", {
+const loaderPath = require.resolve("app-builder-lib/out/util/config/config", {
   paths: [path.dirname(electronBuilder)],
 })
 const loader = require(loaderPath)
 const originalLink = process.env.CSC_LINK
 const originalPassword = process.env.CSC_KEY_PASSWORD
-const loaded = await loader.getConfig(
-  {
-    packageKey: "build",
-    configFilename: "electron-builder",
-    projectDir: path.resolve(import.meta.dir, ".."),
-    packageMetadata: null,
-  },
+const projectDir = path.resolve(import.meta.dir, "..")
+const config = await loader.getConfig(
+  projectDir,
   "electron-builder.config.ts",
+  process.env.OPENCODE_TEST_BUILDER_OVERRIDE ? JSON.parse(process.env.OPENCODE_TEST_BUILDER_OVERRIDE) : null,
 )
-const config = loaded?.result
-if (!config) throw new Error("Builder configuration did not load")
 
 const stagedLink = process.env.CSC_LINK
 const certificateStaged = Boolean(originalLink && stagedLink && originalLink !== stagedLink)
@@ -46,14 +42,26 @@ if (process.env.OPENCODE_TEST_BUILDER_SCENARIO === "exit") {
     process.env.OPENCODE_TEST_RESULT_PATH,
     certificateStaged && certificateOpaque && stagedLink ? stagedLink : "",
   )
-  process.stdout.write(JSON.stringify({ certificateStaged, certificateOpaque }))
+  process.stdout.write(`${resultPrefix}${JSON.stringify({ certificateStaged, certificateOpaque })}`)
   process.exit(0)
+}
+
+if (process.env.OPENCODE_TEST_BUILDER_SCENARIO === "signal") {
+  if (!process.env.OPENCODE_TEST_RESULT_PATH) throw new Error("Builder test result path is required")
+  await Bun.write(
+    process.env.OPENCODE_TEST_RESULT_PATH,
+    certificateStaged && certificateOpaque && stagedLink ? stagedLink : "",
+  )
+  process.stdout.write(`${resultPrefix}${JSON.stringify({ certificateStaged, certificateOpaque })}`)
+  await new Promise<void>(() => setInterval(() => undefined, 1_000))
 }
 
 const disposers: Array<() => Promise<void>> = []
 if (typeof config.beforePack === "function") {
   await config.beforePack({
     packager: {
+      config,
+      platformSpecificBuildOptions: config.win,
       info: {
         disposeOnBuildFinish(disposer: () => Promise<void>) {
           disposers.push(disposer)
@@ -86,7 +94,7 @@ const extraResources = Array.isArray(config.extraResources)
   : []
 
 process.stdout.write(
-  JSON.stringify({
+  `${resultPrefix}${JSON.stringify({
     appId: config.appId,
     productName: config.productName,
     artifactName: config.artifactName,
@@ -95,6 +103,7 @@ process.stdout.write(
     winTarget: config.win?.target,
     ordinarySignFunction: typeof config.win?.signtoolOptions?.sign === "function",
     standardCSC: config.win?.signtoolOptions === undefined,
+    effectiveCscPinned: config.cscLink === stagedLink && config.win?.cscLink === stagedLink,
     nsis: config.nsis,
     extraResources,
     desktopName: config.extraMetadata?.desktopName,
@@ -115,5 +124,5 @@ process.stdout.write(
         process.env.CSC_KEY_PASSWORD === undefined),
     serializedHidesOriginal,
     serializedHidesPassword,
-  }),
+  })}`,
 )

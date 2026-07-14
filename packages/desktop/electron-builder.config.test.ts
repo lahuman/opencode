@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -145,6 +145,37 @@ test("rejects URL, data, base64, and relative certificate forms with fixed error
   }
 })
 
+test("rejects alternate signing environment inputs through direct builder loading", async () => {
+  await withCertificate(async (certificate) => {
+    for (const key of [
+      "WIN_CSC_LINK",
+      "WIN_CSC_KEY_PASSWORD",
+      "CSC_NAME",
+      "CSC_INSTALLER_LINK",
+      "CSC_INSTALLER_KEY_PASSWORD",
+      "CSC_KEYCHAIN",
+      "CSC_IDENTITY_AUTO_DISCOVERY",
+      "CSC_FOR_PULL_REQUEST",
+    ]) {
+      const result = evaluateConfig({
+        ...enterprise,
+        CSC_LINK: certificate,
+        CSC_KEY_PASSWORD: passwordMarker,
+        [key]: "alternate-child-marker",
+      })
+
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr).toContain(`${key} is not supported for an enterprise Windows package`)
+      expectDiagnosticsSafe(result, [
+        "alternate-child-marker",
+        path.basename(path.dirname(certificate)),
+        path.basename(certificate),
+        passwordMarker,
+      ])
+    }
+  })
+})
+
 test("stages an opaque restricted certificate and preserves enterprise installer behavior", async () => {
   await withCertificate(async (certificate) => {
     const result = evaluateConfig({
@@ -166,6 +197,7 @@ test("stages an opaque restricted certificate and preserves enterprise installer
       winTarget: ["nsis"],
       ordinarySignFunction: false,
       standardCSC: true,
+      effectiveCscPinned: true,
       nsis: { oneClick: true, perMachine: false },
       certificateStaged: true,
       certificateExists: true,
@@ -193,6 +225,56 @@ test("stages an opaque restricted certificate and preserves enterprise installer
       ),
     ).toHaveLength(1)
     expect(await Bun.file(certificate).exists()).toBeTrue()
+  })
+})
+
+test("rejects merged signing source and identity overrides without diagnostic disclosure", async () => {
+  await withCertificate(async (certificate) => {
+    const overrideMarker = "effective-override-marker"
+    const overrides = [
+      { beforePack: overrideMarker, cscLink: overrideMarker },
+      { cscLink: overrideMarker },
+      { cscKeyPassword: overrideMarker },
+      { win: { cscLink: overrideMarker } },
+      { win: { cscKeyPassword: overrideMarker } },
+      { win: { signtoolOptions: { certificateFile: overrideMarker } } },
+      { win: { signtoolOptions: { certificatePassword: overrideMarker } } },
+      { win: { signtoolOptions: { certificateSubjectName: overrideMarker } } },
+      { win: { signtoolOptions: { certificateSha1: overrideMarker } } },
+      { win: { signtoolOptions: { additionalCertificateFile: overrideMarker } } },
+      { win: { signtoolOptions: { sign: overrideMarker } } },
+      {
+        win: {
+          azureSignOptions: {
+            endpoint: overrideMarker,
+            certificateProfileName: overrideMarker,
+            codeSigningAccountName: overrideMarker,
+          },
+        },
+      },
+      { win: { signExecutable: false } },
+      { win: { signAndEditExecutable: false } },
+    ]
+
+    for (const override of overrides) {
+      const result = evaluateConfig(
+        {
+          ...enterprise,
+          CSC_LINK: certificate,
+          CSC_KEY_PASSWORD: passwordMarker,
+        },
+        override,
+      )
+
+      expect(result.exitCode).not.toBe(0)
+      expect(result.stderr).toContain("Enterprise signing configuration is invalid")
+      expectDiagnosticsSafe(result, [
+        overrideMarker,
+        path.basename(path.dirname(certificate)),
+        path.basename(certificate),
+        passwordMarker,
+      ])
+    }
   })
 })
 
@@ -257,6 +339,49 @@ test("removes the opaque certificate through the packager failure disposer befor
   })
 })
 
+test("removes the opaque certificate before exiting on SIGTERM", async () => {
+  await withCertificate(async (certificate) => {
+    const directory = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "opencode-builder-signal-")))
+    const resultPath = path.join(directory, "staged-path.txt")
+    const child = Bun.spawn([process.execPath, "test/electron-builder-config-entrypoint.ts"], {
+      cwd: import.meta.dir,
+      env: builderEnvironment({
+        ...enterprise,
+        CSC_LINK: certificate,
+        CSC_KEY_PASSWORD: passwordMarker,
+        OPENCODE_TEST_BUILDER_SCENARIO: "signal",
+        OPENCODE_TEST_RESULT_PATH: resultPath,
+      }),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    try {
+      await waitForFile(resultPath)
+      const stagedPath = await Bun.file(resultPath).text()
+      child.kill("SIGTERM")
+      const exitCode = await withDeadline(child.exited, 5_000)
+      const result = {
+        stdout: await new Response(child.stdout).text(),
+        stderr: await new Response(child.stderr).text(),
+      }
+
+      expect(exitCode).toBe(143)
+      expect(path.basename(stagedPath)).toBe("certificate.pfx")
+      expect(await Bun.file(stagedPath).exists()).toBeFalse()
+      expectDiagnosticsSafe(result, [
+        path.basename(path.dirname(certificate)),
+        path.basename(certificate),
+        passwordMarker,
+      ])
+    } finally {
+      child.kill("SIGKILL")
+      await child.exited
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
 test("isolated builder scenarios leave the parent environment untouched", () => {
   const keys = ["OPENCODE_CHANNEL", "OPENCODE_ENTERPRISE", "CSC_LINK", "CSC_KEY_PASSWORD"] as const
   const before = keys.map((key) => process.env[key])
@@ -265,35 +390,41 @@ test("isolated builder scenarios leave the parent environment untouched", () => 
   expect(keys.every((key, index) => process.env[key] === before[index])).toBeTrue()
 })
 
-function evaluateConfig(env: Record<string, string | undefined> = {}) {
+function evaluateConfig(env: Record<string, string | undefined> = {}, override?: object) {
   const result = Bun.spawnSync([process.execPath, "test/electron-builder-config-entrypoint.ts"], {
     cwd: import.meta.dir,
-    env: {
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-      TMPDIR: process.env.TMPDIR,
-      TEMP: process.env.TEMP,
-      TMP: process.env.TMP,
-      SystemRoot: process.env.SystemRoot,
-      WINDIR: process.env.WINDIR,
-      USERPROFILE: process.env.USERPROFILE,
-      LOCALAPPDATA: process.env.LOCALAPPDATA,
-      APPDATA: process.env.APPDATA,
-      FORCE_COLOR: "0",
-      NO_COLOR: "1",
-      OPENCODE_CHANNEL: "dev",
-      OPENCODE_ENTERPRISE: "0",
-      ...env,
-    },
+    env: builderEnvironment(env, override),
     stdout: "pipe",
     stderr: "pipe",
   })
   const stdout = new TextDecoder().decode(result.stdout).trim()
+  const summary = stdout.split(/\r?\n/).find((line) => line.startsWith("OPENCODE_TEST_RESULT:"))
   return {
     exitCode: result.exitCode,
     stdout,
     stderr: new TextDecoder().decode(result.stderr),
-    summary: stdout ? JSON.parse(stdout) : undefined,
+    summary: summary ? JSON.parse(summary.slice("OPENCODE_TEST_RESULT:".length)) : undefined,
+  }
+}
+
+function builderEnvironment(env: Record<string, string | undefined>, override?: object) {
+  return {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    TMPDIR: process.env.TMPDIR,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+    SystemRoot: process.env.SystemRoot,
+    WINDIR: process.env.WINDIR,
+    USERPROFILE: process.env.USERPROFILE,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    APPDATA: process.env.APPDATA,
+    FORCE_COLOR: "0",
+    NO_COLOR: "1",
+    OPENCODE_CHANNEL: "dev",
+    OPENCODE_ENTERPRISE: "0",
+    OPENCODE_TEST_BUILDER_OVERRIDE: override ? JSON.stringify(override) : undefined,
+    ...env,
   }
 }
 
@@ -303,7 +434,7 @@ function expectDiagnosticsSafe(result: { stdout: string; stderr: string }, marke
 }
 
 async function withCertificate<T>(run: (certificate: string) => T | Promise<T>) {
-  const directory = await mkdtemp(path.join(tmpdir(), "csc-path-secret-marker-"))
+  const directory = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "csc-path-secret-marker-")))
   const certificate = path.join(directory, "certificate-basename-secret-marker.pfx")
   await Bun.write(certificate, "test certificate")
   try {
@@ -311,4 +442,20 @@ async function withCertificate<T>(run: (certificate: string) => T | Promise<T>) 
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+}
+
+async function waitForFile(file: string, attempts = 100): Promise<void> {
+  if (await Bun.file(file).exists()) return
+  if (attempts === 0) throw new Error("Timed out waiting for builder child readiness")
+  await Bun.sleep(20)
+  await waitForFile(file, attempts - 1)
+}
+
+async function withDeadline<T>(promise: Promise<T>, milliseconds: number) {
+  return await Promise.race([
+    promise,
+    Bun.sleep(milliseconds).then(() => {
+      throw new Error("Timed out waiting for builder child exit")
+    }),
+  ])
 }
