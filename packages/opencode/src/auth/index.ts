@@ -7,6 +7,10 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 
 export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
 
+export function persistenceEnabled(env: Record<string, string | undefined> = process.env) {
+  return env.OPENCODE_ENTERPRISE_OFFLINE !== "1"
+}
+
 const file = path.join(Global.Path.data, "auth.json")
 
 const fail = (message: string) => (cause: unknown) => new AuthError({ message, cause })
@@ -71,6 +75,7 @@ const layer = Layer.effect(
     })
 
     const set = Effect.fn("Auth.set")(function* (key: string, info: Info) {
+      if (!persistenceEnabled()) return yield* new AuthError({ message: "Auth persistence is disabled in this build" })
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       if (norm !== key) delete data[key]
@@ -81,6 +86,7 @@ const layer = Layer.effect(
     })
 
     const remove = Effect.fn("Auth.remove")(function* (key: string) {
+      if (!persistenceEnabled()) return yield* new AuthError({ message: "Auth persistence is disabled in this build" })
       const norm = key.replace(/\/+$/, "")
       const data = yield* all()
       delete data[key]

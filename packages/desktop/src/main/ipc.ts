@@ -39,6 +39,11 @@ type Deps = {
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
+  enterprise: {
+    credentialStatus: () => Promise<{ configured: boolean }>
+    setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    clearCredentials: () => Promise<{ restartRequired: true }>
+  }
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -82,6 +87,13 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
+  ipcMain.handle("enterprise-credential-status", () => deps.enterprise.credentialStatus())
+  ipcMain.handle(
+    "enterprise-set-credentials",
+    (_event: IpcMainInvokeEvent, input: { apiKey?: string; headers?: Record<string, string> }) =>
+      deps.enterprise.setCredentials(input),
+  )
+  ipcMain.handle("enterprise-clear-credentials", () => deps.enterprise.clearCredentials())
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {
       const store = getStore(name)

@@ -6,6 +6,40 @@ export type EnterpriseCredentials = {
   headers: Record<string, string>
 }
 
+type Store = ReturnType<typeof createEnterpriseCredentialStore>
+
+export function enterpriseSidecarEnvironment(): Record<string, string> {
+  return {
+    OPENCODE_AUTH_CONTENT: "{}",
+    OPENCODE_CONFIG_CONTENT: "{}",
+  }
+}
+
+export function createEnterpriseCredentialHandlers(enabled: boolean, store: Store) {
+  const status = async () => {
+    if (!enabled) return { configured: false }
+    const credentials = await store.get()
+    return { configured: Boolean(credentials.apiKey || Object.keys(credentials.headers).length) }
+  }
+
+  const set = async (input: { apiKey?: string; headers?: Record<string, string> }) => {
+    if (!enabled) return { restartRequired: true as const }
+    const current = await store.get()
+    await store.set({
+      apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey,
+      headers: input.headers && Object.keys(input.headers).length ? input.headers : current.headers,
+    })
+    return { restartRequired: true as const }
+  }
+
+  const clear = async () => {
+    if (enabled) await store.clear()
+    return { restartRequired: true as const }
+  }
+
+  return { status, set, clear }
+}
+
 type Input = {
   file: string
   encryptionAvailable: () => boolean
@@ -47,9 +81,7 @@ export function createEnterpriseCredentialStore(input: Input) {
     const headers =
       record.headers && typeof record.headers === "object" && !Array.isArray(record.headers)
         ? Object.fromEntries(
-            Object.entries(record.headers).filter(
-              (entry): entry is [string, string] => typeof entry[1] === "string",
-            ),
+            Object.entries(record.headers).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
           )
         : {}
     return { ...(typeof record.apiKey === "string" ? { apiKey: record.apiKey } : {}), headers }

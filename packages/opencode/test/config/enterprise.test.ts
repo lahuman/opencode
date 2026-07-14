@@ -79,3 +79,40 @@ test("materializes company provider metadata as structured defaults", () => {
   expect(result.provider?.["company-llm"]?.options?.baseURL).toBe("https://llm.corp.example/v1")
   expect(result.provider?.["company-llm"]?.models?.["company-code"]?.name).toBe("Company Code")
 })
+
+test("enterprise public config removes secret provider options without mutation", () => {
+  const info = {
+    provider: {
+      "company-llm": {
+        npm: "@ai-sdk/openai-compatible",
+        options: {
+          baseURL: "https://llm.corp.example/v1",
+          apiKey: "secret-key",
+          headers: { Authorization: "secret-header" },
+        },
+        models: {
+          "company-code": {
+            name: "Company Code",
+            headers: { "X-Model-Token": "model-secret-header" },
+            options: { temperature: 0, apiKey: "model-secret-key", headers: { Authorization: "model-secret" } },
+          },
+        },
+      },
+    },
+  }
+  const policy = {
+    enabled: true,
+    defaultsPath: undefined,
+    allowedOrigins: new Set(["https://llm.corp.example"]),
+  }
+  const result = ConfigEnterprise.publicInfo(info, policy)
+
+  expect(result.provider?.["company-llm"]?.options).toEqual({ baseURL: "https://llm.corp.example/v1" })
+  expect(result.provider?.["company-llm"]?.models?.["company-code"]?.headers).toBeUndefined()
+  expect(result.provider?.["company-llm"]?.models?.["company-code"]?.options).toEqual({ temperature: 0 })
+  expect(info.provider["company-llm"].options.apiKey).toBe("secret-key")
+  expect(info.provider["company-llm"].models["company-code"].headers).toEqual({
+    "X-Model-Token": "model-secret-header",
+  })
+  expect(ConfigEnterprise.publicInfo(info, { ...policy, enabled: false })).toBe(info)
+})

@@ -3,7 +3,7 @@ import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -1545,6 +1545,47 @@ test("public provider info omits invalid models", () => {
 
   expect(result.models.valid).toBeDefined()
   expect(result.models.invalid).toBeUndefined()
+})
+
+test("public provider info can redact runtime credentials without mutation", () => {
+  const provider = Provider.fromModelsDevProvider({
+    id: "company-llm",
+    name: "Company LLM",
+    env: [],
+    models: {
+      "company-code": {
+        id: "company-code",
+        name: "Company Code",
+        cost: { input: 0, output: 0 },
+        limit: { context: 128_000, output: 16_000 },
+      },
+    },
+  } as unknown as ModelsDev.Provider)
+  provider.source = "api"
+  provider.key = "provider-secret-key"
+  provider.options = {
+    baseURL: "https://llm.corp.example/v1",
+    apiKey: "option-secret-key",
+    headers: { Authorization: "provider-secret-header" },
+  }
+  provider.models["company-code"].headers = { "X-Model-Token": "model-secret-header" }
+  provider.models["company-code"].options = {
+    temperature: 0,
+    apiKey: "model-secret-key",
+    headers: { Authorization: "model-option-secret-header" },
+  }
+
+  const result = Provider.toPublicInfo(provider, { redactSecrets: true })
+
+  expect(JSON.stringify(result)).not.toContain("secret")
+  expect(result.key).toBeUndefined()
+  expect(result.options).toEqual({ baseURL: "https://llm.corp.example/v1" })
+  expect(result.models["company-code"].headers).toEqual({})
+  expect(result.models["company-code"].options).toEqual({ temperature: 0 })
+  expect(Schema.is(Provider.Info)(result)).toBe(true)
+  expect(provider.key).toBe("provider-secret-key")
+  expect(provider.options.apiKey).toBe("option-secret-key")
+  expect(provider.models["company-code"].headers).toEqual({ "X-Model-Token": "model-secret-header" })
 })
 
 it.instance("model variants are generated for reasoning models", () =>

@@ -45,6 +45,12 @@ export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
   awaitInitialization: () => Promise<ServerReadyData>
+  enterprise: {
+    enabled: boolean
+    credentialStatus: () => Promise<{ configured: boolean }>
+    setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    clearCredentials: () => Promise<{ restartRequired: true }>
+  }
   wslServers: WslServersAPI
   updater: UpdaterAPI
   consumeInitialDeepLinks: () => Promise<string[]>

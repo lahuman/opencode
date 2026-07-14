@@ -6,13 +6,13 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app } from "electron"
+import { app, safeStorage } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
-import { ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
+import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL, RUNTIME_FEATURES } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
@@ -43,6 +43,11 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import {
+  createEnterpriseCredentialHandlers,
+  createEnterpriseCredentialStore,
+  enterpriseSidecarEnvironment,
+} from "./enterprise-credentials"
 
 const APP_NAMES: Record<string, string> = {
   dev: "OpenCode Dev",
@@ -255,6 +260,14 @@ const main = Effect.gen(function* () {
 
   yield* Effect.promise(() => app.whenReady())
 
+  const enterpriseCredentials = createEnterpriseCredentialStore({
+    file: join(app.getPath("userData"), "enterprise-credentials.bin"),
+    encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (value) => safeStorage.encryptString(value),
+    decrypt: (value) => safeStorage.decryptString(value),
+  })
+  const enterpriseCredentialHandlers = createEnterpriseCredentialHandlers(ENTERPRISE_ENABLED, enterpriseCredentials)
+
   if (!TEST_ONBOARDING) migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
     Effect.tap((result) =>
@@ -300,6 +313,11 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+    enterprise: {
+      credentialStatus: enterpriseCredentialHandlers.status,
+      setCredentials: enterpriseCredentialHandlers.set,
+      clearCredentials: enterpriseCredentialHandlers.clear,
+    },
   })
   registerWslIpcHandlers(wslServers, RUNTIME_FEATURES.wsl)
   if (RUNTIME_FEATURES.updater) {
@@ -350,9 +368,11 @@ const main = Effect.gen(function* () {
     useEnvProxy()
 
     logger.log("spawning sidecar", { url })
-    const { listener, health } = yield* Effect.promise(() =>
+    const { listener, health } = yield* Effect.promise(async () =>
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
+        env: ENTERPRISE_ENABLED ? enterpriseSidecarEnvironment() : undefined,
+        credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.get() : undefined,
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),

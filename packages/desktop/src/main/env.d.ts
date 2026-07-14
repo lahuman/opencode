@@ -20,5 +20,8 @@ declare module "virtual:opencode-server" {
     export const get: typeof import("../../../opencode/dist/types/src/node").Config.get
     export type Info = import("../../../opencode/dist/types/src/node").Config.Info
   }
+  export namespace ProviderEnterprise {
+    export const setCredentials: typeof import("../../../opencode/dist/types/src/node").ProviderEnterprise.setCredentials
+  }
   export const bootstrap: typeof import("../../../opencode/dist/types/src/node").bootstrap
 }

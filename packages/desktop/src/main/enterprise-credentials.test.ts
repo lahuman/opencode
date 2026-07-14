@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createEnterpriseCredentialStore } from "./enterprise-credentials"
+import { createEnterpriseCredentialHandlers, createEnterpriseCredentialStore } from "./enterprise-credentials"
 
 const dirs: string[] = []
 
@@ -85,12 +85,7 @@ describe("enterprise credential store", () => {
     dirs.push(dir)
     const file = join(dir, "credentials.bin")
     await Bun.write(file, "encrypted")
-    const decrypted = [
-      "not json",
-      "null",
-      "[]",
-      JSON.stringify({ apiKey: 123, headers: ["secret-header"] }),
-    ]
+    const decrypted = ["not json", "null", "[]", JSON.stringify({ apiKey: 123, headers: ["secret-header"] })]
     const store = createEnterpriseCredentialStore({
       file,
       encryptionAvailable: () => true,
@@ -99,12 +94,7 @@ describe("enterprise credential store", () => {
     })
 
     const results = await Promise.all(decrypted.map(() => store.get()))
-    expect(results).toEqual([
-      { headers: {} },
-      { headers: {} },
-      { headers: {} },
-      { headers: {} },
-    ])
+    expect(results).toEqual([{ headers: {} }, { headers: {} }, { headers: {} }, { headers: {} }])
   })
 
   test("keeps only string credential values", async () => {
@@ -219,5 +209,80 @@ describe("enterprise credential store", () => {
     expect(await store.get()).toEqual({ headers: {} })
     expect(await Bun.file(file).exists()).toBe(false)
     expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
+  })
+
+  test("credential handlers preserve omitted values and return no secrets", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    const handlers = createEnterpriseCredentialHandlers(true, store)
+    await store.set({ apiKey: "original-key", headers: { "X-Original": "original-header" } })
+
+    const apiKeyResult = await handlers.set({ apiKey: "replacement-key" })
+    expect(apiKeyResult).toEqual({ restartRequired: true })
+    expect(JSON.stringify(apiKeyResult)).not.toContain("replacement-key")
+    expect(await store.get()).toEqual({
+      apiKey: "replacement-key",
+      headers: { "X-Original": "original-header" },
+    })
+
+    const headerResult = await handlers.set({ headers: { "X-Replacement": "replacement-header" } })
+    expect(headerResult).toEqual({ restartRequired: true })
+    expect(JSON.stringify(headerResult)).not.toContain("replacement-header")
+    expect(await store.get()).toEqual({
+      apiKey: "replacement-key",
+      headers: { "X-Replacement": "replacement-header" },
+    })
+
+    await handlers.set({ headers: {} })
+    expect(await store.get()).toEqual({
+      apiKey: "replacement-key",
+      headers: { "X-Replacement": "replacement-header" },
+    })
+  })
+
+  test("credential handlers expose status and explicit clear without secrets", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    const handlers = createEnterpriseCredentialHandlers(true, store)
+    await store.set({ apiKey: "secret-key", headers: { Authorization: "secret-header" } })
+
+    const status = await handlers.status()
+    expect(status).toEqual({ configured: true })
+    expect(JSON.stringify(status)).not.toContain("secret")
+    expect(await handlers.clear()).toEqual({ restartRequired: true })
+    expect(await store.get()).toEqual({ headers: {} })
+    expect(await handlers.status()).toEqual({ configured: false })
+  })
+
+  test("credential handlers are disabled no-ops in ordinary builds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    const handlers = createEnterpriseCredentialHandlers(false, store)
+
+    expect(await handlers.status()).toEqual({ configured: false })
+    expect(await handlers.set({ apiKey: "secret-key" })).toEqual({ restartRequired: true })
+    expect(await handlers.clear()).toEqual({ restartRequired: true })
+    expect(await Bun.file(file).exists()).toBe(false)
   })
 })

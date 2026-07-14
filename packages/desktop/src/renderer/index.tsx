@@ -171,6 +171,15 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     os,
     version: pkg.version,
     windowID: windowState.id,
+    ...(ENTERPRISE_ENABLED
+      ? {
+          enterprise: {
+            credentialStatus: window.api.enterprise.credentialStatus,
+            setCredentials: window.api.enterprise.setCredentials,
+            clearCredentials: window.api.enterprise.clearCredentials,
+          },
+        }
+      : {}),
 
     async openDirectoryPickerDialog(opts) {
       return window.api.openDirectoryPicker({

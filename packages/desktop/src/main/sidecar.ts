@@ -16,6 +16,7 @@ type StartCommand = {
   port: number
   password: string
   userDataPath: string
+  credentials?: unknown
 }
 
 type StopCommand = { type: "stop" }
@@ -54,7 +55,9 @@ async function start(command: StartCommand) {
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
-    const { Server } = await import("virtual:opencode-server")
+    const { ProviderEnterprise, Server } = await import("virtual:opencode-server")
+    ProviderEnterprise.setCredentials(command.credentials)
+    command.credentials = undefined
 
     listener = await Server.listen({
       port: command.port,
@@ -142,6 +145,7 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
     port: command.port,
     password: command.password,
     userDataPath: command.userDataPath,
+    credentials: command.credentials,
   }
 }
 

@@ -10,6 +10,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ConfigEnterprise } from "@/config/enterprise"
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -52,7 +53,9 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
         connected,
       )
       return {
-        all: Object.values(providers).map(Provider.toPublicInfo),
+        all: Object.values(providers).map((provider) =>
+          Provider.toPublicInfo(provider, { redactSecrets: ConfigEnterprise.settings().enabled }),
+        ),
         default: Provider.defaultModelIDs(providers),
         connected: Object.keys(connected),
       }

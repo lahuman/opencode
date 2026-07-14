@@ -31,6 +31,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { ProviderEnterprise } from "./enterprise"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
@@ -1069,8 +1070,8 @@ export const ConfigProvidersResult = Schema.Struct({
 })
 export type ConfigProvidersResult = Types.DeepMutable<Schema.Schema.Type<typeof ConfigProvidersResult>>
 
-export function toPublicInfo(provider: Info): Info {
-  return JSON.parse(
+export function toPublicInfo(provider: Info, options: { redactSecrets?: boolean } = {}): Info {
+  const result: Info = JSON.parse(
     JSON.stringify(
       {
         ...provider,
@@ -1083,6 +1084,16 @@ export function toPublicInfo(provider: Info): Info {
       },
     ),
   )
+  if (!options.redactSecrets) return result
+  delete result.key
+  delete result.options.apiKey
+  delete result.options.headers
+  Object.values(result.models).forEach((model) => {
+    model.headers = {}
+    delete model.options.apiKey
+    delete model.options.headers
+  })
+  return result
 }
 
 export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
@@ -1335,7 +1346,7 @@ const layer = Layer.effect(
         const cfg = yield* config.get()
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
-        const database = mapValues(catalog, toPublicInfo)
+        const database = mapValues(catalog, (provider) => toPublicInfo(provider))
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
         const languages = new Map<string, LanguageModelV3>()
@@ -1712,6 +1723,7 @@ const layer = Layer.effect(
             ...options["headers"],
             ...model.headers,
           }
+        Object.assign(options, ProviderEnterprise.options(model.providerID, options))
 
         const key = Hash.fast(
           JSON.stringify({

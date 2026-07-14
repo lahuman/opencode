@@ -36,6 +36,26 @@ export function upgradeAllowed(policy: Pick<Policy, "enabled"> = settings()) {
   return !policy.enabled
 }
 
+export function publicInfo(info: Info, policy: EnforcementPolicy = settings()): Info {
+  if (!policy.enabled) return info
+  if (!info.provider) return { ...info }
+  return {
+    ...info,
+    provider: mapValues(info.provider, (provider) => ({
+      ...provider,
+      ...(provider.options ? { options: omit(provider.options, ["apiKey", "headers"]) } : {}),
+      ...(provider.models
+        ? {
+            models: mapValues(provider.models, (model) => ({
+              ...omit(model, ["headers"]),
+              ...(model.options ? { options: omit(model.options, ["apiKey", "headers"]) } : {}),
+            })),
+          }
+        : {}),
+    })),
+  }
+}
+
 export function materializeDefaults(info: Info, policy: DefaultsPolicy = settings()): Info {
   if (!policy.enabled) return info
   if (!policy.baseURL || !policy.modelID || !policy.modelName) {
