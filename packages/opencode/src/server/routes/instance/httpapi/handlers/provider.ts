@@ -1,4 +1,5 @@
 import { ProviderAuth } from "@/provider/auth"
+import { ProviderDiagnostic } from "@/provider/diagnostic"
 import { Config } from "@/config/config"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
@@ -36,6 +37,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
   Effect.gen(function* () {
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
+    const diagnostic = yield* ProviderDiagnostic.Service
     const svc = yield* ProviderAuth.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
@@ -64,6 +66,11 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const auth = Effect.fn("ProviderHttpApi.auth")(function* () {
       return yield* svc.methods()
     })
+
+    const diagnose = Effect.fn("ProviderHttpApi.diagnose")(
+      (ctx: { params: { providerID: ProviderV2.ID }; payload: typeof ProviderDiagnostic.Input.Type }) =>
+        diagnostic.run(ctx.params.providerID, ctx.payload),
+    )
 
     const authorize = Effect.fn("ProviderHttpApi.authorize")(function* (ctx: {
       params: { providerID: ProviderV2.ID }
@@ -110,6 +117,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     return handlers
       .handle("list", list)
       .handle("auth", auth)
+      .handle("diagnose", diagnose)
       .handleRaw("authorize", authorizeRaw)
       .handle("callback", callback)
   }),

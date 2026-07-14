@@ -145,6 +145,8 @@ import type {
   PromptInput,
   ProviderAuthErrors,
   ProviderAuthResponses,
+  ProviderDiagnoseErrors,
+  ProviderDiagnoseResponses,
   ProviderListErrors,
   ProviderListResponses,
   ProviderOauthAuthorizeErrors,
@@ -3350,6 +3352,47 @@ export class Provider extends HeyApiClient {
       url: "/provider/auth",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Diagnose provider connection
+   *
+   * Test model response, streaming, and optional tool-call compatibility.
+   */
+  public diagnose<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      directory?: string
+      workspace?: string
+      modelID?: string
+      checkToolCall?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "modelID" },
+            { in: "body", key: "checkToolCall" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<ProviderDiagnoseResponses, ProviderDiagnoseErrors, ThrowOnError>({
+      url: "/provider/{providerID}/diagnostics",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

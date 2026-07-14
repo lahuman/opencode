@@ -9357,6 +9357,50 @@ export type ProviderAuthResponses = {
 
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
 
+export type ProviderDiagnoseData = {
+  body?: {
+    modelID: string
+    checkToolCall: boolean
+  }
+  path: {
+    providerID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/{providerID}/diagnostics"
+}
+
+export type ProviderDiagnoseErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderDiagnoseError = ProviderDiagnoseErrors[keyof ProviderDiagnoseErrors]
+
+export type ProviderDiagnoseResponses = {
+  /**
+   * Provider diagnostic result
+   */
+  200: {
+    ok: boolean
+    checks: {
+      basic: "pass" | "fail" | "skipped"
+      streaming: "pass" | "fail" | "skipped"
+      toolCall: "pass" | "fail" | "skipped"
+    }
+    failure?: {
+      kind: "connection" | "dns" | "tls" | "timeout" | "auth" | "model" | "response" | "stream" | "tool_call"
+      message: string
+    }
+  }
+}
+
+export type ProviderDiagnoseResponse = ProviderDiagnoseResponses[keyof ProviderDiagnoseResponses]
+
 export type ProviderOauthAuthorizeData = {
   body?: {
     /**

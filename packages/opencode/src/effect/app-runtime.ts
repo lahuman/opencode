@@ -14,6 +14,7 @@ import { Snapshot } from "@/snapshot"
 import { Plugin } from "@/plugin"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
+import { ProviderDiagnostic } from "@/provider/diagnostic"
 import { ProviderAuth } from "@/provider/auth"
 import { Agent } from "@/agent/agent"
 import { Skill } from "@/skill"
@@ -69,6 +70,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     Plugin.node,
     ModelsDev.node,
     Provider.node,
+    ProviderDiagnostic.node,
     ProviderAuth.node,
     Agent.node,
     Skill.node,

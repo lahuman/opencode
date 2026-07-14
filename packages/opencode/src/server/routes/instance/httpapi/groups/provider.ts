@@ -1,4 +1,5 @@
 import { ProviderAuth } from "@/provider/auth"
+import { ProviderDiagnostic } from "@/provider/diagnostic"
 import { Provider } from "@/provider/provider"
 
 import { Schema } from "effect"
@@ -53,6 +54,18 @@ export const ProviderApi = HttpApi.make("provider")
             identifier: "provider.auth",
             summary: "Get provider auth methods",
             description: "Retrieve available authentication methods for all AI providers.",
+          }),
+        ),
+        HttpApiEndpoint.post("diagnose", `${root}/:providerID/diagnostics`, {
+          params: { providerID: ProviderV2.ID },
+          query: WorkspaceRoutingQuery,
+          payload: ProviderDiagnostic.Input,
+          success: described(ProviderDiagnostic.Result, "Provider diagnostic result"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.diagnose",
+            summary: "Diagnose provider connection",
+            description: "Test model response, streaming, and optional tool-call compatibility.",
           }),
         ),
         HttpApiEndpoint.post("authorize", `${root}/:providerID/oauth/authorize`, {
