@@ -3,9 +3,13 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "..",
-    "types": ["node", "bun"]
+    "types": ["node", "bun", "vite/client"]
   },
   "include": [
+    "../package.json",
+    "../src",
+    "./company-llm-enterprise.spec.ts",
+    "./fixtures/company-llm-enterprise.tsx",
     "./performance/timeline-stability/**/*.spec.ts",
     "./performance/timeline-stability/fixture.test.ts",
     "./performance/timeline-stability/fixture.ts",

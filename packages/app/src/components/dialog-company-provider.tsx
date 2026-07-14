@@ -241,6 +241,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
 
   const diagnose = async () => {
     if (!companyProviderCanStart(action(), Boolean(modelID()))) return
+    setResult()
     setAction("diagnose")
     setError()
     const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), modelID())
@@ -259,6 +260,12 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
 
   const selectedModel = createMemo(() => config().models.find((model) => model.id === modelID()))
   const input = createMemo(() => companyProviderCredentialInput(apiKey(), headers))
+  const diagnosticStatus = () => {
+    if (action() === "diagnose") return "Testing Company LLM connection"
+    if (!result()) return "Ready to test Company LLM connection"
+    if (result()?.ok) return "Company LLM connection test completed successfully"
+    return ""
+  }
 
   return (
     <Dialog title="Company LLM">
@@ -368,6 +375,16 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           </Button>
         </div>
 
+        <span
+          class="sr-only"
+          data-slot="company-diagnostic-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {diagnosticStatus()}
+        </span>
+
         <Show when={error()}>
           {(message) => (
             <p class="text-12-regular text-text-danger-base" role="alert">
@@ -379,9 +396,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
         <Show when={result()}>
           {(diagnostic) => (
             <div
+              data-slot="company-diagnostic-result"
               class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular"
-              role={diagnostic().ok ? "status" : "alert"}
-              aria-live={diagnostic().ok ? "polite" : undefined}
+              role={diagnostic().ok ? undefined : "alert"}
               aria-atomic="true"
             >
               <span class="text-text-weak">Basic response</span>
