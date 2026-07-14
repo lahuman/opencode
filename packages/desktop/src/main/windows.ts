@@ -4,7 +4,7 @@ import type { DesktopTheme } from "@opencode-ai/ui/theme/types"
 import oc2ThemeJson from "../../../ui/src/theme/themes/oc-2.json"
 import { randomUUID } from "node:crypto"
 import { rmSync } from "node:fs"
-import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol } from "electron"
+import { app, BrowserWindow, dialog, nativeImage, nativeTheme, protocol, session } from "electron"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import {
@@ -24,6 +24,7 @@ const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
 const rendererProtocol = "oc"
 const rendererHost = "renderer"
+const rendererAssetPartition = "opencode-renderer-assets"
 const clipboardWritePermission = "clipboard-sanitized-write"
 const notificationPermission = "notifications"
 const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
@@ -257,18 +258,20 @@ export function installEnterpriseWindowPolicy(
 
   win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
     const allowed = enterpriseRendererRequestAllowed(profile, details.url)
-    if (!allowed) blocked(details.url, details.resourceType)
     callback({ cancel: !allowed })
+    if (!allowed) blocked(details.url, details.resourceType)
   })
   win.webContents.setWindowOpenHandler((details) => {
     blocked(details.url, "windowOpen")
     return { action: "deny" }
   })
-  win.webContents.on("will-navigate", (event, url) => {
+  const guardNavigation = (event: Electron.Event, url: string) => {
     if (trustedRendererURL(url)) return
     event.preventDefault()
     blocked(url, "mainFrame")
-  })
+  }
+  win.webContents.on("will-navigate", guardNavigation)
+  win.webContents.on("will-redirect", guardNavigation)
 }
 
 function registerWindow(win: BrowserWindow, id: string) {
@@ -292,44 +295,62 @@ function windowDataFile(id: string) {
   return `opencode.window.${id.replace(/[^a-zA-Z0-9._-]/g, "-")}.dat`
 }
 
-export function registerRendererProtocol() {
+export function registerRendererProtocol(options: { rendererRoot?: string } = {}) {
   if (protocol.isProtocolHandled(rendererProtocol)) return
 
+  const root = options.rendererRoot ?? rendererRoot
+  // This in-memory session is retained only by the main-process handler. The
+  // renderer can reach it only after host, decoding, and root containment checks.
+  const assetSession = session.fromPartition(rendererAssetPartition)
   protocol.handle(rendererProtocol, async (request) => {
-    const url = new URL(request.url)
+    const url = parseRendererRequestURL(request.url)
+    if (!url) return rejectRendererRequest("invalid-url")
     if (url.host !== rendererHost) {
-      writeLog("protocol", "rejected host", { url: request.url }, "warn")
-      return new Response("Not found", { status: 404 })
+      return rejectRendererRequest("invalid-host")
     }
 
-    const file = resolve(rendererRoot, `.${decodeURIComponent(url.pathname)}`)
-    const rel = relative(rendererRoot, file)
+    const pathname = decodeRendererPath(url.pathname)
+    if (pathname === undefined) return rejectRendererRequest("invalid-encoding")
+    const file = resolve(root, `.${pathname}`)
+    const rel = relative(root, file)
     if (rel.startsWith("..") || isAbsolute(rel)) {
-      writeLog("protocol", "rejected path", { url: request.url, file }, "warn")
-      return new Response("Not found", { status: 404 })
+      return rejectRendererRequest("path-traversal")
     }
 
     try {
-      const response = await net.fetch(pathToFileURL(file).toString())
+      const response = await assetSession.fetch(pathToFileURL(file).toString())
       if (response.status >= 400) {
         writeLog(
           "protocol",
-          "fetch failed",
-          {
-            url: request.url,
-            file,
-            status: response.status,
-            statusText: response.statusText,
-          },
+          "renderer asset unavailable",
+          { reason: "asset-fetch-failed", status: response.status },
           "error",
         )
       }
       return addDocumentPolicy(response, file)
-    } catch (error) {
-      writeLog("protocol", "fetch error", { url: request.url, file, error }, "error")
+    } catch {
+      writeLog("protocol", "renderer asset unavailable", { reason: "asset-fetch-error", status: 404 }, "error")
       return new Response("Not found", { status: 404 })
     }
   })
+}
+
+function parseRendererRequestURL(value: string) {
+  if (!URL.canParse(value)) return undefined
+  return new URL(value)
+}
+
+function decodeRendererPath(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return undefined
+  }
+}
+
+function rejectRendererRequest(reason: "invalid-url" | "invalid-host" | "invalid-encoding" | "path-traversal") {
+  writeLog("protocol", "rejected renderer asset request", { reason, status: 404 }, "warn")
+  return new Response("Not found", { status: 404 })
 }
 
 function loadWindow(win: BrowserWindow, html: string) {

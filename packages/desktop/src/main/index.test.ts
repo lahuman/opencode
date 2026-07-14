@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
-import { createEnterpriseURLHandler, enterpriseTelemetryEnabled, parseEnterpriseProfile } from "../enterprise"
+import { enterpriseTelemetryEnabled } from "../enterprise"
 import { forwardInitializationFailure } from "./initialization"
 import { desktopRuntimeFeatures } from "./runtime-features"
 
@@ -21,29 +21,6 @@ test("ordinary production keeps updater and WSL", () => {
 test("enterprise profile disables telemetry even when a DSN is present", () => {
   expect(enterpriseTelemetryEnabled({ enabled: true }, "https://sentry.example/1")).toBe(false)
   expect(enterpriseTelemetryEnabled({ enabled: false }, "https://sentry.example/1")).toBe(true)
-})
-
-test("main external URL policy rejects before shell.openExternal", async () => {
-  const calls: string[] = []
-  const openExternalURL = createEnterpriseURLHandler(
-    parseEnterpriseProfile({
-      OPENCODE_ENTERPRISE: "1",
-      OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
-      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
-    }),
-    async (url) => {
-      calls.push(url)
-    },
-  )
-
-  await openExternalURL("https://opencode.ai/docs?token=main-secret")
-  await openExternalURL("https://llm.corp.example/docs")
-  await openExternalURL("https://user:secret@llm.corp.example/docs")
-
-  expect(calls).toEqual(["https://llm.corp.example/docs"])
 })
 
 describe("desktop initialization", () => {

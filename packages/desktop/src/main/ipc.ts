@@ -6,6 +6,7 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
 import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
+import { createEnterpriseURLHandler, type EnterpriseProfile } from "../enterprise"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { readEnterpriseGuide } from "./enterprise-guide"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
@@ -54,6 +55,23 @@ type Deps = {
 }
 
 export type IpcRegistry = Pick<typeof ipcMain, "handle" | "on">
+
+export function registerMainIpcHandlers(
+  deps: Omit<Deps, "openExternalURL">,
+  input: {
+    profile: EnterpriseProfile
+    openExternal: (url: string) => Promise<void> | void
+    registry?: IpcRegistry
+  },
+) {
+  return registerIpcHandlers(
+    {
+      ...deps,
+      openExternalURL: createEnterpriseURLHandler(input.profile, input.openExternal),
+    },
+    input.registry,
+  )
+}
 
 export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain) {
   const updaterSubscriptions = createUpdaterSubscriptions()

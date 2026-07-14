@@ -24,10 +24,12 @@ mock.module("electron", () => ({
   net: {},
   netLog: {},
   protocol: { registerSchemesAsPrivileged: () => undefined },
+  session: { fromPartition: () => ({ fetch: () => undefined }) },
   shell: { openExternal: (url: string) => shellOpenExternalURLs.push(url), openPath: () => undefined },
 }))
 
-const { registerIpcHandlers } = await import("../src/main/ipc")
+const { registerMainIpcHandlers } = await import("../src/main/ipc")
+const { parseEnterpriseProfile } = await import("../src/enterprise")
 const { createUpdaterController } = await import("../src/main/updater-controller")
 const directory = await mkdtemp(join(tmpdir(), "enterprise-guide-registration-"))
 
@@ -36,7 +38,6 @@ try {
   await writeFile(path, "# Registered guide\n", "utf8")
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const listeners = new Map<string, (...args: unknown[]) => unknown>()
-  const openExternalURLs: string[] = []
   const updater = createUpdaterController({
     enabled: false,
     currentVersion: "2026.08",
@@ -53,7 +54,7 @@ try {
     stop: async () => undefined,
   })
 
-  registerIpcHandlers(
+  registerMainIpcHandlers(
     {
       killSidecar() {},
       relaunch() {},
@@ -73,9 +74,6 @@ try {
       setBackgroundColor() {},
       exportDebugLogs: async () => "logs.zip",
       recordFatalRendererError() {},
-      openExternalURL: async (url) => {
-        openExternalURLs.push(url)
-      },
       enterprise: {
         credentialStatus: async () => ({ configured: false }),
         setCredentials: async () => ({ restartRequired: true }),
@@ -84,18 +82,30 @@ try {
       },
     },
     {
-      handle: (channel, handler) => handlers.set(channel, handler),
-      on: (channel, handler) => listeners.set(channel, handler),
+      profile: parseEnterpriseProfile({
+        OPENCODE_ENTERPRISE: "1",
+        OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+        OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+        OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      }),
+      openExternal: (url) => shellOpenExternalURLs.push(url),
+      registry: {
+        handle: (channel, handler) => handlers.set(channel, handler),
+        on: (channel, handler) => listeners.set(channel, handler),
+      },
     },
   )
 
+  await listeners.get("open-link")?.({}, "https://opencode.ai/docs?token=main-secret")
   await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
+  await listeners.get("open-link")?.({}, "https://user:secret@llm.corp.example/docs")
 
   console.log(
     JSON.stringify({
       registered: handlers.has("enterprise-guide-read"),
       guide: await handlers.get("enterprise-guide-read")?.(),
-      openExternalURLs,
       shellOpenExternalURLs,
     }),
   )

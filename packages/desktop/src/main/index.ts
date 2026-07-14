@@ -12,15 +12,10 @@ import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
-import {
-  createEnterpriseURLHandler,
-  ENTERPRISE_ENABLED,
-  ENTERPRISE_PROFILE,
-  enterpriseEnvironment,
-} from "../enterprise"
+import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL, RUNTIME_FEATURES } from "./constants"
-import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
+import { registerMainIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
 import { parseMarkdown } from "./markdown"
@@ -298,45 +293,50 @@ const main = Effect.gen(function* () {
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
-  registerIpcHandlers({
-    killSidecar: () => killSidecar(),
-    relaunch,
-    awaitInitialization: Effect.fnUntraced(
-      function* () {
-        logger.log("awaiting server ready")
-        const res = yield* Deferred.await(serverReady)
-        logger.log("server ready", { url: res.url })
-        return res
-      },
-      (e) => Effect.runPromise(e),
-    ),
-    consumeInitialDeepLinks: () => pendingDeepLinks.splice(0),
-    getDefaultServerUrl: () => getDefaultServerUrl(),
-    setDefaultServerUrl: (url) => setDefaultServerUrl(url),
-    isFirstLaunchOnboardingPending,
-    finishFirstLaunchOnboarding,
-    getDisplayBackend: async () => null,
-    setDisplayBackend: async () => undefined,
-    parseMarkdown: async (markdown) => parseMarkdown(markdown),
-    checkAppExists: (appName) => checkAppExists(appName),
-    resolveAppPath: async (appName) => resolveAppPath(appName),
-    updater,
-    showUpdater: () => showUpdaterDialog(updater, true),
-    setBackgroundColor: (color) => setBackgroundColor(color),
-    exportDebugLogs: () => exportDebugLogs(),
-    recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
-    openExternalURL: createEnterpriseURLHandler(ENTERPRISE_PROFILE, (url) => shell.openExternal(url)),
-    enterprise: {
-      credentialStatus: enterpriseCredentialHandlers.status,
-      setCredentials: enterpriseCredentialHandlers.set,
-      clearCredentials: enterpriseCredentialHandlers.clear,
-      guide: {
-        enabled: ENTERPRISE_PROFILE.enabled,
-        path: enterpriseGuide,
-        version: ENTERPRISE_PROFILE.enabled ? ENTERPRISE_PROFILE.guideVersion : "",
+  registerMainIpcHandlers(
+    {
+      killSidecar: () => killSidecar(),
+      relaunch,
+      awaitInitialization: Effect.fnUntraced(
+        function* () {
+          logger.log("awaiting server ready")
+          const res = yield* Deferred.await(serverReady)
+          logger.log("server ready", { url: res.url })
+          return res
+        },
+        (e) => Effect.runPromise(e),
+      ),
+      consumeInitialDeepLinks: () => pendingDeepLinks.splice(0),
+      getDefaultServerUrl: () => getDefaultServerUrl(),
+      setDefaultServerUrl: (url) => setDefaultServerUrl(url),
+      isFirstLaunchOnboardingPending,
+      finishFirstLaunchOnboarding,
+      getDisplayBackend: async () => null,
+      setDisplayBackend: async () => undefined,
+      parseMarkdown: async (markdown) => parseMarkdown(markdown),
+      checkAppExists: (appName) => checkAppExists(appName),
+      resolveAppPath: async (appName) => resolveAppPath(appName),
+      updater,
+      showUpdater: () => showUpdaterDialog(updater, true),
+      setBackgroundColor: (color) => setBackgroundColor(color),
+      exportDebugLogs: () => exportDebugLogs(),
+      recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+      enterprise: {
+        credentialStatus: enterpriseCredentialHandlers.status,
+        setCredentials: enterpriseCredentialHandlers.set,
+        clearCredentials: enterpriseCredentialHandlers.clear,
+        guide: {
+          enabled: ENTERPRISE_PROFILE.enabled,
+          path: enterpriseGuide,
+          version: ENTERPRISE_PROFILE.enabled ? ENTERPRISE_PROFILE.guideVersion : "",
+        },
       },
     },
-  })
+    {
+      profile: ENTERPRISE_PROFILE,
+      openExternal: (url) => shell.openExternal(url),
+    },
+  )
   registerWslIpcHandlers(wslServers, RUNTIME_FEATURES.wsl)
   if (RUNTIME_FEATURES.updater) {
     void updater.start()
