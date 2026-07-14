@@ -6,13 +6,18 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, safeStorage } from "electron"
+import { app, safeStorage, shell } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 
 import type { ServerReadyData } from "../preload/types"
-import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
+import {
+  createEnterpriseURLHandler,
+  ENTERPRISE_ENABLED,
+  ENTERPRISE_PROFILE,
+  enterpriseEnvironment,
+} from "../enterprise"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL, RUNTIME_FEATURES } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
@@ -320,6 +325,7 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+    openExternalURL: createEnterpriseURLHandler(ENTERPRISE_PROFILE, (url) => shell.openExternal(url)),
     enterprise: {
       credentialStatus: enterpriseCredentialHandlers.status,
       setCredentials: enterpriseCredentialHandlers.set,

@@ -29,7 +29,13 @@ import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
 import { useTheme } from "@opencode-ai/ui/theme/context"
-import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseTelemetryEnabled } from "../enterprise"
+import {
+  createEnterpriseRendererNetwork,
+  desktopNotificationOptions,
+  ENTERPRISE_ENABLED,
+  ENTERPRISE_PROFILE,
+  enterpriseTelemetryEnabled,
+} from "../enterprise"
 import { mapEnterpriseAPI } from "../preload/types"
 
 const root = document.getElementById("root")
@@ -166,6 +172,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
   })()
 
   const wslServersApi = os === "windows" && !ENTERPRISE_ENABLED ? window.api.wslServers : undefined
+  const network = createEnterpriseRendererNetwork(ENTERPRISE_PROFILE, {
+    openLink: (url) => window.api.openLink(url),
+    fetch,
+  })
 
   return {
     platform: "desktop",
@@ -215,9 +225,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       })
     },
 
-    openLink(url: string) {
-      window.api.openLink(url)
-    },
+    openLink: network.openLink,
     async openPath(path: string, app?: string) {
       if (os === "windows") {
         const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
@@ -255,10 +263,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())
       if (focused) return
 
-      const notification = new Notification(title, {
-        body: description ?? "",
-        icon: "https://opencode.ai/favicon-96x96-v3.png",
-      })
+      const notification = new Notification(
+        title,
+        desktopNotificationOptions(ENTERPRISE_PROFILE, description ?? "", window.location.href),
+      )
       notification.onclick = () => {
         void window.api.showWindow()
         void window.api.setWindowFocus()
@@ -267,10 +275,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       }
     },
 
-    fetch: (input, init) => {
-      if (input instanceof Request) return fetch(input)
-      return fetch(input, init)
-    },
+    fetch: network.fetch,
 
     getDefaultServer: async () => {
       if (ENTERPRISE_ENABLED) return ServerConnection.Key.make("sidecar")

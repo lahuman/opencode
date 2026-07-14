@@ -9,6 +9,19 @@ import { DialogReleaseNotes, type Highlight } from "@/components/dialog-release-
 
 const CHANGELOG_URL = "https://opencode.ai/changelog.json"
 
+export function shouldLoadReleaseHighlights(enterprise: boolean) {
+  return !enterprise
+}
+
+export function loadReleaseHighlightsForEdition(input: {
+  enterprise: boolean
+  markSeen: () => void
+  load: () => void
+}) {
+  if (shouldLoadReleaseHighlights(input.enterprise)) return input.load()
+  input.markSeen()
+}
+
 type Store = {
   version?: string
 }
@@ -164,42 +177,47 @@ export const { use: useHighlights, provider: HighlightsProvider } = createSimple
       setStore("version", platform.version)
     }
 
-    const start = (previous: string) => {
-      if (!settings.general.releaseNotes()) {
-        markSeen()
-        return
-      }
-
-      const fetcher = platform.fetch ?? fetch
-      const controller = new AbortController()
-      onCleanup(() => {
-        controller.abort()
-        clearTimer()
-      })
-
-      fetcher(CHANGELOG_URL, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      })
-        .then((response) => (response.ok ? (response.json() as Promise<unknown>) : undefined))
-        .then((json) => {
-          if (!json) return
-          const highlights = loadReleaseHighlights(json, platform.version, previous)
-          if (controller.signal.aborted) return
-
-          if (highlights.length === 0) {
+    const start = (previous: string) =>
+      loadReleaseHighlightsForEdition({
+        enterprise: Boolean(platform.enterprise),
+        markSeen,
+        load: () => {
+          if (!settings.general.releaseNotes()) {
             markSeen()
             return
           }
 
-          timer = setTimeout(() => {
-            timer = undefined
-            markSeen()
-            dialog.show(() => <DialogReleaseNotes highlights={highlights} />)
-          }, 500)
-        })
-        .catch(() => undefined)
-    }
+          const fetcher = platform.fetch ?? fetch
+          const controller = new AbortController()
+          onCleanup(() => {
+            controller.abort()
+            clearTimer()
+          })
+
+          fetcher(CHANGELOG_URL, {
+            signal: controller.signal,
+            headers: { Accept: "application/json" },
+          })
+            .then((response) => (response.ok ? (response.json() as Promise<unknown>) : undefined))
+            .then((json) => {
+              if (!json) return
+              const highlights = loadReleaseHighlights(json, platform.version, previous)
+              if (controller.signal.aborted) return
+
+              if (highlights.length === 0) {
+                markSeen()
+                return
+              }
+
+              timer = setTimeout(() => {
+                timer = undefined
+                markSeen()
+                dialog.show(() => <DialogReleaseNotes highlights={highlights} />)
+              }, 500)
+            })
+            .catch(() => undefined)
+        },
+      })
 
     createEffect(() => {
       if (state.started) return

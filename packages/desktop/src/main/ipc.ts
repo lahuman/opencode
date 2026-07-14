@@ -40,6 +40,7 @@ type Deps = {
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
+  openExternalURL: (url: string) => Promise<void> | void
   enterprise: {
     credentialStatus: () => Promise<{ configured: boolean }>
     setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
@@ -193,7 +194,7 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   )
 
   registry.on("open-link", (_event: IpcMainEvent, url: string) => {
-    void shell.openExternal(url)
+    void deps.openExternalURL(url)
   })
 
   registry.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {

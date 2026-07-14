@@ -7,6 +7,12 @@ import { rmSync } from "node:fs"
 import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol } from "electron"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import {
+  ENTERPRISE_PROFILE,
+  enterpriseRendererRequestAllowed,
+  enterpriseURLOrigin,
+  type EnterpriseProfile,
+} from "../enterprise"
 import type { TitlebarTheme } from "../preload/types"
 import { exportDebugLogs, write as writeLog } from "./logging"
 import { getStore, removeStoreFile } from "./store"
@@ -202,6 +208,7 @@ export function createMainWindow(id: string = randomUUID()) {
 
   allowRendererPermissions(win)
   wireWindowRecovery(win, id)
+  installEnterpriseWindowPolicy(win)
 
   win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     const { requestHeaders } = details
@@ -225,6 +232,43 @@ export function createMainWindow(id: string = randomUUID()) {
   })
 
   return win
+}
+
+export function installEnterpriseWindowPolicy(
+  win: BrowserWindow,
+  options: {
+    profile?: EnterpriseProfile
+    trustedRendererURL?: (url: string) => boolean
+    write?: (
+      service: string,
+      message: string,
+      metadata: { origin: string; resourceType: string },
+      level: "warn",
+    ) => void
+  } = {},
+) {
+  const profile = options.profile ?? ENTERPRISE_PROFILE
+  if (!profile.enabled) return
+  const trustedRendererURL = options.trustedRendererURL ?? isTrustedRendererUrl
+  const write = options.write ?? writeLog
+  const blocked = (url: string, resourceType: string) => {
+    write("window", "blocked enterprise renderer request", { origin: enterpriseURLOrigin(url), resourceType }, "warn")
+  }
+
+  win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+    const allowed = enterpriseRendererRequestAllowed(profile, details.url)
+    if (!allowed) blocked(details.url, details.resourceType)
+    callback({ cancel: !allowed })
+  })
+  win.webContents.setWindowOpenHandler((details) => {
+    blocked(details.url, "windowOpen")
+    return { action: "deny" }
+  })
+  win.webContents.on("will-navigate", (event, url) => {
+    if (trustedRendererURL(url)) return
+    event.preventDefault()
+    blocked(url, "mainFrame")
+  })
 }
 
 function registerWindow(win: BrowserWindow, id: string) {

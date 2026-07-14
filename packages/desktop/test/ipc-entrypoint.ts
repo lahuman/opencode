@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+const shellOpenExternalURLs: string[] = []
+
 mock.module("electron", () => ({
   default: { app: { getPath: () => "" } },
   app: { getPath: () => "", once: () => undefined },
@@ -22,7 +24,7 @@ mock.module("electron", () => ({
   net: {},
   netLog: {},
   protocol: { registerSchemesAsPrivileged: () => undefined },
-  shell: { openExternal: () => undefined, openPath: () => undefined },
+  shell: { openExternal: (url: string) => shellOpenExternalURLs.push(url), openPath: () => undefined },
 }))
 
 const { registerIpcHandlers } = await import("../src/main/ipc")
@@ -33,6 +35,8 @@ try {
   const path = join(directory, "company-guide.md")
   await writeFile(path, "# Registered guide\n", "utf8")
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const listeners = new Map<string, (...args: unknown[]) => unknown>()
+  const openExternalURLs: string[] = []
   const updater = createUpdaterController({
     enabled: false,
     currentVersion: "2026.08",
@@ -69,6 +73,9 @@ try {
       setBackgroundColor() {},
       exportDebugLogs: async () => "logs.zip",
       recordFatalRendererError() {},
+      openExternalURL: async (url) => {
+        openExternalURLs.push(url)
+      },
       enterprise: {
         credentialStatus: async () => ({ configured: false }),
         setCredentials: async () => ({ restartRequired: true }),
@@ -78,14 +85,18 @@ try {
     },
     {
       handle: (channel, handler) => handlers.set(channel, handler),
-      on() {},
+      on: (channel, handler) => listeners.set(channel, handler),
     },
   )
+
+  await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
 
   console.log(
     JSON.stringify({
       registered: handlers.has("enterprise-guide-read"),
       guide: await handlers.get("enterprise-guide-read")?.(),
+      openExternalURLs,
+      shellOpenExternalURLs,
     }),
   )
 } finally {

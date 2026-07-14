@@ -47,6 +47,8 @@ describe("enterprise guide IPC", () => {
       JSON.stringify({
         registered: true,
         guide: { version: "2026.08", markdown: "# Registered guide\n" },
+        openExternalURLs: ["https://llm.corp.example/docs"],
+        shellOpenExternalURLs: [],
       }),
     )
   })
