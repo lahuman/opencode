@@ -2121,6 +2121,63 @@ it.effect("loads enterprise defaults below global, project, and managed settings
   }),
 )
 
+it.effect("prepends the bundled guide before project instructions and deduplicates it", () =>
+  Effect.gen(function* () {
+    const enterprise = yield* tmpdirScoped()
+    const emptyGlobal = yield* tmpdirScoped()
+    const root = yield* tmpdirScoped()
+    const project = path.join(root, "project")
+    const duplicate = path.join(root, "duplicate")
+    const enterpriseFile = path.join(enterprise, "enterprise.jsonc")
+    const enterpriseGuide = path.join(enterprise, "company-guide.md")
+    yield* writeConfigEffect(enterprise, schemaConfig({}), "enterprise.jsonc")
+    yield* writeConfigEffect(project, schemaConfig({ instructions: ["project-guide.md"] }))
+    yield* writeConfigEffect(duplicate, schemaConfig({ instructions: ["project-guide.md"] }))
+
+    yield* withProcessEnvs(
+      {
+        OPENCODE_ENTERPRISE_OFFLINE: "1",
+        OPENCODE_ENTERPRISE_DEFAULTS_PATH: enterpriseFile,
+        OPENCODE_ENTERPRISE_GUIDE_PATH: enterpriseGuide,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+        OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+        OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+        OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      },
+      Effect.gen(function* () {
+        yield* withGlobalConfigDir(
+          emptyGlobal,
+          withInstanceDir(
+            project,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).instructions).toEqual([enterpriseGuide, "project-guide.md"])
+            }),
+          ),
+        )
+
+        yield* writeConfigEffect(
+          enterprise,
+          schemaConfig({ instructions: ["enterprise-guide.md", enterpriseGuide] }),
+          "enterprise.jsonc",
+        )
+        yield* withGlobalConfigDir(
+          emptyGlobal,
+          withInstanceDir(
+            duplicate,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).instructions).toEqual([
+                enterpriseGuide,
+                "enterprise-guide.md",
+                "project-guide.md",
+              ])
+            }),
+          ),
+        )
+      }),
+    )
+  }),
+)
+
 it.effect("allows project provider overrides only on packaged internal origins", () =>
   withConfigTree(
     {

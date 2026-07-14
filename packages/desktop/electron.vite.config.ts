@@ -20,6 +20,8 @@ const enterpriseProfile = parseEnterpriseProfile({
   OPENCODE_ENTERPRISE_BASE_URL: process.env.OPENCODE_ENTERPRISE_BASE_URL,
   OPENCODE_ENTERPRISE_MODEL_ID: process.env.OPENCODE_ENTERPRISE_MODEL_ID,
   OPENCODE_ENTERPRISE_MODEL_NAME: process.env.OPENCODE_ENTERPRISE_MODEL_NAME,
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: process.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION,
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: process.env.OPENCODE_ENTERPRISE_GUIDE_VERSION,
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS,
 })
 
@@ -29,6 +31,8 @@ const enterprise = enterpriseProfile.enabled
       "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(enterpriseProfile.baseURL),
       "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(enterpriseProfile.modelID),
       "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(enterpriseProfile.modelName),
+      "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify(enterpriseProfile.defaultsVersion),
+      "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify(enterpriseProfile.guideVersion),
       "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(enterpriseProfile.allowedOrigins.join(",")),
     }
   : {
@@ -36,6 +40,8 @@ const enterprise = enterpriseProfile.enabled
       "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS": JSON.stringify(""),
     }
 

@@ -5,6 +5,8 @@ export type EnterpriseProfile =
       baseURL: string
       modelID: string
       modelName: string
+      defaultsVersion: string
+      guideVersion: string
       allowedOrigins: string[]
     }
 
@@ -16,9 +18,13 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
   const baseURL = env.OPENCODE_ENTERPRISE_BASE_URL?.trim()
   const modelID = env.OPENCODE_ENTERPRISE_MODEL_ID?.trim()
   const modelName = env.OPENCODE_ENTERPRISE_MODEL_NAME?.trim()
+  const defaultsVersion = env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION?.trim()
+  const guideVersion = env.OPENCODE_ENTERPRISE_GUIDE_VERSION?.trim()
   if (!baseURL) throw new Error("OPENCODE_ENTERPRISE_BASE_URL is required")
   if (!modelID) throw new Error("OPENCODE_ENTERPRISE_MODEL_ID is required")
   if (!modelName) throw new Error("OPENCODE_ENTERPRISE_MODEL_NAME is required")
+  if (!defaultsVersion) throw new Error("OPENCODE_ENTERPRISE_DEFAULTS_VERSION is required")
+  if (!guideVersion) throw new Error("OPENCODE_ENTERPRISE_GUIDE_VERSION is required")
 
   const url = (() => {
     try {
@@ -52,7 +58,15 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
         }),
     ]),
   )
-  return { enabled: true, baseURL: url.toString(), modelID, modelName, allowedOrigins }
+  return {
+    enabled: true,
+    baseURL: url.toString(),
+    modelID,
+    modelName,
+    defaultsVersion,
+    guideVersion,
+    allowedOrigins,
+  }
 }
 
 export function enterpriseEnvironment(
@@ -63,6 +77,8 @@ export function enterpriseEnvironment(
   return {
     OPENCODE_ENTERPRISE_OFFLINE: "1",
     OPENCODE_ENTERPRISE_DEFAULTS_PATH: paths.defaults,
+    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: profile.defaultsVersion,
+    OPENCODE_ENTERPRISE_GUIDE_VERSION: profile.guideVersion,
     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: profile.allowedOrigins.join(","),
     OPENCODE_ENTERPRISE_BASE_URL: profile.baseURL,
     OPENCODE_ENTERPRISE_MODEL_ID: profile.modelID,

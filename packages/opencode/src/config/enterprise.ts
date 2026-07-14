@@ -19,6 +19,7 @@ export function settings() {
   return {
     enabled,
     defaultsPath: enabled ? process.env.OPENCODE_ENTERPRISE_DEFAULTS_PATH : undefined,
+    guidePath: enabled ? process.env.OPENCODE_ENTERPRISE_GUIDE_PATH : undefined,
     baseURL: enabled ? process.env.OPENCODE_ENTERPRISE_BASE_URL : undefined,
     modelID: enabled ? process.env.OPENCODE_ENTERPRISE_MODEL_ID : undefined,
     modelName: enabled ? process.env.OPENCODE_ENTERPRISE_MODEL_NAME : undefined,
@@ -65,10 +66,14 @@ export function materializeDefaults(info: Info, policy: DefaultsPolicy = setting
   if (!policy.baseURL || !policy.modelID || !policy.modelName) {
     throw new Error("Enterprise provider metadata is incomplete")
   }
+  const guidePath = policy.guidePath
   const current = info.provider?.["company-llm"]
   return {
     ...info,
     model: info.model ?? `company-llm/${policy.modelID}`,
+    ...(guidePath
+      ? { instructions: [guidePath, ...(info.instructions ?? []).filter((item) => item !== guidePath)] }
+      : {}),
     provider: {
       ...info.provider,
       "company-llm": {

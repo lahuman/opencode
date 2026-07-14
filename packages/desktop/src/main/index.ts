@@ -184,6 +184,12 @@ const main = Effect.gen(function* () {
     packaged: app.isPackaged,
     onboardingTest: Boolean(onboardingTestRoot),
   })
+  if (ENTERPRISE_PROFILE.enabled) {
+    logger.log("enterprise profile", {
+      defaultsVersion: ENTERPRISE_PROFILE.defaultsVersion,
+      guideVersion: ENTERPRISE_PROFILE.guideVersion,
+    })
+  }
 
   ensureLoopbackNoProxy()
   useEnvProxy()

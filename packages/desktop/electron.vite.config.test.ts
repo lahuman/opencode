@@ -5,6 +5,8 @@ const enabledProfile = {
   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
 }
 
 function evaluateConfig(env: Record<string, string> = {}) {
@@ -23,6 +25,8 @@ function evaluateConfig(env: Record<string, string> = {}) {
         OPENCODE_ENTERPRISE_BASE_URL: "",
         OPENCODE_ENTERPRISE_MODEL_ID: "",
         OPENCODE_ENTERPRISE_MODEL_NAME: "",
+        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "",
         ...env,
       },
