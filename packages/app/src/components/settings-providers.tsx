@@ -59,7 +59,9 @@ function SettingsCompanyProvider() {
               <span class="text-14-medium text-text-strong">Company LLM</span>
               <div class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-12-regular text-text-weak">
                 <span class="truncate">{model()}</span>
-                <span>{company.status()}</span>
+                <span role="status" aria-live="polite" aria-atomic="true">
+                  {company.status()}
+                </span>
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">

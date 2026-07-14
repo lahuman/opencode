@@ -9,14 +9,18 @@ import { createStore } from "solid-js/store"
 import { ServerRowMenu } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { ServerConnection, serverName } from "@/context/server"
-import { useServerManagementController } from "../dialog-select-server"
+import { EnterpriseServerStatus, useServerManagementController } from "../dialog-select-server"
 import { DialogServerV2 } from "./dialog-server-v2"
 import { SettingsListV2 } from "./parts/list"
 import { AddServerMenu, isWslServer, useFilteredWslServers, WslServerSettings } from "@/wsl/settings"
 import "./settings-v2.css"
 
 export const SettingsServersV2: Component = () => {
+  const platform = usePlatform()
+  if (platform.enterprise) return <SettingsEnterpriseServerV2 />
+
   const dialog = useDialog()
   const language = useLanguage()
   const controller = useServerManagementController()
@@ -133,6 +137,22 @@ export const SettingsServersV2: Component = () => {
             </For>
           </SettingsListV2>
         </Show>
+      </div>
+    </>
+  )
+}
+
+function SettingsEnterpriseServerV2() {
+  const language = useLanguage()
+  return (
+    <>
+      <div class="settings-v2-tab-header settings-v2-servers-header">
+        <div class="settings-v2-tab-header-row">
+          <h2 class="settings-v2-tab-title">{language.t("status.popover.tab.servers")}</h2>
+        </div>
+      </div>
+      <div class="settings-v2-tab-body settings-v2-servers">
+        <EnterpriseServerStatus />
       </div>
     </>
   )

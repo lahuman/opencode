@@ -280,7 +280,12 @@ function SettingsCompanyProviderV2() {
                   <div class="settings-v2-provider-main">
                     <span class="settings-v2-provider-name">Company LLM</span>
                   </div>
-                  <p class="settings-v2-provider-description">
+                  <p
+                    class="settings-v2-provider-description"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
                     {model()} - {company.status()}
                   </p>
                 </div>

@@ -77,6 +77,33 @@ export function companyProviderShouldRestart(result?: CredentialMutationResult) 
   return result?.restartRequired === true
 }
 
+export function companyProviderCredentialStatus(
+  status: { loading: boolean; configured?: boolean; error?: unknown },
+  failureMessage: string,
+) {
+  if (status.loading) return "Checking credentials..."
+  if (status.error) return failureMessage
+  return status.configured ? "Credentials configured" : "Credentials not configured"
+}
+
+export async function applyCompanyProviderCredentialMutation(input: {
+  mutation: () => Promise<CredentialMutationResult>
+  clearLocal: () => void
+  restart: () => Promise<void>
+}) {
+  const result = await input.mutation()
+  input.clearLocal()
+  if (companyProviderShouldRestart(result)) await input.restart()
+  return result
+}
+
+export function diagnoseCompanyProvider<T>(
+  diagnose: (input: { providerID: string; modelID: string; checkToolCall: boolean }) => T,
+  modelID: string,
+) {
+  return diagnose({ providerID: "company-llm", modelID, checkToolCall: true })
+}
+
 export function companyProviderDiagnosticResult(
   result: CompanyProviderDiagnosticResult | undefined,
   failureMessage: string,
@@ -106,12 +133,7 @@ export function useCompanyProviderSettingsState() {
     const model = config().models[0]
     if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model))) return
     setChecking(true)
-    const response = await serverSDK()
-      .client.provider.diagnose({
-        providerID: "company-llm",
-        modelID: model.id,
-        checkToolCall: true,
-      })
+    const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), model.id)
       .then((value) => value.data)
       .catch(() => undefined)
     const result = companyProviderDiagnosticResult(response, language.t("common.requestFailed"))
@@ -133,9 +155,10 @@ export function useCompanyProviderSettingsState() {
   }
 
   const statusLabel = () => {
-    if (status.loading) return "Checking credentials..."
-    if (status.error) return language.t("common.requestFailed")
-    return status.latest?.configured ? "Credentials configured" : "Credentials not configured"
+    return companyProviderCredentialStatus(
+      { loading: status.loading, error: status.error, configured: status.latest?.configured },
+      language.t("common.requestFailed"),
+    )
   }
 
   return {
@@ -183,7 +206,11 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     if (!companyProviderCanStart(action(), true)) return
     setAction(nextAction)
     setError()
-    const response = await mutation().then(
+    const response = await applyCompanyProviderCredentialMutation({
+      mutation,
+      clearLocal: resetSecrets,
+      restart: () => platform.restart(),
+    }).then(
       (value) => ({ value }),
       () => ({ error: true as const }),
     )
@@ -193,19 +220,8 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
       return
     }
 
-    resetSecrets()
     statusActions.mutate({ configured })
-    if (!companyProviderShouldRestart(response.value)) {
-      setAction()
-      return
-    }
-    await platform.restart().then(
-      () => setAction(),
-      () => {
-        setError(language.t("common.requestFailed"))
-        setAction()
-      },
-    )
+    setAction()
   }
 
   const save = async (event: SubmitEvent) => {
@@ -227,12 +243,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     if (!companyProviderCanStart(action(), Boolean(modelID()))) return
     setAction("diagnose")
     setError()
-    const response = await serverSDK()
-      .client.provider.diagnose({
-        providerID: "company-llm",
-        modelID: modelID(),
-        checkToolCall: true,
-      })
+    const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), modelID())
       .then((value) => value.data)
       .catch(() => undefined)
     setResult(companyProviderDiagnosticResult(response, language.t("common.requestFailed")))
@@ -240,9 +251,10 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   }
 
   const statusLabel = () => {
-    if (status.loading) return "Checking credentials..."
-    if (status.error) return language.t("common.requestFailed")
-    return status.latest?.configured ? "Credentials configured" : "Credentials not configured"
+    return companyProviderCredentialStatus(
+      { loading: status.loading, error: status.error, configured: status.latest?.configured },
+      language.t("common.requestFailed"),
+    )
   }
 
   const selectedModel = createMemo(() => config().models.find((model) => model.id === modelID()))
@@ -270,7 +282,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
 
         <div class="flex items-center justify-between gap-3 text-12-regular">
           <span class="text-text-weak">Credential status</span>
-          <span class="text-text-strong">{statusLabel()}</span>
+          <span class="text-text-strong" role="status" aria-live="polite" aria-atomic="true">
+            {statusLabel()}
+          </span>
         </div>
 
         <TextField
@@ -354,11 +368,22 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           </Button>
         </div>
 
-        <Show when={error()}>{(message) => <p class="text-12-regular text-text-danger-base">{message()}</p>}</Show>
+        <Show when={error()}>
+          {(message) => (
+            <p class="text-12-regular text-text-danger-base" role="alert">
+              {message()}
+            </p>
+          )}
+        </Show>
 
         <Show when={result()}>
           {(diagnostic) => (
-            <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular">
+            <div
+              class="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular"
+              role={diagnostic().ok ? "status" : "alert"}
+              aria-live={diagnostic().ok ? "polite" : undefined}
+              aria-atomic="true"
+            >
               <span class="text-text-weak">Basic response</span>
               <span class="text-text-strong capitalize">{diagnostic().checks.basic}</span>
               <span class="text-text-weak">Streaming</span>

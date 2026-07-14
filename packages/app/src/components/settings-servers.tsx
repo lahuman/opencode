@@ -1,8 +1,17 @@
 import { Show, type Component } from "solid-js"
 import { useLanguage } from "@/context/language"
-import { ServerConnectionForm, ServerConnectionList, useServerManagementController } from "./dialog-select-server"
+import { usePlatform } from "@/context/platform"
+import {
+  EnterpriseServerStatus,
+  ServerConnectionForm,
+  ServerConnectionList,
+  useServerManagementController,
+} from "./dialog-select-server"
 
 export const SettingsServers: Component = () => {
+  const platform = usePlatform()
+  if (platform.enterprise) return <SettingsEnterpriseServer />
+
   const language = useLanguage()
   const controller = useServerManagementController()
 
@@ -27,6 +36,18 @@ export const SettingsServers: Component = () => {
             <ServerConnectionForm controller={controller} />
           </div>
         </Show>
+      </div>
+    </div>
+  )
+}
+
+function SettingsEnterpriseServer() {
+  const language = useLanguage()
+  return (
+    <div class="flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10">
+      <div class="flex w-full max-w-[720px] flex-col gap-4 pt-6">
+        <h2 class="text-16-medium text-text-strong">{language.t("status.popover.tab.servers")}</h2>
+        <EnterpriseServerStatus />
       </div>
     </div>
   )

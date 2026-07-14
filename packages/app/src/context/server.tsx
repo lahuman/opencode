@@ -4,6 +4,7 @@ import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { pathKey } from "@/utils/path-key"
 import { ServerScope } from "@/utils/server-scope"
+import { usePlatform } from "./platform"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
@@ -19,6 +20,7 @@ const HEALTH_POLL_INTERVAL_MS = 10_000
 // filtered out do not evict still-visible ones from the persisted store.
 const RECENTLY_CLOSED_HISTORY_LIMIT = 16
 export const RECENTLY_CLOSED_DISPLAY_LIMIT = 5
+export const REMOTE_SERVERS_DISABLED_MESSAGE = "Remote servers are disabled in this build"
 
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
@@ -74,6 +76,16 @@ export function migrateCanonicalLocalServerState(value: unknown, canonicalLocalS
     next.lastProject = nextLastProject
   }
   return next
+}
+
+export function migrateServerStateForMode(
+  value: unknown,
+  canonicalLocalServer: ServerConnection.Key | undefined,
+  enterprise: boolean,
+) {
+  const migrated = migrateCanonicalLocalServerState(value, canonicalLocalServer)
+  if (!enterprise || !isRecord(migrated)) return migrated
+  return { ...migrated, list: [] }
 }
 
 export function createServerProjects<T extends ServerProjectState>(input: {
@@ -146,9 +158,12 @@ export function createServerProjects<T extends ServerProjectState>(input: {
 }
 
 export function resolveServerList(input: {
+  enterprise?: boolean
   props?: Array<ServerConnection.Any>
   stored: StoredServer[]
 }): Array<ServerConnection.Any> {
+  if (input.enterprise) return input.props?.filter(ServerConnection.builtin).slice(0, 1) ?? []
+
   const deduped = new Map<ServerConnection.Key, ServerConnection.Any>(
     input.props?.map((v) => [ServerConnection.key(v), v]) ?? [],
   )
@@ -252,6 +267,84 @@ export function nextServerAfterRemoval(
   return next ? ServerConnection.key(next) : fallback
 }
 
+export function requireRemoteServersAllowed(enterprise: boolean) {
+  if (!enterprise) return
+  throw new Error(REMOTE_SERVERS_DISABLED_MESSAGE)
+}
+
+export function requireServerSelectionAllowed(enterprise: boolean, key: ServerConnection.Key) {
+  if (!enterprise || key === ServerConnection.Key.make("sidecar")) return
+  throw new Error(REMOTE_SERVERS_DISABLED_MESSAGE)
+}
+
+export function createServerConnectionController<T extends { list: StoredServer[] }>(input: {
+  enterprise: boolean
+  defaultServer: ServerConnection.Key
+  servers?: Array<ServerConnection.Any>
+  store: Store<T>
+  setStore: SetStoreFunction<T>
+}) {
+  const setStore = input.setStore as unknown as SetStoreFunction<{ list: StoredServer[] }>
+  const url = (value: StoredServer) =>
+    typeof value === "string" ? value : "type" in value ? value.http.url : value.url
+  const list = createMemo(() =>
+    resolveServerList({ enterprise: input.enterprise, stored: input.store.list, props: input.servers }),
+  )
+  const initial = list()[0]
+  const [state, setState] = createStore({
+    active: input.enterprise
+      ? initial
+        ? ServerConnection.key(initial)
+        : ServerConnection.Key.make("sidecar")
+      : input.defaultServer,
+  })
+  const current = createMemo(
+    () => list().find((server) => ServerConnection.key(server) === state.active) ?? list()[0],
+  )
+
+  return {
+    get key() {
+      return state.active
+    },
+    get list() {
+      return list()
+    },
+    get current() {
+      return current()
+    },
+    setActive(key: ServerConnection.Key) {
+      requireServerSelectionAllowed(input.enterprise, key)
+      if (state.active !== key) setState("active", key)
+    },
+    add(server: ServerConnection.Http) {
+      requireRemoteServersAllowed(input.enterprise)
+      const normalized = normalizeServerUrl(server.http.url)
+      if (!normalized) return
+      const connection: ServerConnection.Http = {
+        ...server,
+        authToken: undefined,
+        http: { ...server.http, url: normalized },
+      }
+      return batch(() => {
+        const existing = input.store.list.findIndex((value) => url(value) === normalized)
+        if (existing !== -1) setStore("list", existing, connection)
+        if (existing === -1) setStore("list", input.store.list.length, connection)
+        setState("active", ServerConnection.key(connection))
+        return connection
+      })
+    },
+    remove(key: ServerConnection.Key) {
+      requireRemoteServersAllowed(input.enterprise)
+      const next = nextServerAfterRemoval(list(), key, input.defaultServer)
+      const remaining = input.store.list.filter((value) => url(value) !== key)
+      batch(() => {
+        setStore("list", remaining)
+        if (state.active === key) setState("active", next)
+      })
+    },
+  }
+}
+
 export const { use: useServer, provider: ServerProvider } = createSimpleContext({
   name: "Server",
   gate: true,
@@ -260,10 +353,12 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     canonicalLocalServer?: ServerConnection.Key
     servers?: Array<ServerConnection.Any>
   }) => {
+    const platform = usePlatform()
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
-        migrate: (value) => migrateCanonicalLocalServerState(value, props.canonicalLocalServer),
+        migrate: (value) =>
+          migrateServerStateForMode(value, props.canonicalLocalServer, Boolean(platform.enterprise)),
       },
       createStore({
         list: [] as StoredServer[],
@@ -272,52 +367,20 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         recentlyClosed: {} as Record<string, string[]>,
       }),
     )
-
-    const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
-
-    const allServers = createMemo((): Array<ServerConnection.Any> => {
-      return resolveServerList({ stored: store.list, props: props.servers })
+    const connection = createServerConnectionController({
+      enterprise: Boolean(platform.enterprise),
+      defaultServer: props.defaultServer,
+      servers: props.servers,
+      store,
+      setStore,
     })
-
-    const [state, setState] = createStore({
-      active: props.defaultServer,
-    })
-
-    function setActive(input: ServerConnection.Key) {
-      if (state.active !== input) setState("active", input)
-    }
-
-    function add(input: ServerConnection.Http) {
-      const url_ = normalizeServerUrl(input.http.url)
-      if (!url_) return
-      const conn: ServerConnection.Http = { ...input, authToken: undefined, http: { ...input.http, url: url_ } }
-      return batch(() => {
-        const existing = store.list.findIndex((x) => url(x) === url_)
-        if (existing !== -1) {
-          setStore("list", existing, conn)
-        } else {
-          setStore("list", store.list.length, conn)
-        }
-        setState("active", ServerConnection.key(conn))
-        return conn
-      })
-    }
-
-    function remove(key: ServerConnection.Key) {
-      const next = nextServerAfterRemoval(allServers(), key, props.defaultServer)
-      const list = store.list.filter((x) => url(x) !== key)
-      batch(() => {
-        setStore("list", list)
-        if (state.active === key) setState("active", next)
-      })
-    }
 
     const isReady = Object.assign(
-      createMemo(() => ready() && !!state.active),
+      createMemo(() => ready() && !!connection.key),
       { promise: ready.promise },
     )
 
-    const scope = (key = state.active) => ServerScope.fromServerKey(key, props.canonicalLocalServer)
+    const scope = (key = connection.key) => ServerScope.fromServerKey(key, props.canonicalLocalServer)
     const projects = createServerProjects({ scope, store, setStore })
     const projectStores = new Map<ServerConnection.Key, ReturnType<typeof createServerProjects>>()
     const projectsForServer = (key: ServerConnection.Key) => {
@@ -327,29 +390,26 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       projectStores.set(key, next)
       return next
     }
-    const current: Accessor<ServerConnection.Any | undefined> = createMemo(
-      () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
-    )
-    const isLocal = createMemo(() => ServerConnection.local(current()))
+    const isLocal = createMemo(() => ServerConnection.local(connection.current))
 
     return {
       ready: isReady,
       isLocal,
       get key() {
-        return state.active
+        return connection.key
       },
       get name() {
-        return serverName(current())
+        return serverName(connection.current)
       },
       get list() {
-        return allServers()
+        return connection.list
       },
       get current() {
-        return current()
+        return connection.current
       },
-      setActive,
-      add,
-      remove,
+      setActive: connection.setActive,
+      add: connection.add,
+      remove: connection.remove,
       scope,
       projects: {
         ...projects,

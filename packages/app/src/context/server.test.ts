@@ -2,9 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
+  createServerConnectionController,
   createServerProjects,
   migrateCanonicalLocalServerState,
+  migrateServerStateForMode,
   nextServerAfterRemoval,
+  REMOTE_SERVERS_DISABLED_MESSAGE,
   resolveServerList,
   ServerConnection,
 } from "./server"
@@ -58,6 +61,112 @@ describe("resolveServerList", () => {
       password: "saved",
     })
     expect(list[0]?.type === "http" ? list[0].authToken : true).toBeUndefined()
+  })
+
+  test("excludes persisted and startup remotes from enterprise health inputs", () => {
+    const sidecar = {
+      type: "sidecar" as const,
+      variant: "base" as const,
+      http: { url: "http://127.0.0.1:4096" },
+    }
+    const probes: string[] = []
+    const list = resolveServerList({
+      enterprise: true,
+      stored: ["https://persisted.example.test"],
+      props: [
+        sidecar,
+        {
+          type: "sidecar",
+          variant: "wsl",
+          distro: "Ubuntu",
+          http: { url: "http://127.0.0.1:4097" },
+        },
+        { type: "ssh", host: "workstation", http: { url: "http://127.0.0.1:4098" } },
+        { type: "http", http: { url: "https://startup.example.test" } },
+      ],
+    })
+
+    list.forEach((server) => probes.push(server.http.url))
+    expect(list).toEqual([sidecar])
+    expect(probes).toEqual(["http://127.0.0.1:4096"])
+  })
+})
+
+describe("createServerConnectionController", () => {
+  const sidecar = {
+    displayName: "Company sidecar",
+    type: "sidecar" as const,
+    variant: "base" as const,
+    http: { url: "http://127.0.0.1:4096" },
+  }
+  const remote = { type: "http" as const, http: { url: "https://remote.example.test" } }
+
+  test("keeps the enterprise sidecar active and rejects mutation before storage or activation", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({ list: [remote] })
+      const controller = createServerConnectionController({
+        enterprise: true,
+        defaultServer: ServerConnection.key(remote),
+        servers: [sidecar, remote],
+        store,
+        setStore,
+      })
+
+      expect(controller.list).toEqual([sidecar])
+      expect(controller.key).toBe(ServerConnection.Key.make("sidecar"))
+      expect(controller.current).toBe(sidecar)
+      expect(() => controller.add({ type: "http", http: { url: "https://added.example.test" } })).toThrow(
+        REMOTE_SERVERS_DISABLED_MESSAGE,
+      )
+      expect(() => controller.setActive(ServerConnection.key(remote))).toThrow(REMOTE_SERVERS_DISABLED_MESSAGE)
+      expect(() => controller.remove(ServerConnection.key(remote))).toThrow(REMOTE_SERVERS_DISABLED_MESSAGE)
+      expect(store.list).toEqual([remote])
+      expect(controller.key).toBe(ServerConnection.Key.make("sidecar"))
+      expect(controller.current).toBe(sidecar)
+      dispose()
+    })
+  })
+
+  test("preserves ordinary add, selection, and removal behavior", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({ list: [] as Array<ServerConnection.Http> })
+      const controller = createServerConnectionController({
+        enterprise: false,
+        defaultServer: ServerConnection.Key.make("sidecar"),
+        servers: [sidecar],
+        store,
+        setStore,
+      })
+
+      const added = controller.add(remote)
+      expect(added).toEqual(remote)
+      expect(store.list).toEqual([remote])
+      expect(controller.key).toBe(ServerConnection.key(remote))
+
+      controller.setActive(ServerConnection.Key.make("sidecar"))
+      expect(controller.key).toBe(ServerConnection.Key.make("sidecar"))
+      controller.remove(ServerConnection.key(remote))
+      expect(store.list).toEqual([])
+      dispose()
+    })
+  })
+
+  test("does not expose a remote default when an enterprise sidecar is unavailable", () => {
+    createRoot((dispose) => {
+      const [store, setStore] = createStore({ list: [remote] })
+      const controller = createServerConnectionController({
+        enterprise: true,
+        defaultServer: ServerConnection.key(remote),
+        servers: [remote],
+        store,
+        setStore,
+      })
+
+      expect(controller.list).toEqual([])
+      expect(controller.key).toBe(ServerConnection.Key.make("sidecar"))
+      expect(controller.current).toBeUndefined()
+      dispose()
+    })
   })
 })
 
@@ -241,5 +350,21 @@ describe("migrateCanonicalLocalServerState", () => {
       },
       lastProject: { local: "/local" },
     })
+  })
+})
+
+describe("migrateServerStateForMode", () => {
+  const stored = {
+    list: ["https://persisted.example.test"],
+    projects: { local: [{ worktree: "/repo", expanded: true }] },
+    lastProject: { local: "/repo" },
+  }
+
+  test("removes stale remote connection persistence in enterprise mode", () => {
+    expect(migrateServerStateForMode(stored, undefined, true)).toEqual({ ...stored, list: [] })
+  })
+
+  test("preserves ordinary persisted connections", () => {
+    expect(migrateServerStateForMode(stored, undefined, false)).toEqual(stored)
   })
 })

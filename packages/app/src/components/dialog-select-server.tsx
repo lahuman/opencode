@@ -15,7 +15,13 @@ import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
+import {
+  normalizeServerUrl,
+  requireRemoteServersAllowed,
+  requireServerSelectionAllowed,
+  ServerConnection,
+  useServer,
+} from "@/context/server"
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
@@ -52,11 +58,52 @@ function showRequestError(language: ReturnType<typeof useLanguage>, err: unknown
   })
 }
 
+export async function setDefaultServerForMode(input: {
+  enterprise: boolean
+  key: ServerConnection.Key | null
+  setDefault?: (key: ServerConnection.Key | null) => Promise<void> | void
+}) {
+  requireRemoteServersAllowed(input.enterprise)
+  await input.setDefault?.(input.key)
+}
+
+export async function checkRemoteServerHealthForMode<T>(input: {
+  enterprise: boolean
+  server: ServerConnection.HttpBase
+  check: (server: ServerConnection.HttpBase) => Promise<T>
+}) {
+  requireRemoteServersAllowed(input.enterprise)
+  return input.check(input.server)
+}
+
+export async function selectServerForMode(input: {
+  enterprise: boolean
+  connection: ServerConnection.Any
+  persist?: boolean
+  healthy?: boolean
+  close?: () => unknown
+  persistConnection: (connection: ServerConnection.Http) => unknown
+  navigate: () => unknown
+  activate: (key: ServerConnection.Key) => unknown
+}) {
+  requireServerSelectionAllowed(input.enterprise, ServerConnection.key(input.connection))
+  if (!input.persist && input.healthy === false) return
+  input.close?.()
+  if (input.persist && input.connection.type === "http") {
+    input.persistConnection(input.connection)
+    input.navigate()
+    return
+  }
+  input.navigate()
+  queueMicrotask(() => input.activate(ServerConnection.key(input.connection)))
+}
+
 function useDefaultServer() {
   const language = useLanguage()
   const platform = usePlatform()
   const [defaultKey, defaultUrlActions] = createResource(
     async () => {
+      if (platform.enterprise) return null
       try {
         const key = await platform.getDefaultServer?.()
         if (!key) return null
@@ -69,10 +116,16 @@ function useDefaultServer() {
     { initialValue: null },
   )
 
-  const canDefault = createMemo(() => !!platform.getDefaultServer && !!platform.setDefaultServer)
+  const canDefault = createMemo(
+    () => !platform.enterprise && !!platform.getDefaultServer && !!platform.setDefaultServer,
+  )
   const setDefault = async (key: ServerConnection.Key | null) => {
     try {
-      await platform.setDefaultServer?.(key)
+      await setDefaultServerForMode({
+        enterprise: Boolean(platform.enterprise),
+        key,
+        setDefault: (value) => platform.setDefaultServer?.(value),
+      })
       defaultUrlActions.mutate(key)
     } catch (err) {
       showRequestError(language, err)
@@ -83,6 +136,7 @@ function useDefaultServer() {
 }
 
 function useServerPreview() {
+  const platform = usePlatform()
   const checkServerHealth = useCheckServerHealth()
 
   const looksComplete = (value: string) => {
@@ -107,7 +161,11 @@ function useServerPreview() {
     const http: ServerConnection.HttpBase = { url: normalized }
     if (username) http.username = username
     if (password) http.password = password
-    const result = await checkServerHealth(http)
+    const result = await checkRemoteServerHealthForMode({
+      enterprise: Boolean(platform.enterprise),
+      server: http,
+      check: checkServerHealth,
+    })
     setStatus(result.healthy)
   }
 
@@ -197,42 +255,50 @@ export function DialogSelectServer() {
 }
 
 function EnterpriseServerConnectionList() {
-  const global = useGlobal()
   const language = useLanguage()
-  const server = useServer()
-  const connections = createMemo(() =>
-    serverConnectionsForMode(true, server.current ? [server.current, ...server.list] : server.list),
-  )
 
   return (
     <Dialog title={language.t("dialog.server.title")}>
       <div class="flex min-h-0 flex-1 flex-col px-5 pb-5">
-        <div class="rounded-md bg-surface-base px-3">
-          <Show
-            when={connections()[0]}
-            fallback={<div class="py-4 text-14-regular text-text-weak">{language.t("dialog.server.empty")}</div>}
-          >
-            {(connection) => {
-              const key = ServerConnection.key(connection())
-              return (
-                <div class="flex min-h-14 min-w-0 items-center gap-3 py-3">
-                  <div class="flex h-full w-5 items-center">
-                    <ServerHealthIndicator health={global.servers.health[key]} />
-                  </div>
-                  <ServerRow
-                    conn={connection()}
-                    status={global.servers.health[key]}
-                    dimmed={global.servers.health[key]?.healthy === false}
-                    class="flex min-w-0 flex-1 items-center gap-3"
-                  />
-                  <Icon name="check" class="h-6 shrink-0" />
-                </div>
-              )
-            }}
-          </Show>
-        </div>
+        <EnterpriseServerStatus />
       </div>
     </Dialog>
+  )
+}
+
+export function EnterpriseServerStatus() {
+  const global = useGlobal()
+  const language = useLanguage()
+  const server = useServer()
+  const connection = createMemo(() =>
+    serverConnectionsForMode(true, server.current ? [server.current, ...server.list] : server.list)[0],
+  )
+
+  return (
+    <div class="rounded-md bg-surface-base px-3">
+      <Show
+        when={connection()}
+        fallback={<div class="py-4 text-14-regular text-text-weak">{language.t("dialog.server.empty")}</div>}
+      >
+        {(item) => {
+          const key = ServerConnection.key(item())
+          return (
+            <div class="flex min-h-14 min-w-0 items-center gap-3 py-3">
+              <div class="flex h-full w-5 items-center">
+                <ServerHealthIndicator health={global.servers.health[key]} />
+              </div>
+              <ServerRow
+                conn={item()}
+                status={global.servers.health[key]}
+                dimmed={global.servers.health[key]?.healthy === false}
+                class="flex min-w-0 flex-1 items-center gap-3"
+              />
+              <Icon name="check" class="h-6 shrink-0" />
+            </div>
+          )
+        }}
+      </Show>
+    </div>
   )
 }
 
@@ -292,6 +358,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
 
   const addMutation = useMutation(() => ({
     mutationFn: async (value: string) => {
+      requireRemoteServersAllowed(Boolean(platform.enterprise))
       const normalized = normalizeServerUrl(value)
       if (!normalized) {
         resetAdd()
@@ -305,7 +372,11 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       if (store.addServer.name.trim()) conn.displayName = store.addServer.name.trim()
       if (store.addServer.password) conn.http.password = store.addServer.password
       if (store.addServer.password && store.addServer.username) conn.http.username = store.addServer.username
-      const result = await checkServerHealth(conn.http)
+      const result = await checkRemoteServerHealthForMode({
+        enterprise: Boolean(platform.enterprise),
+        server: conn.http,
+        check: checkServerHealth,
+      })
       if (!result.healthy) {
         setStore("addServer", { error: language.t("dialog.server.add.error") })
         return
@@ -323,6 +394,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
 
   const editMutation = useMutation(() => ({
     mutationFn: async (input: { original: ServerConnection.Any; value: string }) => {
+      requireRemoteServersAllowed(Boolean(platform.enterprise))
       if (input.original.type !== "http") return
       const normalized = normalizeServerUrl(input.value)
       if (!normalized) {
@@ -349,7 +421,11 @@ export function useServerManagementController(options: { onSelect?: () => void; 
         displayName: name,
         http: { url: normalized, username, password },
       }
-      const result = await checkServerHealth(conn.http)
+      const result = await checkRemoteServerHealthForMode({
+        enterprise: Boolean(platform.enterprise),
+        server: conn.http,
+        check: checkServerHealth,
+      })
       if (!result.healthy) {
         setStore("editServer", { error: language.t("dialog.server.add.error") })
         return
@@ -365,6 +441,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }))
 
   const replaceServer = (original: ServerConnection.Http, next: ServerConnection.Http) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     const originalKey = ServerConnection.key(original)
     const active = server.key
     tabs.removeServer(originalKey)
@@ -411,18 +488,20 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   })
 
   async function select(conn: ServerConnection.Any, persist?: boolean) {
-    if (!persist && global.servers.health[ServerConnection.key(conn)]?.healthy === false) return
-    options.onSelect?.()
-    if (persist && conn.type === "http") {
-      server.add(conn)
-      navigate("/")
-      return
-    }
-    navigate("/")
-    queueMicrotask(() => server.setActive(ServerConnection.key(conn)))
+    await selectServerForMode({
+      enterprise: Boolean(platform.enterprise),
+      connection: conn,
+      persist,
+      healthy: global.servers.health[ServerConnection.key(conn)]?.healthy,
+      close: options.onSelect,
+      persistConnection: (connection) => server.add(connection),
+      navigate: () => navigate("/"),
+      activate: (key) => server.setActive(key),
+    })
   }
 
   const handleAddChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (addMutation.isPending) return
     setStore("addServer", { url: value, error: "" })
     void previewStatus(value, store.addServer.username, store.addServer.password, (next) =>
@@ -431,11 +510,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const handleAddNameChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (addMutation.isPending) return
     setStore("addServer", { name: value, error: "" })
   }
 
   const handleAddUsernameChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (addMutation.isPending) return
     setStore("addServer", { username: value, error: "" })
     void previewStatus(store.addServer.url, value, store.addServer.password, (next) =>
@@ -444,6 +525,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const handleAddPasswordChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (addMutation.isPending) return
     setStore("addServer", { password: value, error: "" })
     void previewStatus(store.addServer.url, store.addServer.username, value, (next) =>
@@ -452,6 +534,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const handleEditChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (editMutation.isPending) return
     setStore("editServer", { value, error: "" })
     void previewStatus(value, store.editServer.username, store.editServer.password, (next) =>
@@ -460,11 +543,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const handleEditNameChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (editMutation.isPending) return
     setStore("editServer", { name: value, error: "" })
   }
 
   const handleEditUsernameChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (editMutation.isPending) return
     setStore("editServer", { username: value, error: "" })
     void previewStatus(store.editServer.value, value, store.editServer.password, (next) =>
@@ -473,6 +558,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const handleEditPasswordChange = (value: string) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (editMutation.isPending) return
     setStore("editServer", { password: value, error: "" })
     void previewStatus(store.editServer.value, store.editServer.username, value, (next) =>
@@ -497,6 +583,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const startAdd = () => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     resetEdit()
     setStore("addServer", {
       showForm: true,
@@ -510,6 +597,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const startEdit = (conn: ServerConnection.Http) => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     resetAdd()
     setStore("editServer", {
       id: conn.http.url,
@@ -523,6 +611,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   }
 
   const submitForm = () => {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     if (mode() === "add") {
       if (addMutation.isPending) return
       setStore("addServer", { error: "" })
@@ -557,6 +646,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   })
 
   async function handleRemove(key: ServerConnection.Key) {
+    requireRemoteServersAllowed(Boolean(platform.enterprise))
     try {
       if (key.startsWith("wsl:")) await platform.wslServers?.removeServer(key)
       tabs.removeServer(key)

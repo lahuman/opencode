@@ -45,12 +45,30 @@ export function useProviderConnectController(options: { onBack?: () => void } = 
   }
 }
 
-export const DialogConnectProvider: Component<{
+type DialogConnectProviderProps = {
   directory?: Accessor<string | undefined>
   controller?: ReturnType<typeof useProviderConnectController>
-}> = (props) => {
+}
+
+export function providerConnectionForMode<T>(input: {
+  enterprise: boolean
+  company: () => T
+  ordinary: () => T
+}) {
+  if (input.enterprise) return input.company()
+  return input.ordinary()
+}
+
+export const DialogConnectProvider: Component<DialogConnectProviderProps> = (props) => {
   const platform = usePlatform()
-  if (platform.enterprise) return <DialogCompanyProvider />
+  return providerConnectionForMode({
+    enterprise: Boolean(platform.enterprise),
+    company: () => <DialogCompanyProvider />,
+    ordinary: () => <DialogConnectProviderOrdinary {...props} />,
+  })
+}
+
+const DialogConnectProviderOrdinary: Component<DialogConnectProviderProps> = (props) => {
   const fallback = useProviderConnectController()
   const controller = props.controller ?? fallback
   const language = useLanguage()
