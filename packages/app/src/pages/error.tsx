@@ -359,25 +359,40 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           {(message) => <p class="text-xs text-text-danger-base text-center max-w-2xl">{message()}</p>}
         </Show>
         <div class="flex flex-col items-center gap-2">
-          <Show when={!platform.enterprise || command}>
-            <div class="flex items-center justify-center gap-1">
-              {language.t("error.page.report.prefix")}
+          <Show
+            when={platform.enterprise}
+            fallback={
+              <div class="flex items-center justify-center gap-1">
+                {language.t("error.page.report.prefix")}
+                <button
+                  type="button"
+                  class="flex items-center text-text-interactive-base gap-1"
+                  onClick={() =>
+                    openEditionHelp({
+                      enterprise: false,
+                      href: "https://opencode.ai/desktop-feedback",
+                      trigger: (id) => command?.trigger(id),
+                      openLink: platform.openLink,
+                    })
+                  }
+                >
+                  <div>{language.t("error.page.report.discord")}</div>
+                  <Icon name="discord" class="text-text-interactive-base" />
+                </button>
+              </div>
+            }
+          >
+            <Show when={command}>
               <button
                 type="button"
                 class="flex items-center text-text-interactive-base gap-1"
-                onClick={() =>
-                  openEditionHelp({
-                    enterprise: Boolean(platform.enterprise),
-                    href: "https://opencode.ai/desktop-feedback",
-                    trigger: (id) => command?.trigger(id),
-                    openLink: platform.openLink,
-                  })
-                }
+                aria-label="Open Company AI Guide"
+                onClick={() => command?.trigger("company.guide.open")}
               >
-                <div>{language.t("error.page.report.discord")}</div>
-                <Icon name="discord" class="text-text-interactive-base" />
+                <div>Company AI Guide</div>
+                <Icon name="help" class="text-text-interactive-base" />
               </button>
-            </div>
+            </Show>
           </Show>
           <Show when={platform.version}>
             {(version) => (

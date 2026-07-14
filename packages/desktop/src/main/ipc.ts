@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { readFile, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { basename } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -7,6 +7,7 @@ import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
 import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
+import { registerEnterpriseGuideIpc } from "./enterprise-guide"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
@@ -48,16 +49,6 @@ type Deps = {
       path: string
       version: string
     }
-  }
-}
-
-export async function readEnterpriseGuide(input: { enabled: boolean; path: string; version: string }) {
-  if (!input.enabled) throw new Error("Company guide is unavailable")
-  const markdown = await readFile(input.path, "utf8").catch(() => undefined)
-  if (markdown === undefined) throw new Error("Company guide could not be read")
-  return {
-    version: input.version,
-    markdown,
   }
 }
 
@@ -109,7 +100,7 @@ export function registerIpcHandlers(deps: Deps) {
       deps.enterprise.setCredentials(input),
   )
   ipcMain.handle("enterprise-clear-credentials", () => deps.enterprise.clearCredentials())
-  ipcMain.handle("enterprise-guide-read", () => readEnterpriseGuide(deps.enterprise.guide))
+  registerEnterpriseGuideIpc((channel, handler) => ipcMain.handle(channel, handler), deps.enterprise.guide)
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {
       const store = getStore(name)

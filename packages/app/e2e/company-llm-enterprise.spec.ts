@@ -186,19 +186,52 @@ test("settings diagnostics display the authenticated server remediation", async 
   expect(diagnostics).toEqual([diagnosticRequest])
 })
 
+test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
+  await page.goto(fixture("error-enterprise"))
+
+  const guide = page.getByRole("button", { name: "Open Company AI Guide" })
+  await expect(guide).toBeVisible()
+  await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
+  await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("on Discord", { exact: true })).toHaveCount(0)
+
+  await guide.click()
+  await expect(page.getByRole("dialog")).toContainText("Company AI Guide")
+  expect(await output<string[]>(page, "external-links")).toEqual([])
+})
+
+test("public fatal error preserves the localized Discord reporting action", async ({ page }) => {
+  await page.goto(fixture("error-public"))
+
+  await expect(page.getByText("Please report this error to the OpenCode team")).toBeVisible()
+  const discord = page.getByRole("button", { name: "on Discord" })
+  await expect(discord).toBeVisible()
+  await expect(discord.locator('use[href="#opencode-icon-discord"]')).toHaveCount(1)
+  await expect(page.getByText("Company AI Guide", { exact: true })).toHaveCount(0)
+
+  await discord.click()
+  await expect.poll(() => output<string[]>(page, "external-links")).toEqual(["https://opencode.ai/desktop-feedback"])
+})
+
 responsiveViewports.forEach((viewport) => {
   test(`Company AI Guide dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(fixture("guide"))
+    await page.getByRole("button", { name: "OpenCode menu" }).click()
+    await page.getByRole("menuitem", { name: "Help" }).hover()
+    await page.getByRole("menuitem", { name: "Company AI Guide" }).click()
 
     const dialog = page.getByRole("dialog")
-    const body = dialog.locator('[data-component="company-guide"]')
+    const body = dialog.getByRole("region", { name: "Company AI Guide content" })
     await expect(dialog).toBeVisible()
     await expect(dialog).toHaveAttribute("aria-labelledby", /.+/)
+    await expect(body).toHaveAttribute("tabindex", "0")
+    await expect(body).toBeFocused()
     await expect(dialog.getByText("Company AI Guide", { exact: true })).toBeVisible()
     await expect(dialog.getByText("Version 2026.07", { exact: true })).toBeVisible()
     await expect(dialog.getByRole("heading", { name: "Internal AI guide", level: 1 })).toBeVisible()
     await expect(dialog.locator("a")).toHaveCount(0)
+    expect(await output<string[]>(page, "external-links")).toEqual([])
 
     const metrics = await dialog.evaluate((node) => {
       const content = node.getBoundingClientRect()
@@ -224,9 +257,19 @@ responsiveViewports.forEach((viewport) => {
     expect(metrics.body.right).toBeLessThanOrEqual(metrics.content.right)
     expect(metrics.body.bottom).toBeLessThanOrEqual(metrics.content.bottom)
 
-    await body.evaluate((node) => node.scrollTo({ top: node.scrollHeight }))
-    expect(await body.evaluate((node) => node.scrollTop > 0)).toBe(true)
+    const pageDownStart = await body.evaluate((node) => node.scrollTop)
+    await page.keyboard.press("PageDown")
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(pageDownStart)
+    const arrowStart = await body.evaluate((node) => node.scrollTop)
+    await page.keyboard.press("ArrowDown")
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(arrowStart)
+    await page.keyboard.press("Shift+Tab")
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused()
+    await page.keyboard.press("Tab")
+    await expect(body).toBeFocused()
     await page.screenshot({ path: testInfo.outputPath(`company-guide-${viewport.name}.png`) })
+    await page.keyboard.press("Escape")
+    await expect(dialog).toBeHidden()
   })
 
   test(`Company LLM dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {

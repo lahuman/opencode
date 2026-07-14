@@ -1,5 +1,5 @@
 import { Dialog } from "@opencode-ai/ui/dialog"
-import { lazy } from "solid-js"
+import { lazy, onCleanup, onMount } from "solid-js"
 import type { CommandOption } from "@/context/command"
 import type { Platform } from "@/context/platform"
 
@@ -43,6 +43,12 @@ export function createCompanyGuideCommand(input: {
 }
 
 export function DialogCompanyGuide(props: CompanyGuide) {
+  let body: HTMLDivElement | undefined
+  onMount(() => {
+    const frame = requestAnimationFrame(() => body?.focus())
+    onCleanup(() => cancelAnimationFrame(frame))
+  })
+
   return (
     <Dialog
       size="large"
@@ -54,7 +60,15 @@ export function DialogCompanyGuide(props: CompanyGuide) {
         </div>
       }
     >
-      <div data-component="company-guide" class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5">
+      <div
+        ref={body}
+        data-component="company-guide"
+        class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5"
+        tabIndex={0}
+        role="region"
+        aria-label="Company AI Guide content"
+        autofocus
+      >
         <Markdown text={props.markdown} class="min-w-0 text-14-regular [overflow-wrap:anywhere]" />
       </div>
     </Dialog>

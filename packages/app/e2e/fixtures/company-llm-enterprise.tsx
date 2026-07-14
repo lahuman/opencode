@@ -8,16 +8,19 @@ import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/components/dialog-connect-provider"
-import { DialogCompanyGuide } from "@/components/dialog-company-guide"
+import { createCompanyGuideCommand, DialogCompanyGuide } from "@/components/dialog-company-guide"
 import { useServerManagementController } from "@/components/dialog-select-server"
+import { WindowsAppMenu } from "@/components/windows-app-menu"
+import { CommandProvider, useCommand } from "@/context/command"
 import { GlobalProvider } from "@/context/global"
 import { LanguageProvider } from "@/context/language"
-import { type Platform, PlatformProvider } from "@/context/platform"
+import { type Platform, PlatformProvider, usePlatform } from "@/context/platform"
 import { ServerConnection, ServerProvider, useServer } from "@/context/server"
 import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider } from "@/context/server-sync"
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs } from "@/context/tabs"
+import { ErrorPage } from "@/pages/error"
 import { ToastRegion } from "@/utils/toast"
 import { useServerHealth } from "@/utils/server-health"
 
@@ -83,6 +86,7 @@ function createHarness() {
     credentialInputs: [] as CredentialInput[],
     defaultWrites: [] as Array<ServerConnection.Key | null>,
     restartSnapshots: [] as string[][],
+    externalLinks: [] as string[],
   })
   const [diagnosticPending, setDiagnosticPending] = createSignal(false)
   const behavior = {
@@ -192,7 +196,9 @@ function createHarness() {
     windowID: "company-llm-enterprise-fixture",
     storage,
     fetch,
-    openLink() {},
+    openLink(url) {
+      setObservations("externalLinks", observations.externalLinks.length, url)
+    },
     async restart() {
       setObservations("restartSnapshots", observations.restartSnapshots.length, [
         inputValue("API key"),
@@ -268,9 +274,9 @@ function QueryProvider(props: ParentProps) {
   )
 }
 
-function ServerTree(props: ParentProps<{ harness: Harness }>) {
+function ServerTree(props: ParentProps<{ harness: Harness; platform?: Platform }>) {
   return (
-    <PlatformProvider value={props.harness.platform}>
+    <PlatformProvider value={props.platform ?? props.harness.platform}>
       <LanguageProvider locale="en">
         <QueryProvider>
           <MemoryRouter history={props.harness.history}>
@@ -312,6 +318,7 @@ function Observations(props: { harness: Harness }) {
       <output data-testid="credential-inputs">{JSON.stringify(props.harness.observations.credentialInputs)}</output>
       <output data-testid="default-writes">{JSON.stringify(props.harness.observations.defaultWrites)}</output>
       <output data-testid="restart-snapshots">{JSON.stringify(props.harness.observations.restartSnapshots)}</output>
+      <output data-testid="external-links">{JSON.stringify(props.harness.observations.externalLinks)}</output>
       <output data-testid="persisted-servers">{JSON.stringify(props.harness.persistedServers())}</output>
     </div>
   )
@@ -475,11 +482,73 @@ function CompanyScenario(props: { harness: Harness }) {
 
 function GuideScenario(props: { harness: Harness }) {
   return (
-    <DialogTree harness={props.harness}>
-      <MarkedProvider>
-        <OpenDialog component={() => <DialogCompanyGuide version="2026.07" markdown={GUIDE_MARKDOWN} />} />
-      </MarkedProvider>
-    </DialogTree>
+    <>
+      <CompanyGuideTree harness={props.harness}>
+        <GuideMenu />
+      </CompanyGuideTree>
+      <Observations harness={props.harness} />
+    </>
+  )
+}
+
+function GuideMenu() {
+  const command = useCommand()
+  const platform = usePlatform()
+  return (
+    <div class="fixed left-2 top-2">
+      <WindowsAppMenu command={command} platform={platform} variant="v2" />
+    </div>
+  )
+}
+
+function CompanyGuideCommands() {
+  const command = useCommand()
+  const dialog = useDialog()
+  const platform = usePlatform()
+
+  command.register("company-guide-fixture", () => {
+    const guide = createCompanyGuideCommand({
+      enterprise: platform.enterprise,
+      category: "Settings",
+      open: (value) => dialog.show(() => <DialogCompanyGuide {...value} />),
+      reportFailure() {},
+    })
+    return guide ? [guide] : []
+  })
+
+  return null
+}
+
+function CompanyGuideTree(props: ParentProps<{ harness: Harness; platform?: Platform }>) {
+  return (
+    <ServerTree harness={props.harness} platform={props.platform}>
+      <DialogProvider>
+        <ServerSDKProvider>
+          <ServerSyncProvider>
+            <SettingsProvider>
+              <CommandProvider>
+                <MarkedProvider>
+                  <CompanyGuideCommands />
+                  {props.children}
+                </MarkedProvider>
+              </CommandProvider>
+            </SettingsProvider>
+          </ServerSyncProvider>
+        </ServerSDKProvider>
+      </DialogProvider>
+    </ServerTree>
+  )
+}
+
+function ErrorScenario(props: { harness: Harness; enterprise: boolean }) {
+  const platform = props.enterprise ? props.harness.platform : { ...props.harness.platform, enterprise: undefined }
+  return (
+    <>
+      <CompanyGuideTree harness={props.harness} platform={platform}>
+        <ErrorPage error={new Error("Fixture failure")} />
+      </CompanyGuideTree>
+      <Observations harness={props.harness} />
+    </>
   )
 }
 
@@ -529,6 +598,12 @@ function Fixture() {
       </Match>
       <Match when={scenario === "guide"}>
         <GuideScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "error-enterprise"}>
+        <ErrorScenario harness={harness} enterprise />
+      </Match>
+      <Match when={scenario === "error-public"}>
+        <ErrorScenario harness={harness} enterprise={false} />
       </Match>
     </Switch>
   )
