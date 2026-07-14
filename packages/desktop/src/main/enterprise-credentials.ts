@@ -14,8 +14,20 @@ type Input = {
 }
 
 export function createEnterpriseCredentialStore(input: Input) {
+  const temp = `${input.file}.tmp`
+  let mutations = Promise.resolve()
+
+  const mutate = (operation: () => Promise<void>) => {
+    const result = mutations.then(operation)
+    mutations = result.catch(() => undefined)
+    return result
+  }
+
   const get = async (): Promise<EnterpriseCredentials> => {
-    const encrypted = await readFile(input.file).catch(() => undefined)
+    const encrypted = await readFile(input.file).catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
+      throw error
+    })
     if (!encrypted) return { headers: {} }
 
     const value: unknown = await Promise.resolve(encrypted)
@@ -36,15 +48,27 @@ export function createEnterpriseCredentialStore(input: Input) {
     return { ...(typeof record.apiKey === "string" ? { apiKey: record.apiKey } : {}), headers }
   }
 
-  const set = async (credentials: EnterpriseCredentials) => {
-    if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
-    await mkdir(dirname(input.file), { recursive: true })
-    const temp = `${input.file}.tmp`
-    await writeFile(temp, input.encrypt(JSON.stringify(credentials)), { mode: 0o600 })
-    await rename(temp, input.file)
-  }
+  const set = (credentials: EnterpriseCredentials) =>
+    mutate(async () => {
+      if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
+      await mkdir(dirname(input.file), { recursive: true })
+      await writeFile(temp, input.encrypt(JSON.stringify(credentials)), { mode: 0o600 })
+        .then(() => rename(temp, input.file))
+        .finally(() => rm(temp, { force: true }))
+    })
 
-  const clear = () => rm(input.file, { force: true })
+  const clear = () =>
+    mutate(async () => {
+      const errors: unknown[] = []
+      await Promise.all(
+        [input.file, temp].map((file) =>
+          rm(file, { force: true }).catch((error: unknown) => {
+            errors.push(error)
+          }),
+        ),
+      )
+      if (errors.length) throw errors[0]
+    })
 
   return { get, set, clear }
 }
