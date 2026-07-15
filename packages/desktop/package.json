@@ -21,6 +21,7 @@
     "package:win": "electron-builder --win --config electron-builder.config.ts",
     "package:enterprise:win": "bun ./scripts/package-enterprise-win.ts",
     "verify:enterprise:package": "bun ./scripts/verify-enterprise-package.ts ./dist/win-unpacked",
+    "smoke:enterprise:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows-portable-smoke.ps1",
     "package:linux": "electron-builder --linux --config electron-builder.config.ts",
     "native:build": "bun install --cwd native"
   },
