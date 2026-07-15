@@ -235,6 +235,19 @@ function Assert-ExactWindowsAcceptanceRecord {
     if ($Actual.$field -cne $Expected.$field) { throw "Windows acceptance record mismatch: $field" }
   }
 }
+
+function Read-VerifiedWindows10Control {
+  param(
+    [string] $Path,
+    [PSCustomObject] $Pristine
+  )
+
+  $metadata = Read-VerifiedPortableReleaseMetadata -Path $Path
+  Assert-ReleaseMetadataMatchesPristine -Metadata $metadata -Pristine $Pristine
+  if ($metadata.windowsAcceptance.Count -ne 1) { throw "Windows 10 control must contain exactly one record" }
+  Assert-ExpectedWindowsAcceptance -Record $metadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
+  return $metadata
+}
 ```
 
 ### Pristine build-host validation
@@ -301,10 +314,7 @@ $windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json
 if (Test-Path -LiteralPath $windows10ReleaseMetadata) { throw "Windows 10 release metadata already exists" }
 Copy-Item -LiteralPath $releaseMetadata -Destination $windows10ReleaseMetadata
 $pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
-$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
-Assert-ReleaseMetadataMatchesPristine -Metadata $windows10Metadata -Pristine $pristineMetadata
-if ($windows10Metadata.windowsAcceptance.Count -ne 1) { throw "Windows 10 metadata must contain exactly one record" }
-Assert-ExpectedWindowsAcceptance -Record $windows10Metadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
+$windows10Metadata = Read-VerifiedWindows10Control -Path $windows10ReleaseMetadata -Pristine $pristineMetadata
 ```
 
 Transfer the Windows 10-updated `.release.json`, the unchanged ZIP and `.sha256`, and the read-only `release.pristine.json` and `release.windows10.json` control copies to Windows 11. The transfer is invalid if any immutable metadata field, ZIP SHA-256, artifact name, or git commit differs from the reviewed build values. A transfer that changes the ZIP or checksum is always a failure; a transfer that changes the release JSON outside its single exact valid Windows 10 record is also a failure. Quarantine a failed set and obtain a fresh copy from the controlled build output.
@@ -318,7 +328,7 @@ $evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$expectedCommit"
 $pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
 $windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json"
 $pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
-$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
+$windows10Metadata = Read-VerifiedWindows10Control -Path $windows10ReleaseMetadata -Pristine $pristineMetadata
 $metadata = Read-VerifiedPortableReleaseMetadata -Path $releaseMetadata
 Assert-ReleaseMetadataMatchesPristine -Metadata $metadata -Pristine $pristineMetadata
 if ($metadata.windowsAcceptance.Count -ne 1) { throw "Windows 11 requires exactly one Windows 10 acceptance record" }
@@ -326,6 +336,37 @@ $windows10 = $metadata.windowsAcceptance[0]
 Assert-ExpectedWindowsAcceptance -Record $windows10 -ExpectedWindows "Windows 10"
 Assert-ExactWindowsAcceptanceRecord -Actual $windows10 -Expected $windows10Metadata.windowsAcceptance[0]
 ```
+
+### Return the Windows 11 result through the trusted channel
+
+After the Windows 11 instance of the smoke command succeeds, return only its updated `.release.json` to the controlled release host through the trusted internal channel. The source and destination names below are deliberately different: the final gate accepts only the returned destination file, never the Windows 11 local source file.
+
+```powershell
+# Run on the Windows 11 VM after its smoke command completes.
+$windows11SourceReleaseMetadata = $releaseMetadata
+$pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
+$windows10Metadata = Read-VerifiedWindows10Control -Path $windows10ReleaseMetadata -Pristine $pristineMetadata
+$windows11SourceMetadata = Read-VerifiedPortableReleaseMetadata -Path $windows11SourceReleaseMetadata
+Assert-ReleaseMetadataMatchesPristine -Metadata $windows11SourceMetadata -Pristine $pristineMetadata
+if ($windows11SourceMetadata.windowsAcceptance.Count -ne 2) { throw "Windows 11 return must contain exactly two records" }
+Assert-ExpectedWindowsAcceptance -Record $windows11SourceMetadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
+Assert-ExactWindowsAcceptanceRecord -Actual $windows11SourceMetadata.windowsAcceptance[0] -Expected $windows10Metadata.windowsAcceptance[0]
+Assert-ExpectedWindowsAcceptance -Record $windows11SourceMetadata.windowsAcceptance[1] -ExpectedWindows "Windows 11"
+$windows11SourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $windows11SourceReleaseMetadata).Hash.ToLowerInvariant()
+$trustedReturnRoot = "\\release-transfer.corp.example\opencode-pilot"
+$windows11ReturnDirectory = Join-Path $trustedReturnRoot "$actualHash\$expectedCommit"
+$returnedReleaseMetadata = Join-Path $windows11ReturnDirectory "$($archive.BaseName).release.windows11-return.json"
+$returnedReleaseChecksum = "$returnedReleaseMetadata.sha256"
+New-Item -ItemType Directory -Path $windows11ReturnDirectory -Force | Out-Null
+if (Test-Path -LiteralPath $returnedReleaseMetadata) { throw "Windows 11 return metadata already exists" }
+Copy-Item -LiteralPath $windows11SourceReleaseMetadata -Destination $returnedReleaseMetadata
+Set-Content -LiteralPath $returnedReleaseChecksum -Value "$windows11SourceHash  $([System.IO.Path]::GetFileName($returnedReleaseMetadata))" -NoNewline
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $returnedReleaseMetadata).Hash.ToLowerInvariant() -ne $windows11SourceHash) {
+  throw "Windows 11 return metadata hash mismatch"
+}
+```
+
+On the controlled release host, retrieve `\\release-transfer.corp.example\opencode-pilot\<zip-sha256>\<git-commit>\company-opencode-pilot-<version>-win-x64.release.windows11-return.json` and its adjacent `.sha256` through that same channel. The final gate below verifies the returned-file hash, then validates its artifact ZIP SHA-256 and git commit through `Read-VerifiedPortableReleaseMetadata` before accepting it.
 
 ## Final distribution gate
 
@@ -336,9 +377,25 @@ $evidenceRoot = "\\release-evidence.corp.example\opencode-pilot"
 $evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$expectedCommit"
 $pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
 $windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json"
+$trustedReturnRoot = "\\release-transfer.corp.example\opencode-pilot"
+$windows11ReturnDirectory = Join-Path $trustedReturnRoot "$actualHash\$expectedCommit"
+$returnedReleaseMetadata = Join-Path $windows11ReturnDirectory "$($archive.BaseName).release.windows11-return.json"
+$returnedReleaseChecksum = "$returnedReleaseMetadata.sha256"
+if (-not (Test-Path -LiteralPath $returnedReleaseMetadata -PathType Leaf)) { throw "Windows 11 return metadata is missing" }
+if (-not (Test-Path -LiteralPath $returnedReleaseChecksum -PathType Leaf)) { throw "Windows 11 return checksum is missing" }
+$returnedChecksumRecord = (Get-Content -Raw -LiteralPath $returnedReleaseChecksum).Trim()
+if ($returnedChecksumRecord -notmatch '^([a-f0-9]{64})  (company-opencode-pilot-.+-win-x64\.release\.windows11-return\.json)$') {
+  throw "Windows 11 return checksum format is invalid"
+}
+$expectedReturnedHash = $Matches[1]
+$returnedArtifact = $Matches[2]
+if ($returnedArtifact -ne [System.IO.Path]::GetFileName($returnedReleaseMetadata)) { throw "Windows 11 return checksum name mismatch" }
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $returnedReleaseMetadata).Hash.ToLowerInvariant() -ne $expectedReturnedHash) {
+  throw "Windows 11 return checksum mismatch"
+}
 $pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
-$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
-$metadata = Read-VerifiedPortableReleaseMetadata -Path $releaseMetadata
+$windows10Metadata = Read-VerifiedWindows10Control -Path $windows10ReleaseMetadata -Pristine $pristineMetadata
+$metadata = Read-VerifiedPortableReleaseMetadata -Path $returnedReleaseMetadata
 Assert-ReleaseMetadataMatchesPristine -Metadata $metadata -Pristine $pristineMetadata
 if ($metadata.windowsAcceptance.Count -ne 2) { throw "Expected exactly two Windows acceptance records" }
 Assert-ExpectedWindowsAcceptance -Record $metadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
@@ -389,7 +446,7 @@ function Add-EgressEvidenceStep {
 }
 
 Add-EgressEvidenceStep "Trace requested before pilot launch"
-& netsh trace start capture=yes scenario=InternetClient tracefile="$traceFile" filemode=single maxsize=512 report=yes persistent=no |
+& netsh trace start capture=yes scenario=InternetClient tracefile="$traceFile" filemode=single maxsize=512 report=no persistent=no |
   Tee-Object -FilePath (Join-Path $vmEvidenceDirectory "netsh-trace-start.txt")
 if ($LASTEXITCODE -ne 0) { throw "Unable to start retained egress trace" }
 Add-EgressEvidenceStep "Trace started; launch pilot now"
@@ -405,8 +462,8 @@ Read-Host "Shut down the pilot normally and press Enter only after it exits" | O
 Add-EgressEvidenceStep "Pilot shutdown complete; stopping trace"
 & netsh trace stop | Tee-Object -FilePath (Join-Path $vmEvidenceDirectory "netsh-trace-stop.txt")
 if ($LASTEXITCODE -ne 0) { throw "Unable to stop retained egress trace" }
-& tracerpt $traceFile -o (Join-Path $vmEvidenceDirectory "manual-workflow.xml") -of XML
-if ($LASTEXITCODE -ne 0) { throw "Unable to write retained egress report" }
+& tracerpt $traceFile -o (Join-Path $vmEvidenceDirectory "manual-workflow-events.xml") -of XML
+if ($LASTEXITCODE -ne 0) { throw "Unable to write retained XML event dump" }
 Get-ChildItem -LiteralPath $vmEvidenceDirectory -File |
   Get-FileHash -Algorithm SHA256 |
   Sort-Object Path |
@@ -414,7 +471,7 @@ Get-ChildItem -LiteralPath $vmEvidenceDirectory -File |
   Out-File -LiteralPath (Join-Path $vmEvidenceDirectory "sha256.txt")
 ```
 
-Use `windows-11-egress` instead of `windows-10-egress` on the Windows 11 VM. The operator must retain the ETL, XML report, `netsh-trace-stop.txt`, timestamps, step log, and hashes in the SHA-256/git-commit evidence directory. Review the trace/report and the smoke output together. Any endpoint outside the configured allowed origin, required DNS, exact loopback, or separately approved enterprise infrastructure is a release blocker until the release owner and security reviewer document approval in `windows-acceptance.md`.
+Use `windows-11-egress` instead of `windows-10-egress` on the Windows 11 VM. The operator must retain the ETL, XML event dump, `netsh-trace-start.txt`, `netsh-trace-stop.txt`, timestamps, step log, and hashes in the SHA-256/git-commit evidence directory. Review the trace/XML event dump and the smoke output together. Any endpoint outside the configured allowed origin, required DNS, exact loopback, or separately approved enterprise infrastructure is a release blocker until the release owner and security reviewer document approval in `windows-acceptance.md`.
 
 Complete every item on both VMs and retain its reference in that external evidence file. The automated smoke appends only its exact structured record to `.release.json`.
 
