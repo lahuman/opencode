@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { BlobReader, BlobWriter, TextReader, ZipWriter } from "@zip.js/zip.js"
@@ -45,6 +45,31 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
   const file = path.join(root, relative)
   await rm(file, { force: true })
   await mkdir(file)
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
+})
+
+test("rejects a required payload symlinked outside the package root", async () => {
+  const root = await portableFixture()
+  const outside = await mkdtemp(path.join(tmpdir(), "enterprise-portable-outside-"))
+  roots.push(outside)
+  const executable = path.join(root, "Company OpenCode Pilot.exe")
+  const target = path.join(outside, "Company OpenCode Pilot.exe")
+  await Bun.write(target, "portable executable")
+  await rm(executable)
+  await symlink(target, executable, "file")
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
+})
+
+test("rejects a required payload reached through an external resources link", async () => {
+  const root = await portableFixture()
+  const outside = await mkdtemp(path.join(tmpdir(), "enterprise-portable-outside-"))
+  roots.push(outside)
+  const resources = path.join(root, "resources")
+  const externalResources = path.join(outside, "resources")
+  await rename(resources, externalResources)
+  await symlink(externalResources, resources, process.platform === "win32" ? "junction" : "dir")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
 })

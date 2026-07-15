@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises"
+import { lstat } from "node:fs/promises"
 import path from "node:path"
 import { type Entry, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
 
@@ -78,15 +78,32 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
 
 async function readEnterprisePackage(root: string): Promise<EnterprisePackageFiles> {
   const paths = requiredFiles((entry) => path.join(root, ...entry.split("/")))
+  const nodes = [
+    { path: root, directory: true },
+    ...requiredEntries.flatMap((entry) => {
+      const parts = entry.split("/")
+      return parts.map((_, index) => ({
+        path: path.join(root, ...parts.slice(0, index + 1)),
+        directory: index < parts.length - 1,
+      }))
+    }),
+  ]
+  // lstat observes the link itself so a payload cannot escape win-unpacked through a link or junction.
   const stats = await Promise.all(
-    Object.values(paths).map((file) =>
-      stat(file).then(
+    nodes.map((node) =>
+      lstat(node.path).then(
         (info) => info,
         () => undefined,
       ),
     ),
   )
-  if (!stats.every((info) => info?.isFile())) throw new Error("Portable package is missing required files")
+  if (
+    !stats.every(
+      (info, index) => info && !info.isSymbolicLink() && (nodes[index].directory ? info.isDirectory() : info.isFile()),
+    )
+  ) {
+    throw new Error("Portable package is missing required files")
+  }
   const contents = new Map(
     await Promise.all(
       requiredEntries.map(
