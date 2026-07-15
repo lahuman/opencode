@@ -138,6 +138,27 @@ test("portable smoke stops the known root when CIM process discovery fails", asy
   )
 })
 
+test("portable smoke rethrows CIM cleanup failures after stopping retained PIDs", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const stop = script.slice(
+    script.indexOf("function Stop-ProcessTree"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+  const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
+
+  expect(stop).toContain("$discoveryFailure = $null")
+  expect(stop).toContain("$discoveryFailure = $_")
+  expect(stop).toMatch(
+    /Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*\$discoveryFailure = \$_[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop[\s\S]*foreach \(\$processID in \$processIDs\)[\s\S]*Get-Process -Id \$processID -ErrorAction SilentlyContinue[\s\S]*if \(\$survivingProcessIDs\.Count -gt 0\)[\s\S]*if \(\$null -ne \$discoveryFailure\) \{ throw \$discoveryFailure \}/,
+  )
+  expect(launch.indexOf("Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs")).toBeLessThan(
+    launch.indexOf("if ($null -ne $cleanupFailure) { throw $cleanupFailure }"),
+  )
+  expect(script.indexOf("$metadata.windowsAcceptance =")).toBeGreaterThan(
+    script.indexOf("Remove-Item -LiteralPath $extractRoot -Recurse -Force"),
+  )
+})
+
 test("portable smoke stops and verifies every discovered process before surfacing cleanup failures", async () => {
   const script = await Bun.file(scriptPath).text()
   const stop = script.slice(
@@ -322,6 +343,46 @@ test.if(process.platform === "win32")(
         })
         expect(await process.exited).not.toBe(0)
       }
+    } finally {
+      await rm(temp, { force: true, recursive: true })
+    }
+  },
+)
+
+test.if(process.platform === "win32")(
+  "PowerShell rethrows CIM cleanup failures after stopping retained PIDs",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const stop = script.slice(
+      script.indexOf("function Stop-ProcessTree"),
+      script.indexOf("function Test-AllowedRemoteAddress"),
+    )
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+    const harness = join(temp, "stop-process-tree.ps1")
+
+    try {
+      await Bun.write(
+        harness,
+        `$ErrorActionPreference = "Stop"
+function Get-ProcessTreeIds { param([int] $RootProcessId) throw "CIM discovery failed" }
+function Stop-Process { [CmdletBinding()] param([int] $Id, [switch] $Force) $script:stoppedProcessIDs += $Id }
+function Get-Process { [CmdletBinding()] param([int] $Id) }
+${stop}
+$script:stoppedProcessIDs = @()
+$knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()
+[void]$knownProcessIDs.Add(20)
+$failure = $null
+try { Stop-ProcessTree -RootProcessId 10 -KnownProcessIDs $knownProcessIDs } catch { $failure = $_ }
+if ((@($script:stoppedProcessIDs | Sort-Object) -join ",") -ne "10,20") { exit 2 }
+if ($null -eq $failure) { exit 3 }
+if ($failure.Exception.Message -ne "CIM discovery failed") { exit 4 }`,
+      )
+      const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+
+      expect(await process.exited).toBe(0)
     } finally {
       await rm(temp, { force: true, recursive: true })
     }

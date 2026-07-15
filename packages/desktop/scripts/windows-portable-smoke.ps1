@@ -167,12 +167,14 @@ function Stop-ProcessTree {
   foreach ($knownProcessID in $KnownProcessIDs) {
     $processIDs += $knownProcessID
   }
+  $discoveryFailure = $null
   try {
     foreach ($processID in @(Get-ProcessTreeIds -RootProcessId $RootProcessId)) {
       $processIDs += $processID
       [void]$KnownProcessIDs.Add($processID)
     }
   } catch {
+    $discoveryFailure = $_
   }
   $processIDs = @($processIDs | Select-Object -Unique)
   $stopFailures = @{}
@@ -201,6 +203,7 @@ function Stop-ProcessTree {
     }
     throw "Portable process tree did not stop: $($survivingProcessIDs -join ', ')"
   }
+  if ($null -ne $discoveryFailure) { throw $discoveryFailure }
   return $processIDs
 }
 
