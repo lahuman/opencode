@@ -91,16 +91,27 @@ function Get-ProcessTreeIds {
 function Stop-ProcessTree {
   param([int] $RootProcessId)
 
-  $processIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId | Sort-Object -Descending)
-  foreach ($processID in $processIDs) {
+  $processIDs = @($RootProcessId)
+  try {
+    $discoveredProcessIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId | Sort-Object -Descending)
+    $processIDs = @($processIDs + $discoveredProcessIDs | Select-Object -Unique)
+  } catch {
+  }
+  foreach ($processID in @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)) {
     try {
       Stop-Process -Id $processID -Force -ErrorAction Stop
     } catch {
-      if (Get-Process -Id $processID -ErrorAction SilentlyContinue) { throw }
     }
   }
-  if (@(Get-Process -Id $processIDs -ErrorAction SilentlyContinue).Count -gt 0) {
-    throw "Portable process tree did not stop"
+  $rootFailure = $null
+  try {
+    Stop-Process -Id $RootProcessId -Force -ErrorAction Stop
+  } catch {
+    $rootFailure = $_
+  }
+  if (Get-Process -Id $RootProcessId -ErrorAction SilentlyContinue) {
+    if ($null -ne $rootFailure) { throw $rootFailure }
+    throw "Portable root process did not stop"
   }
   return $processIDs
 }

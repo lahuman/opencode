@@ -118,6 +118,21 @@ test("portable smoke continues cleanup after final observation failures", async 
   )
 })
 
+test("portable smoke stops the known root when CIM process discovery fails", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const stop = script.slice(
+    script.indexOf("function Stop-ProcessTree"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+
+  expect(stop).toContain("$processIDs = @($RootProcessId)")
+  expect(stop).toContain("Get-ProcessTreeIds -RootProcessId $RootProcessId")
+  expect(stop).toContain("Stop-Process -Id $RootProcessId -Force -ErrorAction Stop")
+  expect(stop).toMatch(
+    /Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop/,
+  )
+})
+
 test("desktop package exposes the portable smoke command", async () => {
   const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json()
 
