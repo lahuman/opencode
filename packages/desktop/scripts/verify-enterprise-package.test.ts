@@ -197,6 +197,20 @@ test("rejects a local Unicode-path extra field", async () => {
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
+test("rejects an undeclared local Setup.exe record before the central directory", async () => {
+  const archive = await archiveFixture(required)
+  await insertBeforeCentralDirectory(archive, localFileRecord("Setup.exe", "installer payload"))
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects an unexplained gap before the central directory", async () => {
+  const archive = await archiveFixture(required)
+  await insertBeforeCentralDirectory(archive, new Uint8Array([0]))
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test.each([
   "resources\\app.asar",
   "resources/../Company OpenCode Pilot.exe",
@@ -566,6 +580,19 @@ async function insertCentralDirectoryByte(archive: string) {
   await Bun.write(archive, result)
 }
 
+async function insertBeforeCentralDirectory(archive: string, payload: Uint8Array) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const end = endOfCentralDirectoryOffset(bytes)
+  const view = new DataView(bytes.buffer)
+  const central = view.getUint32(end + 16, true)
+  const result = new Uint8Array(bytes.byteLength + payload.byteLength)
+  result.set(bytes.subarray(0, central))
+  result.set(payload, central)
+  result.set(bytes.subarray(central), central + payload.byteLength)
+  new DataView(result.buffer).setUint32(end + payload.byteLength + 16, central + payload.byteLength, true)
+  await Bun.write(archive, result)
+}
+
 async function extendFirstCentralRecordExtraField(archive: string) {
   const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
   const view = new DataView(bytes.buffer)
@@ -593,6 +620,24 @@ function unicodePathExtraField(rawName: string, filename: string) {
   new DataView(data.buffer).setUint32(1, crc32(raw), true)
   data.set(name, 5)
   return data
+}
+
+function localFileRecord(filename: string, contents: string) {
+  const name = new TextEncoder().encode(filename)
+  const data = new TextEncoder().encode(contents)
+  const record = new Uint8Array(30 + name.byteLength + data.byteLength)
+  const view = new DataView(record.buffer)
+  view.setUint32(0, 0x04034b50, true)
+  view.setUint16(4, 20, true)
+  view.setUint16(6, 0x800, true)
+  view.setUint16(8, 0, true)
+  view.setUint32(14, crc32(data), true)
+  view.setUint32(18, data.byteLength, true)
+  view.setUint32(22, data.byteLength, true)
+  view.setUint16(26, name.byteLength, true)
+  record.set(name, 30)
+  record.set(data, 30 + name.byteLength)
+  return record
 }
 
 function crc32(input: Uint8Array) {

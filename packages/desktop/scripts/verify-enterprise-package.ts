@@ -308,7 +308,12 @@ function hasSafeLocalHeaders(bytes: Uint8Array, centralDirectory: CentralDirecto
     .filter((range): range is ArchiveRange => range !== undefined)
   if (ranges.length !== centralDirectory.entries.length) return false
   const sorted = ranges.toSorted((left, right) => left.start - right.start)
-  return sorted.every((range, index) => index === 0 || sorted[index - 1].end <= range.start)
+  // Controlled Windows release ZIPs have no self-extracting prefix or undeclared local payload.
+  return (
+    sorted[0].start === 0 &&
+    sorted[sorted.length - 1].end === centralDirectory.offset &&
+    sorted.every((range, index) => index === 0 || sorted[index - 1].end === range.start)
+  )
 }
 
 function readLocalHeader(bytes: Uint8Array, centralDirectoryOffset: number, central: CentralDirectoryEntry) {
