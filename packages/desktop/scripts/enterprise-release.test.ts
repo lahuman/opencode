@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 
 import { validateEnterpriseBuild } from "./enterprise-build"
-import { writeEnterpriseRelease } from "./enterprise-release"
+import { type EnterpriseWindowsAcceptance, writeEnterpriseRelease } from "./enterprise-release"
 
 const roots: string[] = []
 const valid = {
@@ -16,6 +16,14 @@ const valid = {
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
+
+const acceptance = {
+  windowsVersion: "Windows 11 Enterprise",
+  windowsBuild: "10.0.26100.1",
+  testedAt: "2026-07-15T00:00:00.000Z",
+  tester: "pilot-tester",
+  result: "pass",
+} satisfies EnterpriseWindowsAcceptance
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -49,7 +57,16 @@ test("writes checksum and non-secret release metadata", async () => {
 
   const metadata = await Bun.file(archive.replace(/\.zip$/, ".release.json")).text()
   expect(JSON.parse(metadata)).toEqual(result)
+  expect(result.windowsAcceptance).toEqual([])
+  expect(Object.keys(acceptance)).toEqual(["windowsVersion", "windowsBuild", "testedAt", "tester", "result"])
   for (const value of ["https://llm.corp.example", "credential-secret", "Authorization", "CSC_LINK"]) {
     expect(metadata).not.toContain(value)
   }
+})
+
+test("declares structured Windows acceptance records", async () => {
+  const source = await Bun.file(new URL("./enterprise-release.ts", import.meta.url)).text()
+
+  expect(source).toContain("export type EnterpriseWindowsAcceptance")
+  expect(source).toContain("windowsAcceptance: EnterpriseWindowsAcceptance[]")
 })

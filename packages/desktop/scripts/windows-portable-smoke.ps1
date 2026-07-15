@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Get-AllowedAddresses {
-  param([string] $Host)
+  param([string] $TargetHost)
 
   $addresses = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
   foreach ($loopback in @("127.0.0.1", "::1", "::ffff:127.0.0.1")) {
@@ -18,7 +18,7 @@ function Get-AllowedAddresses {
   }
 
   [System.Net.IPAddress] $literalAddress = $null
-  if ([System.Net.IPAddress]::TryParse($Host, [ref]$literalAddress)) {
+  if ([System.Net.IPAddress]::TryParse($TargetHost, [ref]$literalAddress)) {
     [void]$addresses.Add($literalAddress.ToString())
     return @($addresses)
   }
@@ -26,7 +26,7 @@ function Get-AllowedAddresses {
   $resolved = 0
   foreach ($type in @("A", "AAAA")) {
     try {
-      foreach ($record in @(Resolve-DnsName -Name $Host -Type $type -DnsOnly)) {
+      foreach ($record in @(Resolve-DnsName -Name $TargetHost -Type $type -DnsOnly)) {
         if ([string]::IsNullOrWhiteSpace($record.IPAddress)) { continue }
         [System.Net.IPAddress] $address = $null
         if (-not [System.Net.IPAddress]::TryParse($record.IPAddress, [ref]$address)) { continue }
@@ -40,6 +40,31 @@ function Get-AllowedAddresses {
 
   if ($resolved -eq 0) { throw "Unable to resolve the allowed host" }
   return @($addresses)
+}
+
+function Assert-WindowsAcceptanceRecords {
+  param([object[]] $Records)
+
+  $requiredFields = @("result", "testedAt", "tester", "windowsBuild", "windowsVersion")
+  foreach ($record in $Records) {
+    if ($null -eq $record) { throw "Release metadata Windows acceptance is invalid" }
+    $recordFields = if ($record -is [System.Collections.IDictionary]) {
+      @($record.Keys | Sort-Object)
+    } else {
+      @($record.PSObject.Properties.Name | Sort-Object)
+    }
+    if (($recordFields -join ",") -ne ($requiredFields -join ",")) {
+      throw "Release metadata Windows acceptance is invalid"
+    }
+    foreach ($field in $requiredFields) {
+      $value = if ($record -is [System.Collections.IDictionary]) { $record[$field] } else { $record.$field }
+      if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
+        throw "Release metadata Windows acceptance is invalid"
+      }
+    }
+    $result = if ($record -is [System.Collections.IDictionary]) { $record["result"] } else { $record.result }
+    if ($result -ne "pass") { throw "Release metadata Windows acceptance is invalid" }
+  }
 }
 
 function Get-ProcessTreeIds {
@@ -147,8 +172,13 @@ if ($metadata.authenticode -ne "NotSigned") { throw "Release metadata signature 
 if ($null -eq $metadata.target -or $metadata.target.os -ne "win32" -or $metadata.target.arch -ne "x64") {
   throw "Release metadata target mismatch"
 }
+if ($null -eq $metadata.windowsAcceptance -or $metadata.windowsAcceptance -is [string]) {
+  throw "Release metadata Windows acceptance is invalid"
+}
+$existingAcceptance = @($metadata.windowsAcceptance)
+Assert-WindowsAcceptanceRecords -Records $existingAcceptance
 
-$allowedAddresses = Get-AllowedAddresses -Host $AllowedHost
+$allowedAddresses = Get-AllowedAddresses -TargetHost $AllowedHost
 $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-smoke-$([Guid]::NewGuid().ToString('N'))"
 $appData = Join-Path $env:LOCALAPPDATA "com.company.opencode.pilot"
 $projectSentinel = Join-Path $SentinelProject "keep.txt"
@@ -191,7 +221,8 @@ try {
     tester = $env:USERNAME
     result = "pass"
   }
-  $metadata.windowsAcceptance = @($metadata.windowsAcceptance) + $record
+  Assert-WindowsAcceptanceRecords -Records @($record)
+  $metadata.windowsAcceptance = @($existingAcceptance) + $record
   $metadataTemporary = "$ReleaseMetadata.$([Guid]::NewGuid().ToString('N')).tmp"
   [System.IO.File]::WriteAllText(
     $metadataTemporary,

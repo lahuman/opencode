@@ -10,6 +10,14 @@ export type EnterpriseReleaseInput = {
   profile: EnterpriseBuildMetadata
 }
 
+export type EnterpriseWindowsAcceptance = {
+  windowsVersion: string
+  windowsBuild: string
+  testedAt: string
+  tester: string
+  result: "pass"
+}
+
 export type EnterpriseReleaseMetadata = {
   schemaVersion: 1
   appVersion: string
@@ -22,7 +30,7 @@ export type EnterpriseReleaseMetadata = {
   target: { os: "win32"; arch: "x64" }
   builtAt: string
   authenticode: "NotSigned"
-  windowsAcceptance: string[]
+  windowsAcceptance: EnterpriseWindowsAcceptance[]
 }
 
 export async function writeEnterpriseRelease(input: EnterpriseReleaseInput): Promise<EnterpriseReleaseMetadata> {
