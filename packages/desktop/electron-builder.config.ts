@@ -6,7 +6,6 @@ import { promisify } from "node:util"
 import type { Configuration } from "electron-builder"
 
 import { validateEnterpriseBuild } from "./scripts/enterprise-build"
-import { stageEnterpriseCertificate } from "./scripts/enterprise-certificate"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
@@ -154,24 +153,21 @@ function getConfig() {
   throw new Error("Unsupported release channel")
 }
 
-async function getEnterpriseConfig() {
+function getEnterpriseConfig() {
   validateEnterpriseBuild(process.env)
-  const certificate = await stageEnterpriseCertificate(process.env)
   const appId = "com.company.opencode.pilot"
   const base = getBase(appId)
-  const config = {
+  return {
     ...base,
-    cscLink: certificate.cscLink,
     appId,
     productName: "Company OpenCode Pilot",
-    artifactName: "company-opencode-pilot-${os}-${arch}.${ext}",
+    artifactName: "company-opencode-pilot-${version}-${os}-${arch}.${ext}",
     protocols: undefined,
-    beforePack: certificate.beforePack,
+    publish: undefined,
+    nsis: undefined,
     win: {
       ...base.win,
-      cscLink: certificate.cscLink,
-      forceCodeSigning: true,
-      target: ["nsis"],
+      target: ["zip"],
       signtoolOptions: undefined,
     },
     extraResources: [
@@ -179,15 +175,6 @@ async function getEnterpriseConfig() {
       { from: "../../LICENSE", to: "licenses/OpenCode-LICENSE" },
     ],
   } satisfies Configuration
-  Object.defineProperty(config, "beforePack", {
-    configurable: false,
-    enumerable: true,
-    get: () => certificate.beforePack,
-    set: () => {
-      throw new Error("Enterprise signing configuration is invalid")
-    },
-  })
-  return config
 }
 
 export default getConfig()

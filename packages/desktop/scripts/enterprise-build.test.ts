@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { validateEnterpriseBuild } from "./enterprise-build"
+import { enterprisePackageEnvironment, validateEnterpriseBuild } from "./enterprise-build"
 
 const valid = {
   OPENCODE_ENTERPRISE: "1",
@@ -10,9 +10,15 @@ const valid = {
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
-  CSC_LINK: "set",
-  CSC_KEY_PASSWORD: "set",
 }
+
+test("accepts a portable unsigned profile without signing inputs", () => {
+  expect(validateEnterpriseBuild(valid)).toMatchObject({
+    baseURL: "https://llm.corp.example/v1",
+    modelID: "company-code",
+    allowedOrigins: ["https://llm.corp.example"],
+  })
+})
 
 test("returns only normalized non-secret enterprise build metadata", () => {
   expect(
@@ -48,32 +54,48 @@ test("requires enterprise mode and every enterprise package input", () => {
     "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
     "OPENCODE_ENTERPRISE_GUIDE_VERSION",
     "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
-    "CSC_LINK",
-    "CSC_KEY_PASSWORD",
   ]) {
     expect(() => validateEnterpriseBuild({ ...valid, [key]: " \t " })).toThrow(key)
   }
 })
 
-test("rejects alternate electron-builder signing environment inputs without disclosing values", () => {
-  for (const key of [
-    "WIN_CSC_LINK",
-    "WIN_CSC_KEY_PASSWORD",
-    "CSC_NAME",
-    "CSC_INSTALLER_LINK",
-    "CSC_INSTALLER_KEY_PASSWORD",
-    "CSC_KEYCHAIN",
-    "CSC_IDENTITY_AUTO_DISCOVERY",
-    "CSC_FOR_PULL_REQUEST",
-  ]) {
-    const message = errorMessage(() => validateEnterpriseBuild({ ...valid, [key]: "alternate-signing-value" }))
+test.each([
+  "https://llm.corp.example/v1\\..\\admin",
+  "https://llm.corp.example/v1/%2e\t%2e/admin",
+  "https://llm.corp.example/v1/.\n./admin",
+])("rejects control and backslash URL normalization: %s", (baseURL) => {
+  expect(() => validateEnterpriseBuild({ ...valid, OPENCODE_ENTERPRISE_BASE_URL: baseURL })).toThrow(
+    "absolute HTTP(S) URL",
+  )
+})
 
-    expect(message).toBe(`${key} is not supported for an enterprise Windows package`)
-    expect(message).not.toContain("alternate-signing-value")
-    expect(errorMessage(() => validateEnterpriseBuild({ ...valid, [key]: "" }))).toBe(
-      `${key} is not supported for an enterprise Windows package`,
-    )
-  }
+test.each(["http://0x7f000001/v1", "http://0x7f.0.0.1/v1"])("rejects legacy IPv4 notation: %s", (baseURL) => {
+  expect(() =>
+    validateEnterpriseBuild({
+      ...valid,
+      OPENCODE_ENTERPRISE_BASE_URL: baseURL,
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "http://127.0.0.1",
+    }),
+  ).toThrow("absolute HTTP(S) URL")
+})
+
+test("strips inherited signing variables from package children", () => {
+  const env = enterprisePackageEnvironment({
+    ...valid,
+    CSC_LINK: "secret-path",
+    CSC_KEY_PASSWORD: "secret-password",
+    WIN_CSC_LINK: "alternate-secret",
+    cSc_Mixed_Case: "case-insensitive-secret-marker",
+    PATH: "preserve-me",
+  })
+
+  expect(env.PATH).toBe("preserve-me")
+  expect(
+    Object.keys(env).filter((key) => {
+      const upper = key.toUpperCase()
+      return upper.startsWith("CSC_") || upper.startsWith("WIN_CSC_")
+    }),
+  ).toEqual([])
 })
 
 test("requires the declared origins to include the base URL origin", () => {

@@ -11,8 +11,6 @@ const valid = {
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
-  CSC_LINK: "set",
-  CSC_KEY_PASSWORD: "set",
 }
 
 test("rejects non-Windows and non-x64 hosts before spawning", async () => {
@@ -20,16 +18,12 @@ test("rejects non-Windows and non-x64 hosts before spawning", async () => {
     { platform: "darwin", arch: "x64" },
     { platform: "win32", arch: "arm64" },
   ]) {
-    const state = { spawns: 0, stages: 0 }
+    const state = { spawns: 0 }
 
     await expect(
       runEnterpriseWindowsPackage({
         ...host,
         env: valid,
-        stage() {
-          state.stages++
-          return Promise.resolve({ cleanup: () => Promise.resolve() })
-        },
         spawn() {
           state.spawns++
           return { exited: Promise.resolve(0) }
@@ -37,61 +31,56 @@ test("rejects non-Windows and non-x64 hosts before spawning", async () => {
       }),
     ).rejects.toThrow("Windows x64")
     expect(state.spawns).toBe(0)
-    expect(state.stages).toBe(0)
   }
 })
 
 test("validates enterprise inputs before spawning", async () => {
-  const state = { spawns: 0, stages: 0 }
+  const state = { spawns: 0 }
 
   await expect(
     runEnterpriseWindowsPackage({
       platform: "win32",
       arch: "x64",
-      env: { ...valid, CSC_LINK: undefined },
-      stage() {
-        state.stages++
-        return Promise.resolve({ cleanup: () => Promise.resolve() })
-      },
+      env: { ...valid, OPENCODE_ENTERPRISE_BASE_URL: undefined },
       spawn() {
         state.spawns++
         return { exited: Promise.resolve(0) }
       },
     }),
-  ).rejects.toThrow("CSC_LINK")
+  ).rejects.toThrow("OPENCODE_ENTERPRISE_BASE_URL")
   expect(state.spawns).toBe(0)
-  expect(state.stages).toBe(0)
 })
 
-test("stages before build then runs both commands with opaque inherited environment and cleanup", async () => {
+test("runs the fixed commands with a signing-free child environment", async () => {
   const commands: string[][] = []
-  const events: string[] = []
-  const env = { ...valid }
+  const env = {
+    ...valid,
+    CSC_LINK: "csc-link-secret-marker",
+    CSC_KEY_PASSWORD: "csc-password-secret-marker",
+    WIN_CSC_LINK: "win-csc-link-secret-marker",
+    cSc_Mixed_Case: "mixed-case-secret-marker",
+    PATH: "preserve-me",
+  }
 
   const code = await runEnterpriseWindowsPackage({
     platform: "win32",
     arch: "x64",
     env,
-    stage(value) {
-      events.push("stage")
-      value.CSC_LINK = "C:/opaque/certificate.pfx"
-      return Promise.resolve({
-        cleanup() {
-          events.push("cleanup")
-          return Promise.resolve()
-        },
-      })
-    },
     spawn(command, options) {
       commands.push(command)
-      events.push(command[2] ?? "unknown")
       expect(options).toEqual({
         cwd: path.resolve(import.meta.dir, ".."),
-        env,
+        env: expect.any(Object),
         stdout: "inherit",
         stderr: "inherit",
       })
-      expect(options.env.CSC_LINK).toBe("C:/opaque/certificate.pfx")
+      expect(options.env.PATH).toBe("preserve-me")
+      expect(
+        Object.keys(options.env).filter((key) => {
+          const upper = key.toUpperCase()
+          return upper.startsWith("CSC_") || upper.startsWith("WIN_CSC_")
+        }),
+      ).toEqual([])
       return { exited: Promise.resolve(0) }
     },
   })
@@ -101,58 +90,34 @@ test("stages before build then runs both commands with opaque inherited environm
     ["bun", "run", "build"],
     ["bun", "run", "package:win", "--x64"],
   ])
-  expect(events).toEqual(["stage", "build", "package:win", "cleanup"])
 })
 
-test("returns the first nonzero exit code without spawning the package command and cleans up", async () => {
+test("returns the first nonzero exit code without spawning the package command", async () => {
   const commands: string[][] = []
-  const events: string[] = []
 
   const code = await runEnterpriseWindowsPackage({
     platform: "win32",
     arch: "x64",
     env: { ...valid },
-    stage() {
-      events.push("stage")
-      return Promise.resolve({
-        cleanup() {
-          events.push("cleanup")
-          return Promise.resolve()
-        },
-      })
-    },
     spawn(command) {
       commands.push(command)
-      events.push(command[2] ?? "unknown")
       return { exited: Promise.resolve(commands.length === 1 ? 17 : 0) }
     },
   })
 
   expect(code).toBe(17)
   expect(commands).toEqual([["bun", "run", "build"]])
-  expect(events).toEqual(["stage", "build", "cleanup"])
 })
 
-test("returns the package exit code after a successful build and cleans up", async () => {
+test("returns the package exit code after a successful build", async () => {
   const commands: string[][] = []
-  const events: string[] = []
 
   const code = await runEnterpriseWindowsPackage({
     platform: "win32",
     arch: "x64",
     env: { ...valid },
-    stage() {
-      events.push("stage")
-      return Promise.resolve({
-        cleanup() {
-          events.push("cleanup")
-          return Promise.resolve()
-        },
-      })
-    },
     spawn(command) {
       commands.push(command)
-      events.push(command[2] ?? "unknown")
       return { exited: Promise.resolve(commands.length === 1 ? 0 : 23) }
     },
   })
@@ -162,7 +127,6 @@ test("returns the package exit code after a successful build and cleans up", asy
     ["bun", "run", "build"],
     ["bun", "run", "package:win", "--x64"],
   ])
-  expect(events).toEqual(["stage", "build", "package:win", "cleanup"])
 })
 
 test("exposes the exact Bun TypeScript enterprise package script", async () => {

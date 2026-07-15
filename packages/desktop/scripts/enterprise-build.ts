@@ -2,9 +2,26 @@ import { isIP } from "node:net"
 
 type Env = Record<string, string | undefined>
 
-export function validateEnterpriseBuild(env: Env) {
+export type EnterpriseBuildMetadata = {
+  baseURL: string
+  modelID: string
+  modelName: string
+  defaultsVersion: string
+  guideVersion: string
+  allowedOrigins: string[]
+}
+
+export function enterprisePackageEnvironment(env: Env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => {
+      const upper = key.toUpperCase()
+      return !upper.startsWith("CSC_") && !upper.startsWith("WIN_CSC_")
+    }),
+  )
+}
+
+export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
   if (env.OPENCODE_ENTERPRISE !== "1") throw new Error("OPENCODE_ENTERPRISE must be 1")
-  rejectAlternateSigningInputs(env)
 
   const baseURL = requireValue(env, "OPENCODE_ENTERPRISE_BASE_URL")
   if (/[?#]/.test(baseURL)) {
@@ -18,7 +35,7 @@ export function validateEnterpriseBuild(env: Env) {
   if (hasDotPathSegment(rawBase.remainder)) {
     throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain dot path segments")
   }
-  const base = createHTTPURL(baseURL, "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
+  const base = createHTTPURL(baseURL, rawBase.host, "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
   const allowedOrigins = Array.from(
     new Set(
       requireValue(env, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
@@ -33,9 +50,6 @@ export function validateEnterpriseBuild(env: Env) {
     throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must include the OPENCODE_ENTERPRISE_BASE_URL origin")
   }
 
-  requireValue(env, "CSC_LINK")
-  requireValue(env, "CSC_KEY_PASSWORD")
-
   return {
     baseURL: base.href,
     modelID: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID"),
@@ -43,21 +57,6 @@ export function validateEnterpriseBuild(env: Env) {
     defaultsVersion: requireValue(env, "OPENCODE_ENTERPRISE_DEFAULTS_VERSION"),
     guideVersion: requireValue(env, "OPENCODE_ENTERPRISE_GUIDE_VERSION"),
     allowedOrigins,
-  }
-}
-
-function rejectAlternateSigningInputs(env: Env) {
-  for (const key of [
-    "WIN_CSC_LINK",
-    "WIN_CSC_KEY_PASSWORD",
-    "CSC_NAME",
-    "CSC_INSTALLER_LINK",
-    "CSC_INSTALLER_KEY_PASSWORD",
-    "CSC_KEYCHAIN",
-    "CSC_IDENTITY_AUTO_DISCOVERY",
-    "CSC_FOR_PULL_REQUEST",
-  ]) {
-    if (env[key] !== undefined) throw new Error(`${key} is not supported for an enterprise Windows package`)
   }
 }
 
@@ -73,7 +72,7 @@ function parseAllowedOrigin(value: string) {
   if (raw.remainder !== "" && raw.remainder !== "/") {
     throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins")
   }
-  return createHTTPURL(value, invalid)
+  return createHTTPURL(value, raw.host, invalid)
 }
 
 function parseRawHTTPURL(value: string, key: string, invalid: string) {
@@ -86,7 +85,10 @@ function parseRawHTTPURL(value: string, key: string, invalid: string) {
   const suffix = delimiter === -1 ? "" : remainder.slice(delimiter)
   if (authority.includes("@")) throw new Error(`${key} must not contain credentials`)
   if (!authority || /[%\\\s]/.test(authority) || !isValidAuthority(authority)) throw new Error(invalid)
-  return { remainder: suffix }
+  return {
+    host: authority.startsWith("[") ? authority.slice(1, authority.indexOf("]")) : authority.split(":")[0],
+    remainder: suffix,
+  }
 }
 
 function isValidAuthority(authority: string) {
@@ -128,9 +130,10 @@ function hasDotPathSegment(remainder: string) {
   return remainder.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
 }
 
-function createHTTPURL(value: string, invalid: string) {
-  if (!URL.canParse(value)) throw new Error(invalid)
+function createHTTPURL(value: string, rawHost: string, invalid: string) {
+  if (/[\u0000-\u0020\u007f\\]/.test(value) || !URL.canParse(value)) throw new Error(invalid)
   const url = new URL(value)
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(invalid)
+  if (isIP(url.hostname) === 4 && isIP(rawHost) !== 4) throw new Error(invalid)
   return url
 }
