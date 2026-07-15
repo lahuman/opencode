@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "node:path"
 
+import { validateEnterpriseBuild } from "./enterprise-build"
 import { runEnterpriseWindowsPackage } from "./package-enterprise-win"
 
 const valid = {
@@ -51,8 +52,8 @@ test("validates enterprise inputs before spawning", async () => {
   expect(state.spawns).toBe(0)
 })
 
-test("runs the fixed commands with a signing-free child environment", async () => {
-  const commands: string[][] = []
+test("runs validation, build, package, verification, git, and release in order", async () => {
+  const steps: string[] = []
   const env = {
     ...valid,
     CSC_LINK: "csc-link-secret-marker",
@@ -66,8 +67,13 @@ test("runs the fixed commands with a signing-free child environment", async () =
     platform: "win32",
     arch: "x64",
     env,
+    version: "1.17.18",
+    validate(value) {
+      steps.push("validate")
+      return validateEnterpriseBuild(value)
+    },
     spawn(command, options) {
-      commands.push(command)
+      steps.push(command[2] ?? command[1])
       expect(options).toEqual({
         cwd: path.resolve(import.meta.dir, ".."),
         env: expect.any(Object),
@@ -83,13 +89,33 @@ test("runs the fixed commands with a signing-free child environment", async () =
       ).toEqual([])
       return { exited: Promise.resolve(0) }
     },
+    verifyPackage(root) {
+      steps.push("verify-unpacked")
+      expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
+      return Promise.resolve({})
+    },
+    verifyArchive(archive) {
+      steps.push("verify-zip")
+      expect(archive).toBe(path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"))
+      return Promise.resolve([])
+    },
+    gitCommit() {
+      steps.push("git-commit")
+      return Promise.resolve("0123456789abcdef")
+    },
+    release(input) {
+      steps.push("release")
+      expect(input).toMatchObject({
+        archive: path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"),
+        version: "1.17.18",
+        gitCommit: "0123456789abcdef",
+      })
+      return Promise.resolve({})
+    },
   })
 
   expect(code).toBe(0)
-  expect(commands).toEqual([
-    ["bun", "run", "build"],
-    ["bun", "run", "package:win", "--x64"],
-  ])
+  expect(steps).toEqual(["validate", "build", "package:win", "verify-unpacked", "verify-zip", "git-commit", "release"])
 })
 
 test("returns the first nonzero exit code without spawning the package command", async () => {
@@ -129,7 +155,44 @@ test("returns the package exit code after a successful build", async () => {
   ])
 })
 
+test("stops after an unpacked-package verification failure", async () => {
+  const steps: string[] = []
+
+  await expect(
+    runEnterpriseWindowsPackage({
+      platform: "win32",
+      arch: "x64",
+      env: valid,
+      version: "1.17.18",
+      spawn(command) {
+        steps.push(command[2] ?? command[1])
+        return { exited: Promise.resolve(0) }
+      },
+      verifyPackage() {
+        steps.push("verify-unpacked")
+        return Promise.reject(new Error("Portable package is invalid"))
+      },
+      verifyArchive() {
+        steps.push("verify-zip")
+        return Promise.resolve([])
+      },
+      gitCommit() {
+        steps.push("git-commit")
+        return Promise.resolve("0123456789abcdef")
+      },
+      release() {
+        steps.push("release")
+        return Promise.resolve({})
+      },
+    }),
+  ).rejects.toThrow("Portable package")
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked"])
+})
+
 test("exposes the exact Bun TypeScript enterprise package script", async () => {
   const pkg = await Bun.file(path.resolve(import.meta.dir, "../package.json")).json()
   expect(pkg.scripts["package:enterprise:win"]).toBe("bun ./scripts/package-enterprise-win.ts")
+  expect(pkg.scripts["verify:enterprise:package"]).toBe(
+    "bun ./scripts/verify-enterprise-package.ts ./dist/win-unpacked",
+  )
 })

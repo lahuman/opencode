@@ -1,6 +1,8 @@
 import path from "node:path"
 
-import { enterprisePackageEnvironment, validateEnterpriseBuild } from "./enterprise-build"
+import { enterprisePackageEnvironment, validateEnterpriseBuild, type EnterpriseBuildMetadata } from "./enterprise-build"
+import { writeEnterpriseRelease, type EnterpriseReleaseInput } from "./enterprise-release"
+import { verifyEnterpriseArchive, verifyEnterprisePackage } from "./verify-enterprise-package"
 
 type Env = Record<string, string | undefined>
 type Spawn = (
@@ -13,12 +15,25 @@ type Spawn = (
   },
 ) => { exited: Promise<number> }
 
-export async function runEnterpriseWindowsPackage(input: { platform: string; arch: string; env: Env; spawn: Spawn }) {
+type EnterprisePackageInput = {
+  platform: string
+  arch: string
+  env: Env
+  spawn: Spawn
+  version?: string
+  validate?: (env: Env) => EnterpriseBuildMetadata
+  verifyPackage?: (root: string) => Promise<unknown>
+  verifyArchive?: (archive: string) => Promise<unknown>
+  gitCommit?: () => Promise<string>
+  release?: (input: EnterpriseReleaseInput) => Promise<unknown>
+}
+
+export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput) {
   if (input.platform !== "win32" || input.arch !== "x64") {
     throw new Error("Enterprise portable packaging requires Windows x64")
   }
 
-  validateEnterpriseBuild(input.env)
+  const profile = (input.validate ?? validateEnterpriseBuild)(input.env)
   const env = enterprisePackageEnvironment(input.env)
   const options = {
     cwd: path.resolve(import.meta.dir, ".."),
@@ -28,7 +43,25 @@ export async function runEnterpriseWindowsPackage(input: { platform: string; arc
   }
   const build = await input.spawn(["bun", "run", "build"], options).exited
   if (build !== 0) return build
-  return input.spawn(["bun", "run", "package:win", "--x64"], options).exited
+  const packageCode = await input.spawn(["bun", "run", "package:win", "--x64"], options).exited
+  if (packageCode !== 0) return packageCode
+
+  const version =
+    input.version ?? (await Bun.file(path.join(options.cwd, "package.json")).json<{ version: string }>()).version
+  const archive = path.join(options.cwd, "dist", `company-opencode-pilot-${version}-win-x64.zip`)
+  await (input.verifyPackage ?? verifyEnterprisePackage)(path.join(options.cwd, "dist", "win-unpacked"))
+  await (input.verifyArchive ?? verifyEnterpriseArchive)(archive)
+  const gitCommit = await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))()
+  await (input.release ?? writeEnterpriseRelease)({ archive, version, gitCommit, builtAt: new Date(), profile })
+  return 0
+}
+
+async function resolveGitCommit(cwd: string, env: Env) {
+  const process = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd, env, stdout: "pipe", stderr: "inherit" })
+  if ((await process.exited) !== 0) throw new Error("Unable to resolve the enterprise package git commit")
+  const commit = (await new Response(process.stdout).text()).trim()
+  if (!commit) throw new Error("Unable to resolve the enterprise package git commit")
+  return commit
 }
 
 if (import.meta.main) {
