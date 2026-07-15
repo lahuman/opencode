@@ -22,7 +22,14 @@ const requiredEntries = [
 
 type RequiredEntry = (typeof requiredEntries)[number]
 type EnterprisePackageFiles = Record<RequiredEntry, Uint8Array>
+type CentralDirectory = {
+  entries: CentralDirectoryEntry[]
+  offset: number
+}
 type CentralDirectoryEntry = {
+  bitFlag: number
+  compressedSize: number
+  compressionMethod: number
   diskNumberStart: number
   externalFileAttributes: number
   filenameUTF8: boolean
@@ -30,8 +37,12 @@ type CentralDirectoryEntry = {
   rawComment: Uint8Array
   rawExtraField: Uint8Array
   rawFilename: Uint8Array
+  signature: number
+  uncompressedSize: number
+  version: number
   versionMadeBy: number
 }
+type ArchiveRange = { end: number; start: number }
 
 export async function verifyEnterprisePackage(root: string): Promise<EnterprisePackageSummary> {
   validateEnterprisePackageFiles(await readEnterprisePackage(root))
@@ -49,12 +60,15 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
   const archiveBytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
   const centralDirectory = readCentralDirectory(archiveBytes)
   if (!centralDirectory) throw new Error("Portable package archive contains an unsafe entry")
+  if (!hasSafeLocalHeaders(archiveBytes, centralDirectory)) {
+    throw new Error("Portable package archive contains an unsafe entry")
+  }
   const reader = new ZipReader(new Uint8ArrayReader(archiveBytes))
   const entries = await reader.getEntries()
   await reader.close()
   if (
-    entries.length !== centralDirectory.length ||
-    !entries.every((entry, index) => matchesCentralDirectoryEntry(entry, centralDirectory[index]))
+    entries.length !== centralDirectory.entries.length ||
+    !entries.every((entry, index) => matchesCentralDirectoryEntry(entry, centralDirectory.entries[index]))
   ) {
     throw new Error("Portable package archive contains an unsafe entry")
   }
@@ -201,7 +215,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function readCentralDirectory(bytes: Uint8Array): CentralDirectoryEntry[] | undefined {
+function readCentralDirectory(bytes: Uint8Array): CentralDirectory | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const endOfCentralDirectory = endOfCentralDirectoryOffset(view, bytes.byteLength)
   if (endOfCentralDirectory === undefined) return undefined
@@ -235,19 +249,36 @@ function readCentralDirectory(bytes: Uint8Array): CentralDirectoryEntry[] | unde
     const filenameOffset = cursor + 46
     const extraFieldOffset = filenameOffset + filenameLength
     const commentOffset = extraFieldOffset + extraFieldLength
+    const rawExtraField = bytes.slice(extraFieldOffset, commentOffset)
+    const compressedSize = view.getUint32(cursor + 20, true)
+    const uncompressedSize = view.getUint32(cursor + 24, true)
+    if (
+      compressedSize === 0xffffffff ||
+      uncompressedSize === 0xffffffff ||
+      view.getUint32(cursor + 42, true) === 0xffffffff ||
+      !hasSafeArchiveExtraFields(rawExtraField)
+    ) {
+      return undefined
+    }
     directory.push({
+      bitFlag: view.getUint16(cursor + 8, true),
+      compressedSize,
+      compressionMethod: view.getUint16(cursor + 10, true),
       diskNumberStart: 0,
       externalFileAttributes: view.getUint32(cursor + 38, true),
       filenameUTF8: Boolean(view.getUint16(cursor + 8, true) & 0x800),
       offset: view.getUint32(cursor + 42, true),
       rawComment: bytes.slice(commentOffset, recordEnd),
-      rawExtraField: bytes.slice(extraFieldOffset, commentOffset),
+      rawExtraField,
       rawFilename: bytes.slice(filenameOffset, extraFieldOffset),
+      signature: view.getUint32(cursor + 16, true),
+      uncompressedSize,
+      version: view.getUint16(cursor + 6, true),
       versionMadeBy: view.getUint16(cursor + 4, true),
     })
     cursor = recordEnd
   }
-  return directory.length === entries ? directory : undefined
+  return directory.length === entries ? { entries: directory, offset } : undefined
 }
 
 function endOfCentralDirectoryOffset(view: DataView, length: number) {
@@ -271,26 +302,107 @@ function matchesCentralDirectoryEntry(entry: Entry, central: CentralDirectoryEnt
   )
 }
 
+function hasSafeLocalHeaders(bytes: Uint8Array, centralDirectory: CentralDirectory) {
+  const ranges = centralDirectory.entries
+    .map((entry) => readLocalHeader(bytes, centralDirectory.offset, entry))
+    .filter((range): range is ArchiveRange => range !== undefined)
+  if (ranges.length !== centralDirectory.entries.length) return false
+  const sorted = ranges.toSorted((left, right) => left.start - right.start)
+  return sorted.every((range, index) => index === 0 || sorted[index - 1].end <= range.start)
+}
+
+function readLocalHeader(bytes: Uint8Array, centralDirectoryOffset: number, central: CentralDirectoryEntry) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (central.offset + 30 > centralDirectoryOffset || view.getUint32(central.offset, true) !== 0x04034b50)
+    return undefined
+  const bitFlag = view.getUint16(central.offset + 6, true)
+  const compressionMethod = view.getUint16(central.offset + 8, true)
+  const filenameLength = view.getUint16(central.offset + 26, true)
+  const extraFieldLength = view.getUint16(central.offset + 28, true)
+  const filenameOffset = central.offset + 30
+  const extraFieldOffset = filenameOffset + filenameLength
+  const dataOffset = extraFieldOffset + extraFieldLength
+  if (dataOffset > centralDirectoryOffset) return undefined
+  const rawFilename = bytes.slice(filenameOffset, extraFieldOffset)
+  const rawExtraField = bytes.slice(extraFieldOffset, dataOffset)
+  if (
+    view.getUint16(central.offset + 4, true) !== central.version ||
+    bitFlag !== central.bitFlag ||
+    compressionMethod !== central.compressionMethod ||
+    !bytesEqual(rawFilename, central.rawFilename) ||
+    !bytesEqual(rawExtraField, central.rawExtraField) ||
+    !hasSafeArchiveExtraFields(rawExtraField) ||
+    isDirectoryName(rawFilename) !== isDirectoryName(central.rawFilename)
+  ) {
+    return undefined
+  }
+  const dataEnd = dataOffset + central.compressedSize
+  if (dataEnd > centralDirectoryOffset) return undefined
+  if (!(central.bitFlag & 0x8)) {
+    if (
+      view.getUint32(central.offset + 14, true) !== central.signature ||
+      view.getUint32(central.offset + 18, true) !== central.compressedSize ||
+      view.getUint32(central.offset + 22, true) !== central.uncompressedSize
+    ) {
+      return undefined
+    }
+    return { start: central.offset, end: dataEnd }
+  }
+  if (
+    view.getUint32(central.offset + 14, true) !== 0 ||
+    view.getUint32(central.offset + 18, true) !== 0 ||
+    view.getUint32(central.offset + 22, true) !== 0
+  ) {
+    return undefined
+  }
+  const dataDescriptorEnd = readDataDescriptor(view, dataEnd, centralDirectoryOffset, central)
+  if (dataDescriptorEnd === undefined) return undefined
+  return { start: central.offset, end: dataDescriptorEnd }
+}
+
+function readDataDescriptor(
+  view: DataView,
+  offset: number,
+  centralDirectoryOffset: number,
+  central: CentralDirectoryEntry,
+) {
+  const descriptorOffset =
+    offset + (offset + 4 <= centralDirectoryOffset && view.getUint32(offset, true) === 0x08074b50 ? 4 : 0)
+  if (descriptorOffset + 12 > centralDirectoryOffset) return undefined
+  if (
+    view.getUint32(descriptorOffset, true) !== central.signature ||
+    view.getUint32(descriptorOffset + 4, true) !== central.compressedSize ||
+    view.getUint32(descriptorOffset + 8, true) !== central.uncompressedSize
+  ) {
+    return undefined
+  }
+  return descriptorOffset + 12
+}
+
 function bytesEqual(left: Uint8Array, right: Uint8Array) {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
 }
 
+function isDirectoryName(name: Uint8Array) {
+  return name.byteLength > 0 && name[name.byteLength - 1] === 0x2f
+}
+
 function readRawCentralName(entry: Entry) {
   if (!entry.filenameUTF8 || !entry.rawFilename.every((byte) => byte >= 0x20 && byte <= 0x7e)) return undefined
-  if (!hasSafeCentralExtraFields(entry.rawExtraField)) return undefined
+  if (!hasSafeArchiveExtraFields(entry.rawExtraField)) return undefined
   const name = new TextDecoder("utf-8", { fatal: true }).decode(entry.rawFilename)
   if (name !== entry.filename || name.includes("\\")) return undefined
   return name
 }
 
-function hasSafeCentralExtraFields(extra: Uint8Array) {
+function hasSafeArchiveExtraFields(extra: Uint8Array) {
   let offset = 0
   while (offset < extra.byteLength) {
     if (offset + 4 > extra.byteLength) return false
     const type = extra[offset] | (extra[offset + 1] << 8)
     const length = extra[offset + 2] | (extra[offset + 3] << 8)
     offset += 4
-    if (offset + length > extra.byteLength || type === 0x7075) return false
+    if (offset + length > extra.byteLength || (type !== 0x000a && type !== 0x5455)) return false
     offset += length
   }
   return true

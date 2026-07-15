@@ -160,6 +160,43 @@ test("rejects a central directory record that crosses its declared span", async 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
+test("rejects a local header name that differs from its central directory name", async () => {
+  const archive = await archiveFixture(required)
+  await rewriteLocalEntryName(archive, "resources/app.asar", "../evil/evil2.asar")
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a local header general-purpose flag mismatch", async () => {
+  const archive = await archiveFixture(required)
+  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+    view.setUint16(offset + 6, view.getUint16(offset + 6, true) ^ 0x800, true)
+  })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a local header compression method mismatch", async () => {
+  const archive = await archiveFixture(required)
+  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+    view.setUint16(offset + 8, view.getUint16(offset + 8, true) === 0 ? 8 : 0, true)
+  })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a local Unicode-path extra field", async () => {
+  const archive = await archiveFixture(required)
+  await insertLocalExtraField(
+    archive,
+    "resources/app.asar",
+    0x7075,
+    unicodePathExtraField("resources/app.asar", "../evil/evil2.asar"),
+  )
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test.each([
   "resources\\app.asar",
   "resources/../Company OpenCode Pilot.exe",
@@ -444,6 +481,71 @@ async function rewriteArchiveEntryName(archive: string, source: string, target: 
     if (sourceBytes.every((byte, offset) => bytes[index + offset] === byte)) bytes.set(targetBytes, index)
   }
   await Bun.write(archive, bytes)
+}
+
+async function rewriteLocalEntryName(archive: string, source: string, target: string) {
+  const sourceBytes = new TextEncoder().encode(source)
+  const targetBytes = new TextEncoder().encode(target)
+  if (sourceBytes.byteLength !== targetBytes.byteLength)
+    throw new Error("Archive entry names must have the same length")
+  await rewriteLocalHeader(archive, source, (view, offset) => {
+    new Uint8Array(view.buffer, offset + 30, sourceBytes.byteLength).set(targetBytes)
+  })
+}
+
+async function rewriteLocalHeader(archive: string, name: string, rewrite: (view: DataView, offset: number) => void) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  rewrite(new DataView(bytes.buffer), localHeaderOffset(bytes, name))
+  await Bun.write(archive, bytes)
+}
+
+async function insertLocalExtraField(archive: string, name: string, type: number, data: Uint8Array) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const offset = localHeaderOffset(bytes, name)
+  const view = new DataView(bytes.buffer)
+  const nameLength = view.getUint16(offset + 26, true)
+  const extraLength = view.getUint16(offset + 28, true)
+  const extra = new Uint8Array(4 + data.byteLength)
+  const extraView = new DataView(extra.buffer)
+  extraView.setUint16(0, type, true)
+  extraView.setUint16(2, data.byteLength, true)
+  extra.set(data, 4)
+  const extraOffset = offset + 30 + nameLength
+  const result = new Uint8Array(bytes.byteLength + extra.byteLength)
+  result.set(bytes.subarray(0, extraOffset + extraLength))
+  result.set(extra, extraOffset + extraLength)
+  result.set(bytes.subarray(extraOffset + extraLength), extraOffset + extraLength + extra.byteLength)
+  const resultView = new DataView(result.buffer)
+  resultView.setUint16(offset + 28, extraLength + extra.byteLength, true)
+  const originalEndOffset = endOfCentralDirectoryOffset(bytes)
+  const endOffset = originalEndOffset + extra.byteLength
+  const centralOffset = view.getUint32(originalEndOffset + 16, true) + extra.byteLength
+  resultView.setUint32(endOffset + 16, centralOffset, true)
+  for (let central = centralOffset; central < endOffset; ) {
+    const centralNameLength = resultView.getUint16(central + 28, true)
+    const centralExtraLength = resultView.getUint16(central + 30, true)
+    const centralCommentLength = resultView.getUint16(central + 32, true)
+    if (resultView.getUint32(central + 42, true) > offset)
+      resultView.setUint32(central + 42, resultView.getUint32(central + 42, true) + extra.byteLength, true)
+    central += 46 + centralNameLength + centralExtraLength + centralCommentLength
+  }
+  await Bun.write(archive, result)
+}
+
+function localHeaderOffset(bytes: Uint8Array, name: string) {
+  const view = new DataView(bytes.buffer)
+  const target = new TextEncoder().encode(name)
+  const end = endOfCentralDirectoryOffset(bytes)
+  for (let offset = view.getUint32(end + 16, true); offset < end; ) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break
+    const nameLength = view.getUint16(offset + 28, true)
+    const extraLength = view.getUint16(offset + 30, true)
+    const commentLength = view.getUint16(offset + 32, true)
+    if (nameLength === target.byteLength && target.every((byte, index) => bytes[offset + 46 + index] === byte))
+      return view.getUint32(offset + 42, true)
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  throw new Error(`Archive does not contain ${name}`)
 }
 
 async function rewriteEndOfCentralDirectory(archive: string, rewrite: (view: DataView, offset: number) => void) {
