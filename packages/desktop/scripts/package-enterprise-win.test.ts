@@ -94,9 +94,10 @@ test("runs validation, build, package, verification, git, and release in order",
       expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve({})
     },
-    verifyArchive(archive) {
+    verifyArchive(archive, root) {
       steps.push("verify-zip")
       expect(archive).toBe(path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"))
+      expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve([])
     },
     gitCommit() {

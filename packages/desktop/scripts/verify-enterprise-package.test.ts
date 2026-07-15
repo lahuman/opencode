@@ -40,6 +40,15 @@ test.each(required)("rejects a package missing %s", async (relative) => {
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package")
 })
 
+test.each(required)("rejects a package directory at %s", async (relative) => {
+  const root = await portableFixture()
+  const file = path.join(root, relative)
+  await rm(file, { force: true })
+  await mkdir(file)
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
+})
+
 test("rejects defaults without the company provider", async () => {
   const root = await portableFixture()
   await Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), JSON.stringify({ enabled_providers: [] }))
@@ -76,9 +85,10 @@ test("rejects a missing OpenCode license notice", async () => {
 })
 
 test("accepts an archive with the required portable entries", async () => {
+  const root = await portableFixture()
   const archive = await archiveFixture(required)
 
-  await expect(verifyEnterpriseArchive(archive)).resolves.toEqual(required)
+  await expect(verifyEnterpriseArchive(archive, root)).resolves.toEqual(required)
 })
 
 test.each([
@@ -87,6 +97,7 @@ test.each([
   "/Company OpenCode Pilot.exe",
   "Company OpenCode Pilot Setup.exe",
   "Uninstall Company OpenCode Pilot.exe",
+  "Setup.EXE",
 ])("rejects unsafe archive entry %s", async (entry) => {
   const archive = await archiveFixture([...required, entry])
 
@@ -103,6 +114,31 @@ test("rejects a traversal directory entry", async () => {
   const archive = await archiveFixture([...required, "../outside/"])
 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive")
+})
+
+test("rejects archive defaults without the company provider", async () => {
+  const archive = await archiveFixture(required, { "resources/enterprise/opencode.jsonc": JSON.stringify({}) })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package defaults")
+})
+
+test("rejects an archive with an empty app archive", async () => {
+  const archive = await archiveFixture(required, { "resources/app.asar": "" })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive")
+})
+
+test("rejects an archive without the OpenCode license notice", async () => {
+  const archive = await archiveFixture(required, { "resources/licenses/OpenCode-LICENSE": "Proprietary" })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package license")
+})
+
+test("rejects required archive contents that differ from the verified unpacked package", async () => {
+  const root = await portableFixture()
+  const archive = await archiveFixture(required, { "resources/licenses/OpenCode-LICENSE": "MIT License\nChanged\n" })
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow("Portable package archive does not match")
 })
 
 async function portableFixture() {
@@ -126,14 +162,28 @@ async function portableFixture() {
   return root
 }
 
-async function archiveFixture(entries: string[]) {
+async function archiveFixture(entries: string[], contents: Record<string, string> = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "enterprise-portable-archive-"))
   roots.push(root)
   const writer = new ZipWriter(new BlobWriter("application/zip"))
   for (const entry of entries) {
-    await writer.add(entry, entry.endsWith("/") ? undefined : new TextReader("portable content"))
+    await writer.add(
+      entry,
+      entry.endsWith("/")
+        ? undefined
+        : new TextReader(contents[entry] ?? portableContents[entry] ?? "portable content"),
+    )
   }
   const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
   await Bun.write(archive, await writer.close())
   return archive
+}
+
+const portableContents: Record<string, string> = {
+  "Company OpenCode Pilot.exe": "portable executable",
+  "resources/app.asar": "application archive",
+  "resources/enterprise/opencode.jsonc": JSON.stringify({ enabled_providers: ["company-llm"] }),
+  "resources/enterprise/company-guide.md": "# Company guide\n",
+  "resources/enterprise/models.json": JSON.stringify({ providers: [] }),
+  "resources/licenses/OpenCode-LICENSE": "MIT License\n",
 }

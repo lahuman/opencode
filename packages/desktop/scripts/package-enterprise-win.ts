@@ -23,7 +23,7 @@ type EnterprisePackageInput = {
   version?: string
   validate?: (env: Env) => EnterpriseBuildMetadata
   verifyPackage?: (root: string) => Promise<unknown>
-  verifyArchive?: (archive: string) => Promise<unknown>
+  verifyArchive?: (archive: string, root?: string) => Promise<unknown>
   gitCommit?: () => Promise<string>
   release?: (input: EnterpriseReleaseInput) => Promise<unknown>
 }
@@ -49,8 +49,9 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
   const version =
     input.version ?? (await Bun.file(path.join(options.cwd, "package.json")).json<{ version: string }>()).version
   const archive = path.join(options.cwd, "dist", `company-opencode-pilot-${version}-win-x64.zip`)
-  await (input.verifyPackage ?? verifyEnterprisePackage)(path.join(options.cwd, "dist", "win-unpacked"))
-  await (input.verifyArchive ?? verifyEnterpriseArchive)(archive)
+  const root = path.join(options.cwd, "dist", "win-unpacked")
+  await (input.verifyPackage ?? verifyEnterprisePackage)(root)
+  await (input.verifyArchive ?? verifyEnterpriseArchive)(archive, root)
   const gitCommit = await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))()
   await (input.release ?? writeEnterpriseRelease)({ archive, version, gitCommit, builtAt: new Date(), profile })
   return 0

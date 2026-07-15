@@ -44,7 +44,7 @@ test("writes checksum and non-secret release metadata", async () => {
     authenticode: "NotSigned",
     windowsAcceptance: [],
   })
-  expect(result.sha256).toMatch(/^[a-f0-9]{64}$/)
+  expect(result.sha256).toBe("d0290b9062401137b81620928d54bc40e808f35a7f2fc550d2821d01c95488f5")
   expect(await Bun.file(`${archive}.sha256`).text()).toBe(`${result.sha256}  ${result.artifact}\n`)
 
   const metadata = await Bun.file(archive.replace(/\.zip$/, ".release.json")).text()
