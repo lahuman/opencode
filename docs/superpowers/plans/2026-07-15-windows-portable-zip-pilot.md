@@ -113,7 +113,12 @@ test("strips inherited signing variables from package children", () => {
     PATH: "preserve-me",
   })
   expect(env.PATH).toBe("preserve-me")
-  expect(Object.keys(env).filter((key) => key.startsWith("CSC_") || key.startsWith("WIN_CSC_"))).toEqual([])
+  expect(
+    Object.keys(env).filter((key) => {
+      const upper = key.toUpperCase()
+      return upper.startsWith("CSC_") || upper.startsWith("WIN_CSC_")
+    }),
+  ).toEqual([])
 })
 ```
 
@@ -138,7 +143,10 @@ type Env = Record<string, string | undefined>
 
 export function enterprisePackageEnvironment(env: Env) {
   return Object.fromEntries(
-    Object.entries(env).filter(([key]) => !key.startsWith("CSC_") && !key.startsWith("WIN_CSC_")),
+    Object.entries(env).filter(([key]) => {
+      const upper = key.toUpperCase()
+      return !upper.startsWith("CSC_") && !upper.startsWith("WIN_CSC_")
+    }),
   )
 }
 
@@ -456,6 +464,8 @@ test("portable smoke script exposes the release contract", async () => {
     "Get-NetTCPConnection",
     "Get-CimInstance Win32_Process",
   ]) expect(script).toContain(token)
+  expect(script).not.toMatch(/Remove-Item[^\r\n]*com\.company\.opencode\.pilot/i)
+  expect(script).not.toMatch(/Remove-Item[^\r\n]*SentinelProject/i)
 })
 ```
 
