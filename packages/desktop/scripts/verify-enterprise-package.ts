@@ -45,7 +45,7 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
     throw new Error("Portable package archive contains an unsafe entry")
   }
   const normalized = normalizedEntries.filter((name): name is string => name !== undefined)
-  if (new Set(normalized).size !== normalized.length) {
+  if (new Set(normalized.map(windowsEntryKey)).size !== normalized.length) {
     throw new Error("Portable package archive contains duplicate entries")
   }
   const files = new Map<string, Entry>(
@@ -79,7 +79,7 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
 async function readEnterprisePackage(root: string): Promise<EnterprisePackageFiles> {
   const paths = requiredFiles((entry) => path.join(root, ...entry.split("/")))
   const nodes = [
-    { path: root, directory: true },
+    ...packageRootNodes(root),
     ...requiredEntries.flatMap((entry) => {
       const parts = entry.split("/")
       return parts.map((_, index) => ({
@@ -179,12 +179,36 @@ function normalizeEntry(value: string, directory: boolean) {
   const name = (directory ? value.slice(0, -1) : value).replaceAll("\\", "/")
   if (
     name.startsWith("/") ||
-    /^[a-z]:\//i.test(name) ||
+    /^[a-z]:/i.test(name) ||
     name.split("/").some((part) => part === "" || part === "." || part === "..")
   ) {
     return undefined
   }
   return name
+}
+
+function windowsEntryKey(name: string) {
+  return name.toLowerCase()
+}
+
+function packageRootNodes(root: string) {
+  const packageRoot = path.resolve(root)
+  const parent = path.dirname(packageRoot)
+  if (parent === packageRoot) return []
+
+  // Production output is <package>/dist/win-unpacked. Stop above the package boundary, but inspect each
+  // existing component below it so a linked dist directory cannot redirect the package tree.
+  const boundary =
+    path.basename(packageRoot) === "win-unpacked" && path.basename(parent) === "dist" ? path.dirname(parent) : parent
+  const boundaryIsFileSystemRoot = boundary === path.parse(boundary).root
+  const parts = path.relative(boundary, packageRoot).split(path.sep).filter(Boolean)
+  return [
+    ...(boundaryIsFileSystemRoot ? [] : [{ path: boundary, directory: true }]),
+    ...parts.map((_, index) => ({
+      path: path.join(boundary, ...parts.slice(0, index + 1)),
+      directory: true,
+    })),
+  ]
 }
 
 if (import.meta.main) {
