@@ -177,38 +177,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeEntry(value: string, directory: boolean) {
   const name = (directory ? value.slice(0, -1) : value).replaceAll("\\", "/")
-  if (
-    name.startsWith("/") ||
-    /^[a-z]:/i.test(name) ||
-    name.split("/").some((part) => part === "" || part === "." || part === "..")
-  ) {
+  if (name.startsWith("/") || /^[a-z]:/i.test(name)) {
     return undefined
   }
-  return name
+  const components = name.split("/")
+  if (!components.every(isSafeWindowsPathComponent)) return undefined
+  return components.join("/")
 }
 
 function windowsEntryKey(name: string) {
-  return name.toLowerCase()
+  return name
+    .split("/")
+    .map((component) => component.replace(/[. ]+$/, "").toLowerCase())
+    .join("/")
 }
 
 function packageRootNodes(root: string) {
   const packageRoot = path.resolve(root)
-  const parent = path.dirname(packageRoot)
-  if (parent === packageRoot) return []
+  const filesystemRoot = path.parse(packageRoot).root
+  const nodes = []
+  for (let current = packageRoot; current !== filesystemRoot; current = path.dirname(current)) {
+    nodes.push({ path: current, directory: true })
+  }
+  // Walk lexical ancestors so lstat sees a link before resolving a child through it. The filesystem root is excluded.
+  return nodes.reverse()
+}
 
-  // Production output is <package>/dist/win-unpacked. Stop above the package boundary, but inspect each
-  // existing component below it so a linked dist directory cannot redirect the package tree.
-  const boundary =
-    path.basename(packageRoot) === "win-unpacked" && path.basename(parent) === "dist" ? path.dirname(parent) : parent
-  const boundaryIsFileSystemRoot = boundary === path.parse(boundary).root
-  const parts = path.relative(boundary, packageRoot).split(path.sep).filter(Boolean)
-  return [
-    ...(boundaryIsFileSystemRoot ? [] : [{ path: boundary, directory: true }]),
-    ...parts.map((_, index) => ({
-      path: path.join(boundary, ...parts.slice(0, index + 1)),
-      directory: true,
-    })),
-  ]
+function isSafeWindowsPathComponent(component: string) {
+  if (
+    component === "" ||
+    component === "." ||
+    component === ".." ||
+    component.endsWith(".") ||
+    component.endsWith(" ") ||
+    /[\u0000-\u001f\u007f-\u009f<>:"|?*]/.test(component)
+  ) {
+    return false
+  }
+  const basename = component.split(".", 1)[0]
+  return !/^(?:con|prn|aux|nul|clock\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$/i.test(basename)
 }
 
 if (import.meta.main) {

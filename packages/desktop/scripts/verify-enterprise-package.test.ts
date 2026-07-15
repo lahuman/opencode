@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rename, rm, symlink } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { BlobWriter, TextReader, ZipWriter } from "@zip.js/zip.js"
@@ -51,8 +51,7 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
 
 test("rejects a required payload symlinked outside the package root", async () => {
   const root = await portableFixture()
-  const outside = await mkdtemp(path.join(tmpdir(), "enterprise-portable-outside-"))
-  roots.push(outside)
+  const outside = await temporaryDirectory("enterprise-portable-outside-")
   const executable = path.join(root, "Company OpenCode Pilot.exe")
   const target = path.join(outside, "Company OpenCode Pilot.exe")
   await Bun.write(target, "portable executable")
@@ -64,8 +63,7 @@ test("rejects a required payload symlinked outside the package root", async () =
 
 test("rejects a required payload reached through an external resources link", async () => {
   const root = await portableFixture()
-  const outside = await mkdtemp(path.join(tmpdir(), "enterprise-portable-outside-"))
-  roots.push(outside)
+  const outside = await temporaryDirectory("enterprise-portable-outside-")
   const resources = path.join(root, "resources")
   const externalResources = path.join(outside, "resources")
   await rename(resources, externalResources)
@@ -75,13 +73,23 @@ test("rejects a required payload reached through an external resources link", as
 })
 
 test("rejects a package root reached through a linked dist ancestor", async () => {
-  const project = await mkdtemp(path.join(tmpdir(), "enterprise-portable-project-"))
-  const externalDist = await mkdtemp(path.join(tmpdir(), "enterprise-portable-dist-"))
-  roots.push(project, externalDist)
+  const project = await temporaryDirectory("enterprise-portable-project-")
+  const externalDist = await temporaryDirectory("enterprise-portable-dist-")
   await writePortableFixture(path.join(externalDist, "win-unpacked"))
   await symlink(externalDist, path.join(project, "dist"), process.platform === "win32" ? "junction" : "dir")
 
   await expect(verifyEnterprisePackage(path.join(project, "dist/win-unpacked"))).rejects.toThrow(
+    "Portable package is missing required files",
+  )
+})
+
+test("rejects a package root reached through a linked grandparent", async () => {
+  const container = await temporaryDirectory("enterprise-portable-container-")
+  const external = await temporaryDirectory("enterprise-portable-external-")
+  await writePortableFixture(path.join(external, "project/dist/win-unpacked"))
+  await symlink(external, path.join(container, "workspace"), process.platform === "win32" ? "junction" : "dir")
+
+  await expect(verifyEnterprisePackage(path.join(container, "workspace/project/dist/win-unpacked"))).rejects.toThrow(
     "Portable package is missing required files",
   )
 })
@@ -146,8 +154,43 @@ test.each([
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive")
 })
 
+test.each([
+  "resources/.. /app.asar",
+  "resources/. /app.asar",
+  "Setup.EXE.",
+  "resources//app.asar",
+  "resources/./app.asar",
+  "resources/name<.txt",
+  "resources/name>.txt",
+  "resources/name:.txt",
+  'resources/name".txt',
+  "resources/name|.txt",
+  "resources/name?.txt",
+  "resources/name*.txt",
+  "resources/name\u0001.txt",
+  "resources/name\u007f.txt",
+  "CON",
+  "resources/PRN.txt",
+  "AUX.log",
+  "resources/NUL.data",
+  "COM1.txt",
+  "resources/LPT9.log",
+  "resources/COM\u00b9.txt",
+  "\\\\.\\PhysicalDrive0",
+])("rejects unsafe Windows archive component %s", async (entry) => {
+  const archive = await archiveFixture([...required, entry])
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test("rejects archive entries that collide on Windows", async () => {
   const archive = await archiveFixture([...required, "resources/APP.ASAR"])
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains duplicate entries")
+})
+
+test("rejects archive entries that collide on a Windows path component", async () => {
+  const archive = await archiveFixture([...required, "RESOURCES/app.asar"])
 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains duplicate entries")
 })
@@ -190,8 +233,7 @@ test("rejects required archive contents that differ from the verified unpacked p
 })
 
 async function portableFixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "enterprise-portable-package-"))
-  roots.push(root)
+  const root = await temporaryDirectory("enterprise-portable-package-")
   await writePortableFixture(root)
   return root
 }
@@ -215,8 +257,7 @@ async function writePortableFixture(root: string) {
 }
 
 async function archiveFixture(entries: string[], contents: Record<string, string> = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "enterprise-portable-archive-"))
-  roots.push(root)
+  const root = await temporaryDirectory("enterprise-portable-archive-")
   const writer = new ZipWriter(new BlobWriter("application/zip"))
   for (const entry of entries) {
     await writer.add(
@@ -229,6 +270,12 @@ async function archiveFixture(entries: string[], contents: Record<string, string
   const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
   await Bun.write(archive, await writer.close())
   return archive
+}
+
+async function temporaryDirectory(prefix: string) {
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), prefix))
+  roots.push(root)
+  return root
 }
 
 const portableContents: Record<string, string> = {
