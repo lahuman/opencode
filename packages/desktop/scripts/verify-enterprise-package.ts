@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises"
+import { lstat, readdir } from "node:fs/promises"
 import path from "node:path"
 import { type Entry, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
 
@@ -22,6 +22,11 @@ const requiredEntries = [
 
 type RequiredEntry = (typeof requiredEntries)[number]
 type EnterprisePackageFiles = Record<RequiredEntry, Uint8Array>
+type EnterprisePackageTree = {
+  directories: Set<string>
+  files: Map<string, string>
+  required: EnterprisePackageFiles
+}
 type CentralDirectory = {
   entries: CentralDirectoryEntry[]
   offset: number
@@ -33,6 +38,8 @@ type CentralDirectoryEntry = {
   diskNumberStart: number
   externalFileAttributes: number
   filenameUTF8: boolean
+  lastModDate: number
+  lastModTime: number
   offset: number
   rawComment: Uint8Array
   rawExtraField: Uint8Array
@@ -45,7 +52,7 @@ type CentralDirectoryEntry = {
 type ArchiveRange = { end: number; start: number }
 
 export async function verifyEnterprisePackage(root: string): Promise<EnterprisePackageSummary> {
-  validateEnterprisePackageFiles(await readEnterprisePackage(root))
+  validateEnterprisePackageFiles((await readEnterprisePackage(root)).required)
   return {
     executable: path.basename(requiredEntries[0]),
     defaults: true,
@@ -108,50 +115,81 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
   validateEnterprisePackageFiles(archiveFiles)
   if (!root) return Array.from(files.keys())
 
-  const unpackedFiles = await readEnterprisePackage(root)
-  validateEnterprisePackageFiles(unpackedFiles)
-  if (requiredEntries.some((entry) => hash(archiveFiles[entry]) !== hash(unpackedFiles[entry]))) {
+  const unpacked = await readEnterprisePackage(root)
+  validateEnterprisePackageFiles(unpacked.required)
+  const directories = archiveDirectories(entries, normalizedEntries)
+  if (
+    !sameEntries(Array.from(files.keys(), windowsEntryKey), unpacked.files.keys()) ||
+    !sameEntries(directories, unpacked.directories)
+  ) {
     throw new Error("Portable package archive does not match the verified unpacked package")
+  }
+  for (const [name, entry] of files) {
+    const unpackedFile = unpacked.files.get(windowsEntryKey(name))
+    if (!unpackedFile || !bytesEqual(await entry.getData(new Uint8ArrayWriter()), await readFile(unpackedFile))) {
+      throw new Error("Portable package archive does not match the verified unpacked package")
+    }
   }
   return Array.from(files.keys())
 }
 
-async function readEnterprisePackage(root: string): Promise<EnterprisePackageFiles> {
-  const paths = requiredFiles((entry) => path.join(root, ...entry.split("/")))
-  const nodes = [
-    ...packageRootNodes(root),
-    ...requiredEntries.flatMap((entry) => {
-      const parts = entry.split("/")
-      return parts.map((_, index) => ({
-        path: path.join(root, ...parts.slice(0, index + 1)),
-        directory: index < parts.length - 1,
-      }))
-    }),
-  ]
-  // lstat observes the link itself so a payload cannot escape win-unpacked through a link or junction.
+async function readEnterprisePackage(root: string): Promise<EnterprisePackageTree> {
+  const packageRoot = path.resolve(root)
   const stats = await Promise.all(
-    nodes.map((node) =>
+    packageRootNodes(root).map((node) =>
       lstat(node.path).then(
         (info) => info,
         () => undefined,
       ),
     ),
   )
-  if (
-    !stats.every(
-      (info, index) => info && !info.isSymbolicLink() && (nodes[index].directory ? info.isDirectory() : info.isFile()),
-    )
-  ) {
+  if (!stats.every((info) => info && !info.isSymbolicLink() && info.isDirectory())) {
     throw new Error("Portable package is missing required files")
   }
+  const files = new Map<string, string>()
+  const directories = new Set<string>()
+  await readEnterprisePackageDirectory(packageRoot, "", files, directories)
   const contents = new Map(
     await Promise.all(
-      requiredEntries.map(
-        async (entry) => [entry, new Uint8Array(await Bun.file(paths[entry]).arrayBuffer())] as const,
-      ),
+      requiredEntries.map(async (entry) => {
+        const file = files.get(windowsEntryKey(entry))
+        if (!file) throw new Error("Portable package is missing required files")
+        return [entry, await readFile(file)] as const
+      }),
     ),
   )
-  return requiredFiles((entry) => getRequiredFile(contents, entry))
+  return { directories, files, required: requiredFiles((entry) => getRequiredFile(contents, entry)) }
+}
+
+async function readEnterprisePackageDirectory(
+  directory: string,
+  relative: string,
+  files: Map<string, string>,
+  directories: Set<string>,
+) {
+  for (const child of await readdir(directory)) {
+    const relativePath = relative ? `${relative}/${child}` : child
+    const name = normalizeWindowsRelativePath(relativePath)
+    const childPath = path.join(directory, child)
+    const info = await lstat(childPath)
+    if (!name || info.isSymbolicLink()) throw new Error("Portable package is missing required files")
+    const key = windowsEntryKey(name)
+    if (files.has(key) || directories.has(key)) throw new Error("Portable package is missing required files")
+    if (info.isDirectory()) {
+      directories.add(key)
+      await readEnterprisePackageDirectory(childPath, name, files, directories)
+      continue
+    }
+    if (info.isFile()) {
+      files.set(key, childPath)
+      continue
+    }
+    throw new Error("Portable package is missing required files")
+  }
+}
+
+async function readFile(file: string) {
+  return new Uint8Array(await Bun.file(file).arrayBuffer())
 }
 
 async function readArchiveEntry(entry: Entry | undefined, name: RequiredEntry) {
@@ -186,12 +224,6 @@ function parseJSON(input: Uint8Array, error: string): unknown {
   } catch {
     throw new Error(error)
   }
-}
-
-function hash(input: Uint8Array) {
-  const hasher = new Bun.CryptoHasher("sha256")
-  hasher.update(input)
-  return hasher.digest("hex")
 }
 
 function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEntry, T> {
@@ -232,6 +264,7 @@ function readCentralDirectory(bytes: Uint8Array): CentralDirectory | undefined {
     entries === 0xffff ||
     size === 0xffffffff ||
     offset === 0xffffffff ||
+    view.getUint16(endOfCentralDirectory + 20, true) !== 0 ||
     offset + size !== endOfCentralDirectory
   ) {
     return undefined
@@ -245,7 +278,7 @@ function readCentralDirectory(bytes: Uint8Array): CentralDirectory | undefined {
     const extraFieldLength = view.getUint16(cursor + 30, true)
     const commentLength = view.getUint16(cursor + 32, true)
     const recordEnd = cursor + 46 + filenameLength + extraFieldLength + commentLength
-    if (recordEnd > end || view.getUint16(cursor + 34, true) !== 0) return undefined
+    if (recordEnd > end || commentLength !== 0 || view.getUint16(cursor + 34, true) !== 0) return undefined
     const filenameOffset = cursor + 46
     const extraFieldOffset = filenameOffset + filenameLength
     const commentOffset = extraFieldOffset + extraFieldLength
@@ -267,6 +300,8 @@ function readCentralDirectory(bytes: Uint8Array): CentralDirectory | undefined {
       diskNumberStart: 0,
       externalFileAttributes: view.getUint32(cursor + 38, true),
       filenameUTF8: Boolean(view.getUint16(cursor + 8, true) & 0x800),
+      lastModDate: view.getUint16(cursor + 14, true),
+      lastModTime: view.getUint16(cursor + 12, true),
       offset: view.getUint32(cursor + 42, true),
       rawComment: bytes.slice(commentOffset, recordEnd),
       rawExtraField,
@@ -334,6 +369,8 @@ function readLocalHeader(bytes: Uint8Array, centralDirectoryOffset: number, cent
     view.getUint16(central.offset + 4, true) !== central.version ||
     bitFlag !== central.bitFlag ||
     compressionMethod !== central.compressionMethod ||
+    view.getUint16(central.offset + 10, true) !== central.lastModTime ||
+    view.getUint16(central.offset + 12, true) !== central.lastModDate ||
     !bytesEqual(rawFilename, central.rawFilename) ||
     !bytesEqual(rawExtraField, central.rawExtraField) ||
     !hasSafeArchiveExtraFields(rawExtraField) ||
@@ -401,25 +438,18 @@ function readRawCentralName(entry: Entry) {
 }
 
 function hasSafeArchiveExtraFields(extra: Uint8Array) {
-  let offset = 0
-  while (offset < extra.byteLength) {
-    if (offset + 4 > extra.byteLength) return false
-    const type = extra[offset] | (extra[offset + 1] << 8)
-    const length = extra[offset + 2] | (extra[offset + 3] << 8)
-    offset += 4
-    if (offset + length > extra.byteLength || (type !== 0x000a && type !== 0x5455)) return false
-    offset += length
-  }
-  return true
+  return extra.byteLength === 0
 }
 
 function normalizeEntry(value: string, entry: Entry) {
   const directory = value.endsWith("/")
   if (directory !== entry.directory) return undefined
   const name = directory ? value.slice(0, -1) : value
-  if (name.startsWith("/") || /^[a-z]:/i.test(name)) {
-    return undefined
-  }
+  return normalizeWindowsRelativePath(name)
+}
+
+function normalizeWindowsRelativePath(name: string) {
+  if (name.startsWith("/") || /^[a-z]:/i.test(name) || name.includes("\\")) return undefined
   const components = name.split("/")
   if (!components.every(isSafeWindowsPathComponent)) return undefined
   return components.join("/")
@@ -443,6 +473,24 @@ function packageRootNodes(root: string) {
   return nodes.reverse()
 }
 
+function archiveDirectories(entries: Entry[], names: (string | undefined)[]) {
+  return new Set(
+    names.flatMap((name, index) => {
+      if (!name) return []
+      const components = name.split("/")
+      return components
+        .slice(0, entries[index].directory ? components.length : -1)
+        .map((_, component) => windowsEntryKey(components.slice(0, component + 1).join("/")))
+    }),
+  )
+}
+
+function sameEntries(left: Iterable<string>, right: Iterable<string>) {
+  const leftEntries = new Set(left)
+  const rightEntries = new Set(right)
+  return leftEntries.size === rightEntries.size && Array.from(leftEntries).every((entry) => rightEntries.has(entry))
+}
+
 function isSafeWindowsPathComponent(component: string) {
   if (
     component === "" ||
@@ -451,6 +499,7 @@ function isSafeWindowsPathComponent(component: string) {
     component.startsWith(" ") ||
     component.endsWith(".") ||
     component.endsWith(" ") ||
+    !/^[\x20-\x7e]+$/.test(component) ||
     /[\u0000-\u001f\u007f-\u009f<>:"|?*]/.test(component)
   ) {
     return false

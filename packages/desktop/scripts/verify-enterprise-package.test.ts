@@ -72,6 +72,16 @@ test("rejects a required payload reached through an external resources link", as
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
 })
 
+test("rejects an extra payload symlink in the unpacked tree", async () => {
+  const root = await portableFixture()
+  const outside = await temporaryDirectory("enterprise-portable-outside-")
+  const target = path.join(outside, "extra.dll")
+  await Bun.write(target, "outside payload")
+  await symlink(target, path.join(root, "resources/extra.dll"), "file")
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
+})
+
 test("rejects a package root reached through a linked dist ancestor", async () => {
   const project = await temporaryDirectory("enterprise-portable-project-")
   const externalDist = await temporaryDirectory("enterprise-portable-dist-")
@@ -136,6 +146,64 @@ test("accepts an archive with the required portable entries", async () => {
   await expect(verifyEnterpriseArchive(archive, root)).resolves.toEqual(required)
 })
 
+test("rejects an archive-only regular file", async () => {
+  const root = await portableFixture()
+  const archive = await archiveFixture([...required, "resources/extra.dll"])
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive does not match the verified unpacked package",
+  )
+})
+
+test("rejects an unpacked-only regular file", async () => {
+  const root = await portableFixture()
+  await writePortableFile(root, "resources/extra.dll", "unpacked payload")
+  const archive = await archiveFixture(required)
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive does not match the verified unpacked package",
+  )
+})
+
+test("rejects an extra regular file whose bytes differ", async () => {
+  const root = await portableFixture()
+  await writePortableFile(root, "resources/extra.dll", "unpacked payload")
+  const archive = await archiveFixture([...required, "resources/extra.dll"], {
+    "resources/extra.dll": "archive payload",
+  })
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive does not match the verified unpacked package",
+  )
+})
+
+test("accepts an explicit archive entry for an unpacked empty directory", async () => {
+  const root = await portableFixture()
+  await mkdir(path.join(root, "resources/empty"))
+  const archive = await archiveFixture([...required, "resources/empty/"])
+
+  await expect(verifyEnterpriseArchive(archive, root)).resolves.toEqual(required)
+})
+
+test("rejects an unpacked empty directory omitted by the archive", async () => {
+  const root = await portableFixture()
+  await mkdir(path.join(root, "resources/empty"))
+  const archive = await archiveFixture(required)
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive does not match the verified unpacked package",
+  )
+})
+
+test("rejects an explicit archive empty directory absent from the unpacked tree", async () => {
+  const root = await portableFixture()
+  const archive = await archiveFixture([...required, "resources/empty/"])
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive does not match the verified unpacked package",
+  )
+})
+
 test("rejects an EOCD count that hides a valid central directory record", async () => {
   const archive = await archiveFixture([...required, "extra.txt"])
   await rewriteEndOfCentralDirectory(archive, (view, offset) => {
@@ -185,6 +253,16 @@ test("rejects a local header compression method mismatch", async () => {
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
+test("rejects a local header DOS timestamp mismatch", async () => {
+  const archive = await archiveFixture(required)
+  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+    view.setUint16(offset + 10, view.getUint16(offset + 10, true) ^ 1, true)
+    view.setUint16(offset + 12, view.getUint16(offset + 12, true) ^ 1, true)
+  })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test("rejects a local Unicode-path extra field", async () => {
   const archive = await archiveFixture(required)
   await insertLocalExtraField(
@@ -193,6 +271,26 @@ test("rejects a local Unicode-path extra field", async () => {
     0x7075,
     unicodePathExtraField("resources/app.asar", "../evil/evil2.asar"),
   )
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects archive timestamp extra fields", async () => {
+  const archive = await archiveFixture(required, {}, {}, { extendedTimestamp: true })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects central directory entry comments", async () => {
+  const archive = await archiveFixture(required)
+  await insertCentralDirectoryComment(archive, "comment")
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects end of central directory comments", async () => {
+  const archive = await archiveFixture(required)
+  await appendEndOfCentralDirectoryComment(archive, "comment")
 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
@@ -458,13 +556,20 @@ async function writePortableFixture(root: string) {
   ])
 }
 
+async function writePortableFile(root: string, relative: string, contents: string) {
+  const file = path.join(root, relative)
+  await mkdir(path.dirname(file), { recursive: true })
+  await Bun.write(file, contents)
+}
+
 async function archiveFixture(
   entries: string[],
   contents: Record<string, string> = {},
   options: Record<string, ZipWriterAddDataOptions> = {},
+  writerOptions: { extendedTimestamp?: boolean } = {},
 ) {
   const root = await temporaryDirectory("enterprise-portable-archive-")
-  const writer = new ZipWriter(new BlobWriter("application/zip"))
+  const writer = new ZipWriter(new BlobWriter("application/zip"), { extendedTimestamp: false, ...writerOptions })
   for (const entry of entries) {
     await writer.add(
       entry,
@@ -577,6 +682,37 @@ async function insertCentralDirectoryByte(archive: string) {
   result[offset] = 0
   result.set(bytes.subarray(offset), offset + 1)
   new DataView(result.buffer).setUint32(offset + 13, view.getUint32(offset + 12, true) + 1, true)
+  await Bun.write(archive, result)
+}
+
+async function insertCentralDirectoryComment(archive: string, comment: string) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const end = endOfCentralDirectoryOffset(bytes)
+  const view = new DataView(bytes.buffer)
+  const central = view.getUint32(end + 16, true)
+  const commentBytes = new TextEncoder().encode(comment)
+  const commentOffset = central + 46 + view.getUint16(central + 28, true) + view.getUint16(central + 30, true)
+  const result = new Uint8Array(bytes.byteLength + commentBytes.byteLength)
+  result.set(bytes.subarray(0, commentOffset))
+  result.set(commentBytes, commentOffset)
+  result.set(bytes.subarray(commentOffset), commentOffset + commentBytes.byteLength)
+  const resultView = new DataView(result.buffer)
+  resultView.setUint16(central + 32, commentBytes.byteLength, true)
+  resultView.setUint32(
+    end + commentBytes.byteLength + 12,
+    view.getUint32(end + 12, true) + commentBytes.byteLength,
+    true,
+  )
+  await Bun.write(archive, result)
+}
+
+async function appendEndOfCentralDirectoryComment(archive: string, comment: string) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const commentBytes = new TextEncoder().encode(comment)
+  const result = new Uint8Array(bytes.byteLength + commentBytes.byteLength)
+  result.set(bytes)
+  result.set(commentBytes, bytes.byteLength)
+  new DataView(result.buffer).setUint16(endOfCentralDirectoryOffset(bytes) + 20, commentBytes.byteLength, true)
   await Bun.write(archive, result)
 }
 
