@@ -105,7 +105,7 @@ The verifier checks names and semantic contents rather than accepting file exist
 
 - Enterprise defaults contain the `company-llm` provider.
 - The guide contains the expected company guide heading and version metadata.
-- `models.json` is valid JSON and contains the configured model.
+- `models.json` is valid local catalog JSON and does not require a public models.dev fetch. The configured company model continues to come from the approved enterprise profile.
 - `app.asar` is present and non-empty.
 - The OpenCode license notice is present.
 - No installer or uninstaller executable is required.
