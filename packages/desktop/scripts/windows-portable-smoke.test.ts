@@ -5,6 +5,8 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const scriptPath = new URL("./windows-portable-smoke.ps1", import.meta.url)
+const generatorPath = new URL("./enterprise-release.ts", import.meta.url)
+const runbookPath = new URL("../../../docs/enterprise/windows-portable-pilot-release.md", import.meta.url)
 
 function powerShellParserInvocation(scriptPath: string) {
   return `[void][scriptblock]::Create((Get-Content -Raw -LiteralPath '${scriptPath.replaceAll("'", "''")}'))`
@@ -245,10 +247,43 @@ test("portable smoke accepts only the deterministic standalone checksum record",
 
   expect(checksum).toContain("[System.IO.Path]::GetFileName($Archive)")
   expect(checksum).toContain("[regex]::Escape($archiveName)")
-  expect(checksum).toContain('"\\A([0-9a-f]{64})  $escapedArchiveName\\r?\\n\\z"')
+  expect(checksum).toContain('"\\A([0-9a-f]{64})  $escapedArchiveName\\n\\z"')
+  expect(checksum).not.toContain("\\r?")
   expect(checksum).toContain("$checksumMatch.Groups[1].Value")
   expect(checksum).not.toContain("-split")
   expect(checksum).not.toContain("ToUpperInvariant")
+})
+
+test("portable smoke accepts child edges only when the child was created after the matched parent", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const discovery = script.slice(
+    script.indexOf("function Get-ProcessCreationTime"),
+    script.indexOf("function Add-KnownProcessIdentities"),
+  )
+
+  expect(discovery).toContain("function ConvertFrom-ProcessCreationTime")
+  expect(discovery).toContain("[DateTime]::TryParseExact")
+  expect(discovery).toContain("[System.Globalization.DateTimeStyles]::RoundtripKind")
+  expect(discovery).toContain(
+    "$childCreationTime = ConvertFrom-ProcessCreationTime -CreationTime $identity.CreationTime",
+  )
+  expect(discovery).toContain(
+    "$parentCreationTime = ConvertFrom-ProcessCreationTime -CreationTime $parent.CreationTime",
+  )
+  expect(discovery).toContain("if ($childCreationTime -le $parentCreationTime) { continue }")
+})
+
+test("runbook checksum consumers match the generator's exact LF-terminated bytes", async () => {
+  const generator = await Bun.file(generatorPath).text()
+  const runbook = await Bun.file(runbookPath).text()
+
+  expect(generator).toContain("Bun.write(`${input.archive}.sha256`, `${sha256}  ${artifact}\\n`)")
+  expect(runbook).not.toMatch(/\$\w*[Cc]hecksumRecord\s*=\s*\(Get-Content[^\r\n]+\)\.Trim\(\)/)
+  expect(runbook.match(/\[regex\]::Match\([^\r\n]+\\n\\z/g)?.length).toBe(2)
+  expect(runbook).not.toContain("\\r?\\n\\z")
+  expect(runbook).toContain("one LF byte (`0x0A`)")
+  expect(runbook).toContain("[System.IO.File]::WriteAllText(")
+  expect(runbook).toContain('"$windows11SourceHash  $returnedArtifact`n"')
 })
 
 test("portable smoke validates every required extracted payload and a nonempty executable", async () => {
@@ -419,6 +454,7 @@ test.if(process.platform === "win32")(
       for (const [name, fixture, expected] of [
         ["valid", `${hash}  Company OpenCode Pilot.zip\n`, 0],
         ["missing-line-end", `${hash}  Company OpenCode Pilot.zip`, 1],
+        ["crlf-line-end", `${hash}  Company OpenCode Pilot.zip\r\n`, 1],
         ["uppercase", `${hash.toUpperCase()}  Company OpenCode Pilot.zip\n`, 1],
         ["wrong-name", `${hash}  other.zip\n`, 1],
         ["extra-record", `${hash}  Company OpenCode Pilot.zip\n${hash}  Company OpenCode Pilot.zip\n`, 1],
@@ -432,6 +468,54 @@ test.if(process.platform === "win32")(
         )
         expect(await process.exited).toBe(expected)
       }
+    } finally {
+      await rm(temp, { force: true, recursive: true })
+    }
+  },
+)
+
+test.if(process.platform === "win32")(
+  "PowerShell cleanup stops only children created after their matched parent",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const processFunctions = script.slice(
+      script.indexOf("function Get-ProcessCreationTime"),
+      script.indexOf("function Test-AllowedRemoteAddress"),
+    )
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+    const harness = join(temp, "stop-ordered-process-tree.ps1")
+
+    try {
+      await Bun.write(
+        harness,
+        `$ErrorActionPreference = "Stop"
+$script:processes = @(
+  [PSCustomObject]@{ ProcessId = 10; ParentProcessId = 0; CreationDate = [DateTime]"2026-07-15T00:00:10Z" },
+  [PSCustomObject]@{ ProcessId = 20; ParentProcessId = 10; CreationDate = [DateTime]"2026-07-15T00:00:05Z" },
+  [PSCustomObject]@{ ProcessId = 30; ParentProcessId = 10; CreationDate = [DateTime]"2026-07-15T00:00:15Z" }
+)
+function Get-CimInstance { [CmdletBinding()] param([string] $ClassName) return @($script:processes) }
+function Stop-Process {
+  [CmdletBinding()]
+  param([int] $Id, [switch] $Force)
+  $script:stopped += $Id
+  $script:processes = @($script:processes | Where-Object { [int]$_.ProcessId -ne $Id })
+}
+function Start-Sleep { [CmdletBinding()] param([int] $Milliseconds) }
+${processFunctions}
+$script:stopped = @()
+$knownProcessIdentities = [System.Collections.Generic.Dictionary[string, object]]::new()
+$root = New-ProcessIdentity -Process $script:processes[0]
+[void](Stop-ProcessTree -RootProcessIdentity $root -KnownProcessIdentities $knownProcessIdentities)
+if ($script:stopped -contains 20) { exit 2 }
+if ((@($script:stopped | Sort-Object) -join ",") -ne "10,30") { exit 3 }`,
+      )
+      const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+
+      expect(await process.exited).toBe(0)
     } finally {
       await rm(temp, { force: true, recursive: true })
     }

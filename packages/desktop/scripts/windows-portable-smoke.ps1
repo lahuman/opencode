@@ -133,7 +133,7 @@ function Read-PortableChecksum {
   $archiveName = [System.IO.Path]::GetFileName($Archive)
   $escapedArchiveName = [regex]::Escape($archiveName)
   $checksumRecord = Get-Content -Raw -LiteralPath $Path
-  $checksumMatch = [regex]::Match($checksumRecord, "\A([0-9a-f]{64})  $escapedArchiveName\r?\n\z")
+  $checksumMatch = [regex]::Match($checksumRecord, "\A([0-9a-f]{64})  $escapedArchiveName\n\z")
   if (-not $checksumMatch.Success) { throw "Portable archive checksum record is invalid" }
   return $checksumMatch.Groups[1].Value
 }
@@ -149,6 +149,22 @@ function Get-ProcessCreationTime {
     return $parsed.ToUniversalTime().ToString("o")
   }
   return [System.Management.ManagementDateTimeConverter]::ToDateTime($CreationDate).ToUniversalTime().ToString("o")
+}
+
+function ConvertFrom-ProcessCreationTime {
+  param([string] $CreationTime)
+
+  [DateTime] $parsed = [DateTime]::MinValue
+  if (-not [DateTime]::TryParseExact(
+    $CreationTime,
+    "o",
+    [System.Globalization.CultureInfo]::InvariantCulture,
+    [System.Globalization.DateTimeStyles]::RoundtripKind,
+    [ref]$parsed
+  )) {
+    throw "Portable process creation identity is invalid"
+  }
+  return $parsed.ToUniversalTime()
 }
 
 function New-ProcessIdentity {
@@ -216,6 +232,9 @@ function Get-ProcessTreeIdentities {
     $pending = @($pending | Select-Object -Skip 1)
     foreach ($process in @($processes | Where-Object { [int]$_.ParentProcessId -eq $parent.ProcessId })) {
       $identity = New-ProcessIdentity -Process $process
+      $childCreationTime = ConvertFrom-ProcessCreationTime -CreationTime $identity.CreationTime
+      $parentCreationTime = ConvertFrom-ProcessCreationTime -CreationTime $parent.CreationTime
+      if ($childCreationTime -le $parentCreationTime) { continue }
       $key = Get-ProcessIdentityKey -ProcessIdentity $identity
       if ($identities.ContainsKey($key)) { continue }
       $identities[$key] = $identity
