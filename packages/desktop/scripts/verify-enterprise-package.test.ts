@@ -183,6 +183,52 @@ test.each([
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
+test.each(["CONIN$.txt", "resources/conout$.log", "CONIN$."])(
+  "rejects a console-device Windows archive component %s",
+  async (entry) => {
+    const archive = await archiveFixture([...required, entry])
+
+    await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+  },
+)
+
+test("rejects a trailing-space console-device component", async () => {
+  const archive = await archiveFixture([...required, "CONOUT$x"])
+  await rewriteArchiveEntryName(archive, "CONOUT$x", "CONOUT$ ")
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test.each(["C:", "CON", "Setup.EXE"])("rejects DOS directory metadata on a file name %s", async (entry) => {
+  const archive = await archiveFixture(
+    [...required, entry],
+    {},
+    {
+      [entry]: { externalFileAttributes: 0x10 },
+    },
+  )
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects file metadata on a slash-terminated directory name", async () => {
+  const archive = await archiveFixture(
+    [...required, "resources/"],
+    {},
+    {
+      "resources/": { externalFileAttributes: 0x20 },
+    },
+  )
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a non-ASCII Windows case-collision component", async () => {
+  const archive = await archiveFixture([...required, "reſources/app.asar"])
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test.each(["resources/ app.asar", "resources/enterprise/ company-guide.md"])(
   "rejects a leading-space Windows archive component %s",
   async (entry) => {
@@ -201,6 +247,23 @@ test("rejects archive entries that collide on Windows", async () => {
 test("rejects a leading-space Windows collision before canonical matching", async () => {
   const archive = await archiveFixture([...required, "xresources/app.asar"])
   await rewriteArchiveEntryName(archive, "xresources/app.asar", " resources/app.asar")
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a valid Unicode-path extra field that masks a raw drive-prefixed name", async () => {
+  const rawAppEntry = "C:../../resourcesx"
+  const archive = await archiveFixture(
+    required.filter((entry) => entry !== "resources/app.asar").concat(rawAppEntry),
+    { [rawAppEntry]: "application archive" },
+    {
+      [rawAppEntry]: {
+        useUnicodeFileNames: false,
+        extraField: new Map([[0x7075, unicodePathExtraField(rawAppEntry, "resources/app.asar")]]),
+      },
+    },
+  )
+  await rewriteArchiveExtraFieldType(archive, rawAppEntry, 0x75, 0x7075)
 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
@@ -224,6 +287,21 @@ test.each([
   await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
     "Portable package archive contains an unsafe entry",
   )
+})
+
+test("rejects a Darwin-host symlink payload", async () => {
+  const archive = await archiveFixture(
+    required,
+    {},
+    {
+      "resources/app.asar": {
+        versionMadeBy: 19 << 8,
+        externalFileAttributes: (0o120777 << 16) >>> 0,
+      },
+    },
+  )
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
 test("accepts a DOS directory entry", async () => {
@@ -318,7 +396,7 @@ async function archiveFixture(
       entry.endsWith("/")
         ? undefined
         : new TextReader(contents[entry] ?? portableContents[entry] ?? "portable content"),
-      options[entry],
+      { msDosCompatible: true, ...options[entry] },
     )
   }
   const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
@@ -340,6 +418,50 @@ async function rewriteArchiveEntryName(archive: string, source: string, target: 
   const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
   for (let index = 0; index <= bytes.byteLength - sourceBytes.byteLength; index++) {
     if (sourceBytes.every((byte, offset) => bytes[index + offset] === byte)) bytes.set(targetBytes, index)
+  }
+  await Bun.write(archive, bytes)
+}
+
+function unicodePathExtraField(rawName: string, filename: string) {
+  const raw = new TextEncoder().encode(rawName)
+  const name = new TextEncoder().encode(filename)
+  const data = new Uint8Array(5 + name.byteLength)
+  data[0] = 1
+  new DataView(data.buffer).setUint32(1, crc32(raw), true)
+  data.set(name, 5)
+  return data
+}
+
+function crc32(input: Uint8Array) {
+  let value = 0xffffffff
+  for (const byte of input) {
+    value ^= byte
+    for (let bit = 0; bit < 8; bit++) {
+      value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0)
+    }
+  }
+  return (value ^ 0xffffffff) >>> 0
+}
+
+async function rewriteArchiveExtraFieldType(archive: string, name: string, source: number, target: number) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const view = new DataView(bytes.buffer)
+  const rawName = new TextEncoder().encode(name)
+  for (let offset = 0; offset <= bytes.byteLength - 46; offset++) {
+    const signature = view.getUint32(offset, true)
+    const central = signature === 0x02014b50
+    const local = signature === 0x04034b50
+    if (!central && !local) continue
+    const nameOffset = offset + (central ? 46 : 30)
+    const nameLength = view.getUint16(offset + (central ? 28 : 26), true)
+    const extraLength = view.getUint16(offset + (central ? 30 : 28), true)
+    if (!rawName.every((byte, index) => bytes[nameOffset + index] === byte) || nameLength !== rawName.byteLength)
+      continue
+    for (let extra = nameOffset + nameLength; extra < nameOffset + nameLength + extraLength; ) {
+      const length = view.getUint16(extra + 2, true)
+      if (view.getUint16(extra, true) === source) view.setUint16(extra, target, true)
+      extra += 4 + length
+    }
   }
   await Bun.write(archive, bytes)
 }

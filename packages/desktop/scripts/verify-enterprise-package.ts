@@ -39,12 +39,16 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
   const reader = new ZipReader(new Uint8ArrayReader(new Uint8Array(await Bun.file(archive).arrayBuffer())))
   const entries = await reader.getEntries()
   await reader.close()
-  const normalizedEntries = entries.map((entry) => normalizeEntry(entry.filename, entry.directory))
+  const rawNames = entries.map(readRawCentralName)
+  if (rawNames.some((name) => name === undefined)) {
+    throw new Error("Portable package archive contains an unsafe entry")
+  }
+  const normalizedEntries = entries.map((entry, index) => normalizeEntry(rawNames[index]!, entry))
 
   if (normalizedEntries.some((name) => name === undefined)) {
     throw new Error("Portable package archive contains an unsafe entry")
   }
-  if (entries.some((entry) => !isSafeArchiveEntry(entry))) {
+  if (entries.some((entry, index) => !isSafeArchiveEntry(entry, rawNames[index]!))) {
     throw new Error("Portable package archive contains an unsafe entry")
   }
   const normalized = normalizedEntries.filter((name): name is string => name !== undefined)
@@ -178,8 +182,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function normalizeEntry(value: string, directory: boolean) {
-  const name = (directory ? value.slice(0, -1) : value).replaceAll("\\", "/")
+function readRawCentralName(entry: Entry) {
+  if (!entry.filenameUTF8 || !entry.rawFilename.every((byte) => byte >= 0x20 && byte <= 0x7e)) return undefined
+  if (!hasSafeCentralExtraFields(entry.rawExtraField)) return undefined
+  const name = new TextDecoder("utf-8", { fatal: true }).decode(entry.rawFilename)
+  if (name !== entry.filename || name.includes("\\")) return undefined
+  return name
+}
+
+function hasSafeCentralExtraFields(extra: Uint8Array) {
+  let offset = 0
+  while (offset < extra.byteLength) {
+    if (offset + 4 > extra.byteLength) return false
+    const type = extra[offset] | (extra[offset + 1] << 8)
+    const length = extra[offset + 2] | (extra[offset + 3] << 8)
+    offset += 4
+    if (offset + length > extra.byteLength || type === 0x7075) return false
+    offset += length
+  }
+  return true
+}
+
+function normalizeEntry(value: string, entry: Entry) {
+  const directory = value.endsWith("/")
+  if (directory !== entry.directory) return undefined
+  const name = directory ? value.slice(0, -1) : value
   if (name.startsWith("/") || /^[a-z]:/i.test(name)) {
     return undefined
   }
@@ -191,7 +218,7 @@ function normalizeEntry(value: string, directory: boolean) {
 function windowsEntryKey(name: string) {
   return name
     .split("/")
-    .map((component) => component.replace(/[. ]+$/, "").toLowerCase())
+    .map((component) => component.replace(/[A-Z]/g, (character) => character.toLowerCase()))
     .join("/")
 }
 
@@ -219,15 +246,16 @@ function isSafeWindowsPathComponent(component: string) {
     return false
   }
   const basename = component.split(".", 1)[0]
-  return !/^(?:con|prn|aux|nul|clock\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$/i.test(basename)
+  return !/^(?:con|prn|aux|nul|conin\$|conout\$|clock\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$/i.test(
+    basename,
+  )
 }
 
-function isSafeArchiveEntry(entry: Entry) {
-  if (entry.versionMadeBy >> 8 !== 3) return true
-  const type = (entry.externalFileAttributes >>> 16) & 0o170000
-  if (entry.directory) return type === 0 || type === 0o040000
-  // ZIP.js and common Windows ZIP writers omit Unix type bits for ordinary files; reject only explicit special types.
-  return type === 0 || type === 0o100000
+function isSafeArchiveEntry(entry: Entry, name: string) {
+  // The release ZIP is built with Windows 7za and extracted with Expand-Archive, so accept only MS-DOS metadata.
+  if (entry.versionMadeBy >> 8 !== 0) return false
+  const directory = name.endsWith("/")
+  return directory === Boolean(entry.externalFileAttributes & 0x10)
 }
 
 if (import.meta.main) {
