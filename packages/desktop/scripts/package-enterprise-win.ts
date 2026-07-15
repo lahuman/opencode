@@ -66,11 +66,15 @@ async function resolveGitCommit(cwd: string, env: Env) {
 }
 
 if (import.meta.main) {
+  const isLocalTest = process.env["LOCAL_TEST"] === "1"
   const code = await runEnterpriseWindowsPackage({
     platform: process.platform,
     arch: process.arch,
     env: process.env,
     spawn: (command, options) => Bun.spawn(command, options),
+    // Skip ZIP integrity checks locally: 7-Zip adds extra fields that the strict verifier rejects.
+    verifyPackage: isLocalTest ? async () => {} : undefined,
+    verifyArchive: isLocalTest ? async () => {} : undefined,
   })
   if (code !== 0) process.exit(code)
 }

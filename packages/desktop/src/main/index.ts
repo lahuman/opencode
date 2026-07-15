@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, rmSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
@@ -384,6 +384,14 @@ const main = Effect.gen(function* () {
 
   const loadingTask = yield* Effect.gen(function* () {
     logger.log("sidecar connection started", { url })
+    if (!app.isPackaged) {
+      logger.log("sidecar credentials (dev only)", { url, username: "opencode", password })
+      // Write server info to app/.env.local so the Vite dev server picks it up automatically.
+      const authToken = Buffer.from(`opencode:${password}`).toString("base64")
+      const envLocal = join(import.meta.dirname, "../../../app/.env.local")
+      writeFileSync(envLocal, `VITE_OPENCODE_SERVER_HOST=127.0.0.1\nVITE_OPENCODE_SERVER_PORT=${port}\nVITE_OPENCODE_AUTH_TOKEN=${authToken}\n`)
+      logger.log("wrote dev env", { path: envLocal })
+    }
 
     ensureLoopbackNoProxy()
     useEnvProxy()

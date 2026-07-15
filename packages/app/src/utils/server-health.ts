@@ -89,8 +89,17 @@ export async function checkServerHealth(
       signal,
     })
       .global.health()
-      .then((x) => (x.error ? next(count, x.error) : { healthy: x.data?.healthy === true, version: x.data?.version }))
-      .catch((error) => next(count, error))
+      .then((x) => {
+        if (x.error) {
+          console.error("health check failed with error:", x.error);
+          return next(count, x.error);
+        }
+        return { healthy: x.data?.healthy === true, version: x.data?.version };
+      })
+      .catch((error) => {
+        console.error("health check threw error:", error);
+        return next(count, error);
+      })
   return attempt(0).finally(() => timeout?.clear?.())
 }
 

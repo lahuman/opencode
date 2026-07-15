@@ -106,6 +106,13 @@ const getCurrentUrl = () => {
   return location.origin
 }
 
+const getDevAuth = () => {
+  if (!import.meta.env.DEV) return undefined
+  const token = import.meta.env.VITE_OPENCODE_AUTH_TOKEN
+  if (!token) return undefined
+  return authFromToken(token)
+}
+
 const getDefaultUrl = () => {
   const lsDefault = readDefaultServerUrl()
   if (lsDefault) return lsDefault
@@ -154,7 +161,8 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 if (root instanceof HTMLElement) {
-  const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
+  const urlAuth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
+  const auth = urlAuth ?? getDevAuth()
   clearAuthToken()
   const server: ServerConnection.Http = {
     type: "http",

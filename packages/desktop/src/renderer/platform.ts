@@ -81,7 +81,7 @@ export function createPlatform(
   const wslServersApi = os === "windows" && !ENTERPRISE_ENABLED ? window.api.wslServers : undefined
   const network = createEnterpriseRendererNetwork(ENTERPRISE_PROFILE, {
     openLink: (url) => window.api.openLink(url),
-    fetch,
+    fetch: fetch.bind(globalThis),
   })
 
   return {
