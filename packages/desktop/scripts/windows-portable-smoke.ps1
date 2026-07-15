@@ -67,6 +67,50 @@ function Assert-WindowsAcceptanceRecords {
   }
 }
 
+function Assert-EnterpriseReleaseMetadata {
+  param([object] $Metadata)
+
+  if ($Metadata -isnot [PSCustomObject]) { throw "Release metadata shape is invalid" }
+
+  $requiredFields = @(
+    "appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID",
+    "schemaVersion", "sha256", "target", "windowsAcceptance"
+  )
+  $metadataFields = @($Metadata.PSObject.Properties.Name | Sort-Object)
+  if (($metadataFields -join ",") -ne ($requiredFields -join ",")) { throw "Release metadata shape is invalid" }
+
+  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID", "sha256")) {
+    if ($Metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($Metadata.$field)) {
+      throw "Release metadata shape is invalid"
+    }
+  }
+
+  $schemaVersion = $Metadata.schemaVersion
+  if ($null -eq $schemaVersion -or $schemaVersion -is [string] -or $schemaVersion -is [bool] -or $schemaVersion -isnot [System.IConvertible]) {
+    throw "Release metadata schema version is invalid"
+  }
+  try {
+    $numericSchemaVersion = [decimal]$schemaVersion
+  } catch {
+    throw "Release metadata schema version is invalid"
+  }
+  if ([decimal]::Truncate($numericSchemaVersion) -ne $numericSchemaVersion -or $numericSchemaVersion -ne 1) {
+    throw "Release metadata schema version is invalid"
+  }
+
+  if ($Metadata.target -isnot [PSCustomObject]) { throw "Release metadata target mismatch" }
+  $targetFields = @($Metadata.target.PSObject.Properties.Name | Sort-Object)
+  if (($targetFields -join ",") -ne "arch,os") { throw "Release metadata target mismatch" }
+  foreach ($field in @("arch", "os")) {
+    if ($Metadata.target.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($Metadata.target.$field)) {
+      throw "Release metadata target mismatch"
+    }
+  }
+
+  if ($Metadata.windowsAcceptance -isnot [System.Array]) { throw "Release metadata Windows acceptance is invalid" }
+  Assert-WindowsAcceptanceRecords -Records ([object[]]$Metadata.windowsAcceptance)
+}
+
 function Get-ProcessTreeIds {
   param([int] $RootProcessId)
 
@@ -97,21 +141,31 @@ function Stop-ProcessTree {
     $processIDs = @($processIDs + $discoveredProcessIDs | Select-Object -Unique)
   } catch {
   }
-  foreach ($processID in @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)) {
+  $stopFailures = @{}
+  $descendantProcessIDs = @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)
+  foreach ($processID in $descendantProcessIDs) {
     try {
       Stop-Process -Id $processID -Force -ErrorAction Stop
     } catch {
+      $stopFailures[$processID] = $_
     }
   }
-  $rootFailure = $null
   try {
     Stop-Process -Id $RootProcessId -Force -ErrorAction Stop
   } catch {
-    $rootFailure = $_
+    $stopFailures[$RootProcessId] = $_
   }
-  if (Get-Process -Id $RootProcessId -ErrorAction SilentlyContinue) {
-    if ($null -ne $rootFailure) { throw $rootFailure }
-    throw "Portable root process did not stop"
+  $survivingProcessIDs = @()
+  foreach ($processID in $processIDs) {
+    if ($null -ne (Get-Process -Id $processID -ErrorAction SilentlyContinue)) {
+      $survivingProcessIDs += $processID
+    }
+  }
+  if ($survivingProcessIDs.Count -gt 0) {
+    foreach ($processID in $survivingProcessIDs) {
+      if ($stopFailures.ContainsKey($processID)) { throw $stopFailures[$processID] }
+    }
+    throw "Portable process tree did not stop: $($survivingProcessIDs -join ', ')"
   }
   return $processIDs
 }
@@ -225,17 +279,14 @@ $actualHash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToUpperInvariant()
 if ($actualHash -ne $expectedHash) { throw "Portable archive checksum mismatch" }
 
 $metadata = Get-Content -Raw $ReleaseMetadata | ConvertFrom-Json
+Assert-EnterpriseReleaseMetadata -Metadata $metadata
 if ($metadata.sha256.ToUpperInvariant() -ne $actualHash) { throw "Release metadata checksum mismatch" }
 if ($metadata.artifact -ne [System.IO.Path]::GetFileName($Archive)) { throw "Release metadata artifact mismatch" }
 if ($metadata.authenticode -ne "NotSigned") { throw "Release metadata signature status mismatch" }
 if ($null -eq $metadata.target -or $metadata.target.os -ne "win32" -or $metadata.target.arch -ne "x64") {
   throw "Release metadata target mismatch"
 }
-if ($null -eq $metadata.windowsAcceptance -or -not ($metadata.windowsAcceptance -is [System.Array])) {
-  throw "Release metadata Windows acceptance is invalid"
-}
 $existingAcceptance = [object[]]$metadata.windowsAcceptance
-Assert-WindowsAcceptanceRecords -Records $existingAcceptance
 
 $allowedAddresses = Get-AllowedAddresses -TargetHost $AllowedHost
 $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-smoke-$([Guid]::NewGuid().ToString('N'))"

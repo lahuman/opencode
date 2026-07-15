@@ -67,7 +67,7 @@ test("portable smoke script preserves the required verification and cleanup boun
 test("portable smoke script requires a JSON acceptance array before normalization", async () => {
   const script = await Bun.file(scriptPath).text()
 
-  expect(script).toContain("-not ($metadata.windowsAcceptance -is [System.Array])")
+  expect(script).toContain("$Metadata.windowsAcceptance -isnot [System.Array]")
   expect(script).toContain("$existingAcceptance = [object[]]$metadata.windowsAcceptance")
   expect(script).not.toContain("$existingAcceptance = @($metadata.windowsAcceptance)")
 })
@@ -130,6 +130,63 @@ test("portable smoke stops the known root when CIM process discovery fails", asy
   expect(stop).toContain("Stop-Process -Id $RootProcessId -Force -ErrorAction Stop")
   expect(stop).toMatch(
     /Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop/,
+  )
+})
+
+test("portable smoke stops and verifies every discovered process before surfacing cleanup failures", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const stop = script.slice(
+    script.indexOf("function Stop-ProcessTree"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+
+  expect(stop).toContain("$stopFailures = @{}")
+  expect(stop).toContain(
+    "$descendantProcessIDs = @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)",
+  )
+  expect(stop).toContain("foreach ($processID in $descendantProcessIDs)")
+  expect(stop).toContain("Stop-Process -Id $RootProcessId -Force -ErrorAction Stop")
+  expect(stop).toContain("$stopFailures[$processID] = $_")
+  expect(stop).toContain("$stopFailures[$RootProcessId] = $_")
+  expect(stop).toContain("$survivingProcessIDs = @()")
+  expect(stop).toContain("$survivingProcessIDs += $processID")
+  expect(stop).toMatch(
+    /foreach \(\$processID in \$descendantProcessIDs\)[\s\S]*Stop-Process[\s\S]*catch \{[\s\S]*\$stopFailures\[\$processID\] = \$_[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop[\s\S]*foreach \(\$processID in \$processIDs\)[\s\S]*Get-Process -Id \$processID -ErrorAction SilentlyContinue[\s\S]*if \(\$survivingProcessIDs\.Count -gt 0\)[\s\S]*throw/,
+  )
+})
+
+test("portable smoke rejects scalar and incompatible release metadata before mutation", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const validation = script.slice(
+    script.indexOf("function Assert-EnterpriseReleaseMetadata"),
+    script.indexOf("function Get-ProcessTreeIds"),
+  )
+  const metadataLoad = script.slice(script.indexOf("$metadata = Get-Content"), script.indexOf("$allowedAddresses"))
+
+  for (const token of [
+    "$Metadata -isnot [PSCustomObject]",
+    "$schemaVersion -is [string]",
+    "$schemaVersion -is [bool]",
+    "$schemaVersion -isnot [System.IConvertible]",
+    "[decimal]$schemaVersion",
+    "[decimal]::Truncate($numericSchemaVersion)",
+    "$numericSchemaVersion -ne 1",
+    '"appVersion"',
+    '"gitCommit"',
+    '"defaultsVersion"',
+    '"guideVersion"',
+    '"modelID"',
+    '"windowsAcceptance"',
+  ]) {
+    expect(validation).toContain(token)
+  }
+
+  expect(metadataLoad.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata")).toBeGreaterThan(-1)
+  expect(metadataLoad.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata")).toBeLessThan(
+    metadataLoad.indexOf("$metadata.sha256"),
+  )
+  expect(script.indexOf("$metadata.windowsAcceptance =")).toBeGreaterThan(
+    script.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata"),
   )
 })
 
