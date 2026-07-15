@@ -6,10 +6,14 @@ import { enterpriseTelemetryEnabled } from "../enterprise"
 import { forwardInitializationFailure } from "./initialization"
 import { desktopRuntimeFeatures } from "./runtime-features"
 
-async function runMain(mode: "identity" | "enterprise" | "ordinary-packaged" | "ordinary-unpackaged") {
+async function runMain(
+  mode: "identity" | "enterprise" | "ordinary-packaged" | "ordinary-unpackaged",
+  env?: Record<string, string>,
+) {
   const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/main-index-entrypoint.ts`, mode], {
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, ...env },
   })
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
@@ -87,6 +91,12 @@ test("ordinary packaged and unpackaged main entrypoints preserve their identitie
   })
   expect(packaged.result.protocolClients).toEqual(["opencode"])
   expect(unpackaged.result.protocolClients).toEqual(["opencode"])
+})
+
+test("onboarding test roots override the desktop user data location", async () => {
+  const { result } = await runMain("enterprise", { OPENCODE_TEST_ONBOARDING: "1" })
+
+  expect(result.identity.userData).toMatch(/opencode-onboarding-[^/]+\/desktop$/)
 })
 
 describe("desktop initialization", () => {

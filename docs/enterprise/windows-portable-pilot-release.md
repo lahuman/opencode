@@ -4,7 +4,7 @@ This runbook is the only supported operator path from a reviewed source revision
 
 ## Release boundary
 
-Use a controlled Windows x64 build machine and a reviewed, clean checkout of the exact commit to release. The build account needs Bun, the repository dependencies, Git, PowerShell 5.1 or later, and normal access to the approved internal LLM endpoint. The build machine and both acceptance VMs must trust the endpoint through the normal Windows trust store. Do not add a TLS bypass, install a private certificate as a workaround for this pilot, or use `--ignore-certificate-errors`.
+Use a controlled Windows x64 build machine and a reviewed, clean checkout of the exact commit to release. The build account needs Bun, the repository dependencies, Git, PowerShell 5.1 or later, and normal access to the approved internal LLM endpoints. The build machine and both acceptance VMs must trust both endpoints through the normal Windows trust store. Do not add a TLS bypass, install a private certificate as a workaround for this pilot, or use `--ignore-certificate-errors`.
 
 Before building, confirm the repository is clean and record the commit:
 
@@ -67,7 +67,7 @@ $env:OPENCODE_ENTERPRISE = "1"
 $env:OPENCODE_ENTERPRISE_BASE_URL = "https://llm.corp.example/v1"
 $env:OPENCODE_ENTERPRISE_MODEL_ID = "company-code"
 $env:OPENCODE_ENTERPRISE_MODEL_NAME = "Company Code"
-$env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = "https://llm.corp.example"
+$env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = "https://llm.corp.example,https://llm-dr.corp.example"
 $env:OPENCODE_ENTERPRISE_DEFAULTS_VERSION = "pilot-1"
 $env:OPENCODE_ENTERPRISE_GUIDE_VERSION = "pilot-1"
 
@@ -76,6 +76,19 @@ bun test
 bun typecheck
 bun run package:enterprise:win
 ```
+
+### Controlled release acceptance profile
+
+Use this exact non-secret profile for the candidate build and both Windows acceptance VMs:
+
+- Primary origin: `https://llm.corp.example`
+- Second approved internal origin: `https://llm-dr.corp.example`
+- Default base URL: `https://llm.corp.example/v1`
+- Default model: `company-llm/company-code`
+
+The base URL and default model remain primary. The second origin exists only to accept a project-level override to another approved internal OpenAI-compatible origin. `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS` is a comma-separated list of absolute HTTP(S) origins; it must include the primary base-URL origin and may include the second origin, but must not include a path, credential, query, fragment, public provider, or acceptance-only substitute. Preserve these exact values with the external evidence for the candidate. They are part of the immutable packaged acceptance profile: do not alter them on an acceptance VM or rebuild/repackage only one component to change an endpoint. A profile change requires a fresh clean build, ZIP/checksum/release JSON set, and full Windows acceptance.
+
+Both approved endpoints must validate through the normal Windows trust store. The second origin does not authorize a certificate exception, relaxed TLS validation, or any change to the release gates.
 
 The supported command builds the desktop, packages only the Windows x64 ZIP target, verifies `dist\win-unpacked`, checks the archive against that unpacked tree, and writes all three artifacts beside one another:
 
@@ -289,7 +302,7 @@ On Windows 10, run the shared identity helper followed by the pristine build-hos
 
 ## Windows 10 and Windows 11 acceptance
 
-Use two clean x64 VMs: one Windows 10 and one Windows 11. Block public internet before launching the pilot, while allowing DNS and the configured internal LLM endpoint. The endpoint must be trusted by the normal Windows trust store. Run the parser and package-fixture commands above on each VM before the smoke command. This release profile intentionally declares only `https://llm.corp.example`; do not add a second origin merely for acceptance testing.
+Use two clean x64 VMs: one Windows 10 and one Windows 11. Block public internet before launching the pilot, while allowing DNS and both configured internal LLM endpoints. Both endpoints must be trusted by the normal Windows trust store. Run the parser and package-fixture commands above on each VM before the smoke command. Use the controlled release acceptance profile above unchanged; its second approved origin is required for the project-override acceptance case.
 
 Run the smoke on Windows 10 first. Copy the updated release JSON, not a newly generated JSON, to the Windows 11 VM before its run so the second successful execution appends the second record. Use the version selected above; this example shows version `1.17.18`.
 
@@ -302,7 +315,7 @@ bun run smoke:enterprise:portable -- `
   -SentinelProject "$env:USERPROFILE\CompanyOpenCodePilotSentinel"
 ```
 
-The `smoke:enterprise:portable` wrapper uses PowerShell execution-policy scope only to run the local reviewed script. It is not a TLS or certificate bypass. The smoke validates the ZIP hash before extraction, requires `Get-AuthenticodeSignature` to report `NotSigned`, tracks the process tree's established TCP destinations through startup and shutdown, permits only the resolved allowed host plus exact loopback, validates AppData persistence across folder replacement, preserves the sentinel project, removes only its temporary extraction directory, and then appends a passing record atomically.
+The `smoke:enterprise:portable` wrapper uses PowerShell execution-policy scope only to run the local reviewed script. It is not a TLS or certificate bypass. Run this automated startup smoke against the default primary host, `llm.corp.example`; the second-origin override is exercised by the retained manual egress workflow below. The smoke validates the ZIP hash before extraction, requires `Get-AuthenticodeSignature` to report `NotSigned`, tracks the process tree's established TCP destinations through startup and shutdown, permits only the resolved primary host plus exact loopback, validates AppData persistence across folder replacement, preserves the sentinel project, removes only its temporary extraction directory, and then appends a passing record atomically.
 
 ### Preserve the Windows 10 acceptance control
 
@@ -429,7 +442,7 @@ $evidenceFile = Join-Path $evidenceDirectory "windows-acceptance.md"
 $evidenceFile
 ```
 
-The external file must identify the artifact, ZIP SHA-256, git commit, release-metadata filename, and `release.pristine.json` control-copy hash, then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, retained egress trace, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
+The external file must identify the artifact, ZIP SHA-256, git commit, release-metadata filename, `release.pristine.json` control-copy hash, and the controlled acceptance profile's primary origin, second approved origin, default base URL, and default model. It must then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, retained egress trace, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
 
 ### Retained egress evidence
 
@@ -458,6 +471,10 @@ Read-Host "Complete credential setup and save, then press Enter" | Out-Null
 Add-EgressEvidenceStep "Credential setup and save complete"
 Read-Host "Complete one basic streamed chat and tool-call diagnostic, then press Enter" | Out-Null
 Add-EgressEvidenceStep "Basic streamed chat and tool-call diagnostic complete"
+Read-Host "In a fresh project, complete the approved second-origin override response, then press Enter" | Out-Null
+Add-EgressEvidenceStep "Approved second-origin project override response complete"
+Read-Host "In separate fresh projects, verify the non-allowed internal and public-provider overrides are rejected before connection, then press Enter" | Out-Null
+Add-EgressEvidenceStep "Non-allowed internal and public-provider project overrides rejected before connection"
 Read-Host "Shut down the pilot normally and press Enter only after it exits" | Out-Null
 Add-EgressEvidenceStep "Pilot shutdown complete; stopping trace"
 & netsh trace stop | Tee-Object -FilePath (Join-Path $vmEvidenceDirectory "netsh-trace-stop.txt")
@@ -471,16 +488,38 @@ Get-ChildItem -LiteralPath $vmEvidenceDirectory -File |
   Out-File -LiteralPath (Join-Path $vmEvidenceDirectory "sha256.txt")
 ```
 
-Use `windows-11-egress` instead of `windows-10-egress` on the Windows 11 VM. The operator must retain the ETL, XML event dump, `netsh-trace-start.txt`, `netsh-trace-stop.txt`, timestamps, step log, and hashes in the SHA-256/git-commit evidence directory. Review the trace/XML event dump and the smoke output together. Any endpoint outside the configured allowed origin, required DNS, exact loopback, or separately approved enterprise infrastructure is a release blocker until the release owner and security reviewer document approval in `windows-acceptance.md`.
+Use `windows-11-egress` instead of `windows-10-egress` on the Windows 11 VM. The operator must retain the ETL, XML event dump, `netsh-trace-start.txt`, `netsh-trace-stop.txt`, timestamps, step log, and hashes in the SHA-256/git-commit evidence directory. Review the trace/XML event dump and the smoke output together. The primary origin is expected for the default chat; the second approved origin is expected only for the successful project override. There must be no DNS probe or TCP destination for `llm-unapproved.corp.example` or `api.openai.com`. Any endpoint outside the two configured allowed origins, required DNS, exact loopback, or separately approved enterprise infrastructure is a release blocker until the release owner and security reviewer document approval in `windows-acceptance.md`.
+
+For each override case, use a separate fresh project so an invalid project file cannot affect the successful case. In that project's `.opencode\opencode.json`, write only the non-secret provider override shown below; do not put credentials, API keys, authorization headers, or TLS settings in the project file. Open the project in the pilot after writing the file. For the allowed case, complete the same basic streamed response used above. For each rejected case, confirm the provider is not available for the attempted request and record the matching trace interval; do not work around the rejection by changing environment variables, the trust store, or the packaged profile.
+
+```json
+{
+  "provider": {
+    "company-llm": {
+      "options": {
+        "baseURL": "https://llm-dr.corp.example/v1"
+      }
+    }
+  }
+}
+```
+
+Replace only the `baseURL` in that fixture for each negative case:
+
+- Non-allowed internal origin: `https://llm-unapproved.corp.example/v1`
+- Public provider origin: `https://api.openai.com/v1`
+
+The negative origins are deliberately absent from `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS`. The release evidence must show both were rejected before connection, with no DNS probe or TCP destination, while the second approved internal origin completed the response.
 
 Complete every item on both VMs and retain its reference in that external evidence file. The automated smoke appends only its exact structured record to `.release.json`.
 
 - [ ] The Company guide and its configured version display in the application.
 - [ ] A credential is saved, the application is restarted, and the credential remains available through DPAPI-backed enterprise AppData.
 - [ ] A basic response completes, streaming is visible, and tool-call diagnostics work against the configured allowed LLM origin, `llm.corp.example`.
-- [ ] A project override to a second, non-allowed internal origin is rejected before connection. Evidence shows no probe or TCP destination for that origin.
-- [ ] A project override to a public provider origin is rejected before connection. Evidence shows no probe or TCP destination for that origin.
-- [ ] Network evidence covers startup, idle, setup, chat, and shutdown and shows no public OpenCode traffic. Destinations are limited to the configured allowed host and exact loopback; retain the smoke output and destination capture externally.
+- [ ] A project override to the second approved internal origin, `https://llm-dr.corp.example/v1`, completes a basic streamed response. Evidence identifies the override interval and its permitted destination.
+- [ ] A project override to the non-allowed internal origin, `https://llm-unapproved.corp.example/v1`, is rejected before connection. Evidence shows no DNS probe or TCP destination for that origin.
+- [ ] A project override to the public provider origin, `https://api.openai.com/v1`, is rejected before connection. Evidence shows no DNS probe or TCP destination for that origin.
+- [ ] Network evidence covers startup, idle, setup, default chat, approved override, rejected overrides, and shutdown; it shows no public OpenCode traffic. Destinations are limited to the two configured allowed origins and exact loopback, apart from required DNS and separately approved enterprise infrastructure. Retain the smoke output and destination capture externally.
 - [ ] TLS uses the normal Windows trust store and there is no TLS/certificate-bypass option or launch flag.
 - [ ] Replacing the extracted application folder preserves settings and credentials under `%LOCALAPPDATA%\com.company.opencode.pilot`.
 - [ ] Deleting the extracted application folder preserves enterprise AppData and the selected project directory.

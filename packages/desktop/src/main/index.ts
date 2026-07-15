@@ -42,6 +42,7 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import { resolveDesktopUserDataPath } from "./user-data"
 import {
   createEnterpriseCredentialHandlers,
   createEnterpriseCredentialStore,
@@ -132,7 +133,15 @@ const main = Effect.gen(function* () {
   app.setAppUserModelId(identity.appId)
   app.setPath(
     "userData",
-    onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), identity.appId),
+    onboardingTestRoot
+      ? join(onboardingTestRoot, "desktop")
+      : resolveDesktopUserDataPath({
+          platform: process.platform,
+          enterprise: ENTERPRISE_ENABLED,
+          appId: identity.appId,
+          localAppData: process.env.LOCALAPPDATA,
+          appData: () => app.getPath("appData"),
+        }),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
   logger = initLogging()

@@ -15,6 +15,7 @@ const required = [
   "resources/enterprise/models.json",
   "resources/licenses/OpenCode-LICENSE",
 ]
+const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -118,6 +119,13 @@ test("rejects an empty guide", async () => {
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package guide")
 })
 
+test("rejects a guide with another H1", async () => {
+  const root = await portableFixture()
+  await Bun.write(path.join(root, "resources/enterprise/company-guide.md"), "# Different company guide\n")
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package guide")
+})
+
 test("rejects invalid models JSON", async () => {
   const root = await portableFixture()
   await Bun.write(path.join(root, "resources/enterprise/models.json"), "not json")
@@ -130,6 +138,13 @@ test("rejects an empty app archive", async () => {
   await Bun.write(path.join(root, "resources/app.asar"), "")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package archive")
+})
+
+test("rejects an empty portable executable", async () => {
+  const root = await portableFixture()
+  await Bun.write(path.join(root, "Company OpenCode Pilot.exe"), "")
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package executable")
 })
 
 test("rejects a missing OpenCode license notice", async () => {
@@ -532,6 +547,22 @@ test("rejects required archive contents that differ from the verified unpacked p
   await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow("Portable package archive does not match")
 })
 
+test.each([
+  ["an empty executable", "Company OpenCode Pilot.exe", "", "Portable package executable"],
+  [
+    "a different guide",
+    "resources/enterprise/company-guide.md",
+    "# Different company guide\n",
+    "Portable package guide",
+  ],
+])("rejects %s shared by the archive and unpacked package", async (_name, entry, contents, error) => {
+  const root = await portableFixture()
+  await Bun.write(path.join(root, entry), contents)
+  const archive = await archiveFixture(required, { [entry]: contents })
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(error)
+})
+
 async function portableFixture() {
   const root = await temporaryDirectory("enterprise-portable-package-")
   await writePortableFixture(root)
@@ -550,7 +581,7 @@ async function writePortableFixture(root: string) {
       path.join(root, "resources/enterprise/opencode.jsonc"),
       JSON.stringify({ enabled_providers: ["company-llm"] }),
     ),
-    Bun.write(path.join(root, "resources/enterprise/company-guide.md"), "# Company guide\n"),
+    Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
     Bun.write(path.join(root, "resources/enterprise/models.json"), JSON.stringify({ providers: [] })),
     Bun.write(path.join(root, "resources/licenses/OpenCode-LICENSE"), "MIT License\n"),
   ])
@@ -814,7 +845,7 @@ const portableContents: Record<string, string> = {
   "Company OpenCode Pilot.exe": "portable executable",
   "resources/app.asar": "application archive",
   "resources/enterprise/opencode.jsonc": JSON.stringify({ enabled_providers: ["company-llm"] }),
-  "resources/enterprise/company-guide.md": "# Company guide\n",
+  "resources/enterprise/company-guide.md": enterpriseGuide,
   "resources/enterprise/models.json": JSON.stringify({ providers: [] }),
   "resources/licenses/OpenCode-LICENSE": "MIT License\n",
 }

@@ -124,87 +124,159 @@ function Read-EnterpriseReleaseMetadata {
   return $metadata
 }
 
-function Get-ProcessTreeIds {
-  param([int] $RootProcessId)
-
-  $processes = @(Get-CimInstance Win32_Process)
-  $ids = [System.Collections.Generic.HashSet[int]]::new()
-  $pending = @($RootProcessId)
-
-  while ($pending.Count -gt 0) {
-    $processID = [int]$pending[0]
-    $pending = @($pending | Select-Object -Skip 1)
-    if (-not $ids.Add($processID)) { continue }
-    $pending += @(
-      $processes |
-        Where-Object { [int]$_.ParentProcessId -eq $processID } |
-        ForEach-Object { [int]$_.ProcessId }
-    )
-  }
-
-  return @($ids)
-}
-
-function Add-KnownProcessIDs {
+function Read-PortableChecksum {
   param(
-    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs,
-    [int[]] $ProcessIDs
+    [string] $Path,
+    [string] $Archive
   )
 
-  foreach ($processID in $ProcessIDs) {
-    [void]$KnownProcessIDs.Add($processID)
+  $archiveName = [System.IO.Path]::GetFileName($Archive)
+  $escapedArchiveName = [regex]::Escape($archiveName)
+  $checksumRecord = Get-Content -Raw -LiteralPath $Path
+  $checksumMatch = [regex]::Match($checksumRecord, "\A([0-9a-f]{64})  $escapedArchiveName\r?\n\z")
+  if (-not $checksumMatch.Success) { throw "Portable archive checksum record is invalid" }
+  return $checksumMatch.Groups[1].Value
+}
+
+function Get-ProcessCreationTime {
+  param([object] $CreationDate)
+
+  if ($CreationDate -is [DateTime]) { return $CreationDate.ToUniversalTime().ToString("o") }
+  if ($CreationDate -isnot [string]) { throw "Portable process creation time is unavailable" }
+
+  [DateTime] $parsed = [DateTime]::MinValue
+  if ([DateTime]::TryParse($CreationDate, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
+    return $parsed.ToUniversalTime().ToString("o")
+  }
+  return [System.Management.ManagementDateTimeConverter]::ToDateTime($CreationDate).ToUniversalTime().ToString("o")
+}
+
+function New-ProcessIdentity {
+  param([object] $Process)
+
+  if ($null -eq $Process -or $null -eq $Process.ProcessId -or $null -eq $Process.CreationDate) {
+    throw "Portable process identity is unavailable"
+  }
+  return [PSCustomObject]@{
+    ProcessId = [int]$Process.ProcessId
+    CreationTime = Get-ProcessCreationTime -CreationDate $Process.CreationDate
+  }
+}
+
+function Get-ProcessIdentityKey {
+  param([PSCustomObject] $ProcessIdentity)
+
+  return "$($ProcessIdentity.ProcessId):$($ProcessIdentity.CreationTime)"
+}
+
+function Test-ProcessIdentity {
+  param(
+    [PSCustomObject] $ProcessIdentity,
+    [object] $Process
+  )
+
+  if ($null -eq $Process -or [int]$Process.ProcessId -ne $ProcessIdentity.ProcessId) { return $false }
+  return (Get-ProcessCreationTime -CreationDate $Process.CreationDate) -eq $ProcessIdentity.CreationTime
+}
+
+function Get-CimProcess {
+  param([int] $ProcessId)
+
+  $processes = @(Get-CimInstance Win32_Process | Where-Object { [int]$_.ProcessId -eq $ProcessId })
+  if ($processes.Count -eq 0) { return $null }
+  if ($processes.Count -ne 1) { throw "Portable process identity is ambiguous" }
+  return $processes[0]
+}
+
+function Get-ProcessIdentity {
+  param([int] $ProcessId)
+
+  $process = Get-CimProcess -ProcessId $ProcessId
+  if ($null -eq $process) { return $null }
+  return New-ProcessIdentity -Process $process
+}
+
+function Get-ProcessTreeIdentities {
+  param([PSCustomObject[]] $RootProcessIdentities)
+
+  $processes = @(Get-CimInstance Win32_Process)
+  $identities = [System.Collections.Generic.Dictionary[string, object]]::new()
+  $pending = @()
+  foreach ($process in $processes) {
+    if (-not @($RootProcessIdentities | Where-Object { Test-ProcessIdentity -ProcessIdentity $_ -Process $process })) { continue }
+    $identity = New-ProcessIdentity -Process $process
+    $key = Get-ProcessIdentityKey -ProcessIdentity $identity
+    if ($identities.ContainsKey($key)) { continue }
+    $identities[$key] = $identity
+    $pending += $identity
+  }
+
+  while ($pending.Count -gt 0) {
+    $parent = $pending[0]
+    $pending = @($pending | Select-Object -Skip 1)
+    foreach ($process in @($processes | Where-Object { [int]$_.ParentProcessId -eq $parent.ProcessId })) {
+      $identity = New-ProcessIdentity -Process $process
+      $key = Get-ProcessIdentityKey -ProcessIdentity $identity
+      if ($identities.ContainsKey($key)) { continue }
+      $identities[$key] = $identity
+      $pending += $identity
+    }
+  }
+
+  return @($identities.Values)
+}
+
+function Add-KnownProcessIdentities {
+  param(
+    [System.Collections.Generic.Dictionary[string, object]] $KnownProcessIdentities,
+    [PSCustomObject[]] $ProcessIdentities
+  )
+
+  foreach ($processIdentity in $ProcessIdentities) {
+    $KnownProcessIdentities[(Get-ProcessIdentityKey -ProcessIdentity $processIdentity)] = $processIdentity
   }
 }
 
 function Stop-ProcessTree {
   param(
-    [int] $RootProcessId,
-    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs
+    [PSCustomObject] $RootProcessIdentity,
+    [System.Collections.Generic.Dictionary[string, object]] $KnownProcessIdentities
   )
 
-  $processIDs = @($RootProcessId)
-  [void]$KnownProcessIDs.Add($RootProcessId)
-  foreach ($knownProcessID in $KnownProcessIDs) {
-    $processIDs += $knownProcessID
-  }
-  $discoveryFailure = $null
-  try {
-    foreach ($processID in @(Get-ProcessTreeIds -RootProcessId $RootProcessId)) {
-      $processIDs += $processID
-      [void]$KnownProcessIDs.Add($processID)
-    }
-  } catch {
-    $discoveryFailure = $_
-  }
-  $processIDs = @($processIDs | Select-Object -Unique)
-  $stopFailures = @{}
-  $descendantProcessIDs = @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)
-  foreach ($processID in $descendantProcessIDs) {
+  Add-KnownProcessIdentities -KnownProcessIdentities $KnownProcessIdentities -ProcessIdentities @($RootProcessIdentity)
+  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  $cleanupFailure = $null
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $processIdentities = $null
     try {
-      Stop-Process -Id $processID -Force -ErrorAction Stop
+      $processIdentities = @(Get-ProcessTreeIdentities -RootProcessIdentities @($KnownProcessIdentities.Values))
+      Add-KnownProcessIdentities -KnownProcessIdentities $KnownProcessIdentities -ProcessIdentities $processIdentities
     } catch {
-      $stopFailures[$processID] = $_
+      if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
     }
-  }
-  try {
-    Stop-Process -Id $RootProcessId -Force -ErrorAction Stop
-  } catch {
-    $stopFailures[$RootProcessId] = $_
-  }
-  $survivingProcessIDs = @()
-  foreach ($processID in $processIDs) {
-    if ($null -ne (Get-Process -Id $processID -ErrorAction SilentlyContinue)) {
-      $survivingProcessIDs += $processID
+
+    if ($null -eq $processIdentities) {
+      Start-Sleep -Milliseconds 100
+      continue
     }
-  }
-  if ($survivingProcessIDs.Count -gt 0) {
-    foreach ($processID in $survivingProcessIDs) {
-      if ($stopFailures.ContainsKey($processID)) { throw $stopFailures[$processID] }
+    if ($processIdentities.Count -eq 0) {
+      if ($null -ne $cleanupFailure) { throw $cleanupFailure }
+      return @($KnownProcessIdentities.Values)
     }
-    throw "Portable process tree did not stop: $($survivingProcessIDs -join ', ')"
+
+    foreach ($processIdentity in @($processIdentities | Sort-Object ProcessId -Descending)) {
+      try {
+        $currentProcess = Get-CimProcess -ProcessId $processIdentity.ProcessId
+        if ($null -eq $currentProcess -or -not (Test-ProcessIdentity -ProcessIdentity $processIdentity -Process $currentProcess)) { continue }
+        Stop-Process -Id $processIdentity.ProcessId -Force -ErrorAction Stop
+      } catch {
+        if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+      }
+    }
+    Start-Sleep -Milliseconds 100
   }
-  if ($null -ne $discoveryFailure) { throw $discoveryFailure }
-  return $processIDs
+  if ($null -ne $cleanupFailure) { throw $cleanupFailure }
+  throw "Portable process tree did not stop before the cleanup deadline"
 }
 
 function Test-AllowedRemoteAddress {
@@ -222,14 +294,23 @@ function Test-AllowedRemoteAddress {
 
 function Add-ObservedConnections {
   param(
-    [int[]] $ProcessIDs,
+    [PSCustomObject[]] $ProcessIdentities,
     [string[]] $AllowedAddresses,
     [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses
   )
 
-  if ($ProcessIDs.Count -eq 0) { return }
+  if ($ProcessIdentities.Count -eq 0) { return }
+  $processes = @(Get-CimInstance Win32_Process)
+  $processIDs = @(
+    foreach ($processIdentity in $ProcessIdentities) {
+      if (@($processes | Where-Object { Test-ProcessIdentity -ProcessIdentity $processIdentity -Process $_ })) {
+        $processIdentity.ProcessId
+      }
+    }
+  )
+  if ($processIDs.Count -eq 0) { return }
   foreach ($connection in @(Get-NetTCPConnection -State Established -ErrorAction Stop)) {
-    if ($ProcessIDs -notcontains [int]$connection.OwningProcess) { continue }
+    if ($processIDs -notcontains [int]$connection.OwningProcess) { continue }
     [void]$ObservedRemoteAddresses.Add($connection.RemoteAddress)
     if (-not (Test-AllowedRemoteAddress -RemoteAddress $connection.RemoteAddress -AllowedAddresses $AllowedAddresses)) {
       throw "Portable process tree established an unexpected TCP connection"
@@ -239,16 +320,31 @@ function Add-ObservedConnections {
 
 function Observe-ProcessTreeConnections {
   param(
-    [int] $RootProcessId,
+    [PSCustomObject] $RootProcessIdentity,
     [string[]] $AllowedAddresses,
     [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses,
-    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs
+    [System.Collections.Generic.Dictionary[string, object]] $KnownProcessIdentities
   )
 
-  $processIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId)
-  Add-KnownProcessIDs -KnownProcessIDs $KnownProcessIDs -ProcessIDs $processIDs
-  Add-ObservedConnections -ProcessIDs $processIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $ObservedRemoteAddresses
-  return $processIDs
+  $processIdentities = @(Get-ProcessTreeIdentities -RootProcessIdentities @($RootProcessIdentity))
+  if ($processIdentities.Count -eq 0) { throw "Portable root process identity is no longer observable" }
+  Add-KnownProcessIdentities -KnownProcessIdentities $KnownProcessIdentities -ProcessIdentities $processIdentities
+  Add-ObservedConnections -ProcessIdentities $processIdentities -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $ObservedRemoteAddresses
+  return $processIdentities
+}
+
+function Assert-PortablePayload {
+  param(
+    [string] $ApplicationDirectory,
+    [string] $RelativePath
+  )
+
+  $item = Get-Item -LiteralPath (Join-Path $ApplicationDirectory $RelativePath) -ErrorAction SilentlyContinue
+  if ($null -eq $item -or -not $item.PSIsContainer) {
+    if ($null -eq $item) { throw "Portable archive is missing required resource: $RelativePath" }
+    return $item
+  }
+  throw "Portable archive is missing required resource: $RelativePath"
 }
 
 function Expand-PortableArchive {
@@ -258,6 +354,16 @@ function Expand-PortableArchive {
   Expand-Archive -LiteralPath $Archive -DestinationPath $Destination
   $executables = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "Company OpenCode Pilot.exe")
   if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one Company OpenCode Pilot.exe" }
+  if ($executables[0].Length -eq 0) { throw "Portable executable is empty" }
+  foreach ($resource in @(
+    "resources/app.asar",
+    "resources/enterprise/opencode.jsonc",
+    "resources/enterprise/company-guide.md",
+    "resources/enterprise/models.json",
+    "resources/licenses/OpenCode-LICENSE"
+  )) {
+    [void](Assert-PortablePayload -ApplicationDirectory $executables[0].DirectoryName -RelativePath $resource)
+  }
 
   $signature = Get-AuthenticodeSignature -FilePath $executables[0].FullName
   if ($signature.Status -ne "NotSigned") { throw "Portable executable must be unsigned" }
@@ -275,16 +381,19 @@ function Test-PortableLaunch {
   )
 
   $observedRemoteAddresses = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  $knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()
+  $knownProcessIdentities = [System.Collections.Generic.Dictionary[string, object]]::new()
   $process = $null
+  $rootProcessIdentity = $null
   try {
     $process = Start-Process -FilePath $Application.Executable -WorkingDirectory $Application.Directory -PassThru
-    [void]$knownProcessIDs.Add([int]$process.Id)
+    $rootProcessIdentity = Get-ProcessIdentity -ProcessId $process.Id
+    if ($null -eq $rootProcessIdentity) { throw "Portable root process identity is unavailable" }
+    Add-KnownProcessIdentities -KnownProcessIdentities $knownProcessIdentities -ProcessIdentities @($rootProcessIdentity)
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
       $process.Refresh()
       if ($process.HasExited) { throw "Portable executable exited during startup" }
-      [void](Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIDs $knownProcessIDs)
+      [void](Observe-ProcessTreeConnections -RootProcessIdentity $rootProcessIdentity -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIdentities $knownProcessIdentities)
       Start-Sleep -Milliseconds 250
     }
     $process.Refresh()
@@ -292,25 +401,20 @@ function Test-PortableLaunch {
   } finally {
     if ($null -ne $process) {
       $cleanupFailure = $null
-      $shutdownProcessIDs = @()
-      $stoppedProcessIDs = @()
+      $shutdownProcessIdentities = @()
+      $stoppedProcessIdentities = @()
       try {
-        $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIDs $knownProcessIDs)
+        $shutdownProcessIdentities = @(Observe-ProcessTreeConnections -RootProcessIdentity $rootProcessIdentity -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIdentities $knownProcessIdentities)
       } catch {
         $cleanupFailure = $_
       }
       try {
-        $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs)
+        $stoppedProcessIdentities = @(Stop-ProcessTree -RootProcessIdentity $rootProcessIdentity -KnownProcessIdentities $knownProcessIdentities)
       } catch {
         if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
       }
       try {
-        $finalProcessIDs = @($process.Id + $shutdownProcessIDs + $stoppedProcessIDs | Select-Object -Unique)
-        foreach ($knownProcessID in $knownProcessIDs) {
-          $finalProcessIDs += $knownProcessID
-        }
-        $finalProcessIDs = @($finalProcessIDs | Select-Object -Unique)
-        Add-ObservedConnections -ProcessIDs $finalProcessIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
+        Add-ObservedConnections -ProcessIdentities @($shutdownProcessIdentities; $stoppedProcessIdentities; $knownProcessIdentities.Values) -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
       } catch {
         if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
       }
@@ -319,13 +423,13 @@ function Test-PortableLaunch {
   }
 }
 
-$expectedHash = ((Get-Content -Raw $Checksum).Trim() -split "\s+")[0].ToUpperInvariant()
-$actualHash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToUpperInvariant()
+$expectedHash = Read-PortableChecksum -Path $Checksum -Archive $Archive
+$actualHash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToLowerInvariant()
 if ($actualHash -ne $expectedHash) { throw "Portable archive checksum mismatch" }
 
 $metadata = Read-EnterpriseReleaseMetadata -Path $ReleaseMetadata
 Assert-EnterpriseReleaseMetadata -Metadata $metadata
-if ($metadata.sha256.ToUpperInvariant() -ne $actualHash) { throw "Release metadata checksum mismatch" }
+if ($metadata.sha256.ToLowerInvariant() -ne $actualHash) { throw "Release metadata checksum mismatch" }
 if ($metadata.artifact -ne [System.IO.Path]::GetFileName($Archive)) { throw "Release metadata artifact mismatch" }
 if ($metadata.authenticode -ne "NotSigned") { throw "Release metadata signature status mismatch" }
 if ($null -eq $metadata.target -or $metadata.target.os -ne "win32" -or $metadata.target.arch -ne "x64") {

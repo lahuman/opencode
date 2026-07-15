@@ -19,6 +19,9 @@ const requiredEntries = [
   "resources/enterprise/models.json",
   "resources/licenses/OpenCode-LICENSE",
 ] as const
+const enterpriseGuide = new Uint8Array(
+  await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).arrayBuffer(),
+)
 
 type RequiredEntry = (typeof requiredEntries)[number]
 type EnterprisePackageFiles = Record<RequiredEntry, Uint8Array>
@@ -209,9 +212,10 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
 
   const models = parseJSON(files["resources/enterprise/models.json"], "Portable package catalog is invalid")
   if (!isRecord(models)) throw new Error("Portable package catalog is invalid")
-  if (!new TextDecoder().decode(files["resources/enterprise/company-guide.md"]).startsWith("# ")) {
+  if (!bytesEqual(files["resources/enterprise/company-guide.md"], enterpriseGuide)) {
     throw new Error("Portable package guide is invalid")
   }
+  if (files["Company OpenCode Pilot.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
   if (files["resources/app.asar"].byteLength === 0) throw new Error("Portable package archive is empty")
   if (!new TextDecoder().decode(files["resources/licenses/OpenCode-LICENSE"]).includes("MIT License")) {
     throw new Error("Portable package license is invalid")

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const scriptPath = new URL("./windows-portable-smoke.ps1", import.meta.url)
@@ -93,7 +93,7 @@ test("portable smoke polls descendant egress through shutdown", async () => {
     "$observedRemoteAddresses",
     "Start-Sleep -Milliseconds 250",
     "Get-NetTCPConnection -State Established -ErrorAction Stop",
-    "Get-ProcessTreeIds",
+    "Get-ProcessTreeIdentities",
     "Stop-ProcessTree",
   ]) {
     expect(script).toContain(token)
@@ -108,10 +108,10 @@ test("portable smoke continues cleanup after final observation failures", async 
 
   expect(launch).toContain("$cleanupFailure = $null")
   expect(launch).toContain(
-    "$stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs)",
+    "$stoppedProcessIdentities = @(Stop-ProcessTree -RootProcessIdentity $rootProcessIdentity -KnownProcessIdentities $knownProcessIdentities)",
   )
   expect(launch).toContain("if ($null -ne $cleanupFailure) { throw $cleanupFailure }")
-  expect(launch).toContain("$process.Id + $shutdownProcessIDs + $stoppedProcessIDs")
+  expect(launch).toContain("Add-ObservedConnections -ProcessIdentities")
   expect(launch).toMatch(
     /Observe-ProcessTreeConnections[\s\S]*catch \{[\s\S]*\$cleanupFailure = \$_[\s\S]*Stop-ProcessTree[\s\S]*catch \{/,
   )
@@ -123,22 +123,21 @@ test("portable smoke continues cleanup after final observation failures", async 
   )
 })
 
-test("portable smoke stops the known root when CIM process discovery fails", async () => {
+test("portable smoke fails closed when CIM process discovery cannot verify an identity", async () => {
   const script = await Bun.file(scriptPath).text()
   const stop = script.slice(
     script.indexOf("function Stop-ProcessTree"),
     script.indexOf("function Test-AllowedRemoteAddress"),
   )
 
-  expect(stop).toContain("$processIDs = @($RootProcessId)")
-  expect(stop).toContain("Get-ProcessTreeIds -RootProcessId $RootProcessId")
-  expect(stop).toContain("Stop-Process -Id $RootProcessId -Force -ErrorAction Stop")
-  expect(stop).toMatch(
-    /Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop/,
-  )
+  expect(stop).toContain("Get-ProcessTreeIdentities -RootProcessIdentities")
+  expect(stop).toContain("$cleanupFailure = $null")
+  expect(stop).toContain("if ($null -ne $cleanupFailure) { throw $cleanupFailure }")
+  expect(stop).toContain("Test-ProcessIdentity")
+  expect(stop).toMatch(/Get-ProcessTreeIdentities[\s\S]*catch \{[\s\S]*\$cleanupFailure = \$_/)
 })
 
-test("portable smoke rethrows CIM cleanup failures after stopping retained PIDs", async () => {
+test("portable smoke preserves cleanup failures after identity-safe teardown", async () => {
   const script = await Bun.file(scriptPath).text()
   const stop = script.slice(
     script.indexOf("function Stop-ProcessTree"),
@@ -146,38 +145,35 @@ test("portable smoke rethrows CIM cleanup failures after stopping retained PIDs"
   )
   const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
 
-  expect(stop).toContain("$discoveryFailure = $null")
-  expect(stop).toContain("$discoveryFailure = $_")
+  expect(stop).toContain("$cleanupFailure = $null")
+  expect(stop).toContain("$cleanupFailure = $_")
   expect(stop).toMatch(
-    /Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*\$discoveryFailure = \$_[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop[\s\S]*foreach \(\$processID in \$processIDs\)[\s\S]*Get-Process -Id \$processID -ErrorAction SilentlyContinue[\s\S]*if \(\$survivingProcessIDs\.Count -gt 0\)[\s\S]*if \(\$null -ne \$discoveryFailure\) \{ throw \$discoveryFailure \}/,
+    /Get-ProcessTreeIdentities[\s\S]*catch \{[\s\S]*\$cleanupFailure = \$_[\s\S]*if \(\$null -eq \$processIdentities\)[\s\S]*Start-Sleep[\s\S]*if \(\$null -ne \$cleanupFailure\) \{ throw \$cleanupFailure \}/,
   )
-  expect(launch.indexOf("Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs")).toBeLessThan(
-    launch.indexOf("if ($null -ne $cleanupFailure) { throw $cleanupFailure }"),
-  )
+  expect(
+    launch.indexOf(
+      "Stop-ProcessTree -RootProcessIdentity $rootProcessIdentity -KnownProcessIdentities $knownProcessIdentities",
+    ),
+  ).toBeLessThan(launch.indexOf("if ($null -ne $cleanupFailure) { throw $cleanupFailure }"))
   expect(script.indexOf("$metadata.windowsAcceptance =")).toBeGreaterThan(
     script.indexOf("Remove-Item -LiteralPath $extractRoot -Recurse -Force"),
   )
 })
 
-test("portable smoke stops and verifies every discovered process before surfacing cleanup failures", async () => {
+test("portable smoke stops only CIM-verified identities before surfacing cleanup failures", async () => {
   const script = await Bun.file(scriptPath).text()
   const stop = script.slice(
     script.indexOf("function Stop-ProcessTree"),
     script.indexOf("function Test-AllowedRemoteAddress"),
   )
 
-  expect(stop).toContain("$stopFailures = @{}")
-  expect(stop).toContain(
-    "$descendantProcessIDs = @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)",
-  )
-  expect(stop).toContain("foreach ($processID in $descendantProcessIDs)")
-  expect(stop).toContain("Stop-Process -Id $RootProcessId -Force -ErrorAction Stop")
-  expect(stop).toContain("$stopFailures[$processID] = $_")
-  expect(stop).toContain("$stopFailures[$RootProcessId] = $_")
-  expect(stop).toContain("$survivingProcessIDs = @()")
-  expect(stop).toContain("$survivingProcessIDs += $processID")
+  expect(stop).toContain("foreach ($processIdentity in @($processIdentities | Sort-Object ProcessId -Descending))")
+  expect(stop).toContain("$currentProcess = Get-CimProcess -ProcessId $processIdentity.ProcessId")
+  expect(stop).toContain("Test-ProcessIdentity -ProcessIdentity $processIdentity -Process $currentProcess")
+  expect(stop).toContain("Stop-Process -Id $processIdentity.ProcessId -Force -ErrorAction Stop")
+  expect(stop).toContain("$cleanupFailure = $_")
   expect(stop).toMatch(
-    /foreach \(\$processID in \$descendantProcessIDs\)[\s\S]*Stop-Process[\s\S]*catch \{[\s\S]*\$stopFailures\[\$processID\] = \$_[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop[\s\S]*foreach \(\$processID in \$processIDs\)[\s\S]*Get-Process -Id \$processID -ErrorAction SilentlyContinue[\s\S]*if \(\$survivingProcessIDs\.Count -gt 0\)[\s\S]*throw/,
+    /Get-CimProcess[\s\S]*Test-ProcessIdentity[\s\S]*Stop-Process[\s\S]*catch \{[\s\S]*\$cleanupFailure = \$_/,
   )
 })
 
@@ -240,7 +236,46 @@ test("portable smoke gates raw release JSON to a single top-level object", async
   expect(reader).not.toContain("-NoEnumerate")
 })
 
-test("portable smoke retains every observed process PID for cleanup", async () => {
+test("portable smoke accepts only the deterministic standalone checksum record", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const checksum = script.slice(
+    script.indexOf("function Read-PortableChecksum"),
+    script.indexOf("function Get-ProcessCreationTime"),
+  )
+
+  expect(checksum).toContain("[System.IO.Path]::GetFileName($Archive)")
+  expect(checksum).toContain("[regex]::Escape($archiveName)")
+  expect(checksum).toContain('"\\A([0-9a-f]{64})  $escapedArchiveName\\r?\\n\\z"')
+  expect(checksum).toContain("$checksumMatch.Groups[1].Value")
+  expect(checksum).not.toContain("-split")
+  expect(checksum).not.toContain("ToUpperInvariant")
+})
+
+test("portable smoke validates every required extracted payload and a nonempty executable", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const archive = script.slice(
+    script.indexOf("function Assert-PortablePayload"),
+    script.indexOf("function Test-PortableLaunch"),
+  )
+
+  for (const resource of [
+    "resources/app.asar",
+    "resources/enterprise/opencode.jsonc",
+    "resources/enterprise/company-guide.md",
+    "resources/enterprise/models.json",
+    "resources/licenses/OpenCode-LICENSE",
+  ]) {
+    expect(archive).toContain(`"${resource}"`)
+  }
+
+  expect(archive).toContain("function Assert-PortablePayload")
+  expect(archive).toContain("Portable executable is empty")
+  expect(archive).toContain("Portable archive is missing required resource")
+  expect(archive).toContain("$executables[0].Length -eq 0")
+  expect(archive).toContain('Status -ne "NotSigned"')
+})
+
+test("portable smoke retains process identities with PID and creation time for observation and cleanup", async () => {
   const script = await Bun.file(scriptPath).text()
   const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
   const observe = script.slice(
@@ -252,19 +287,36 @@ test("portable smoke retains every observed process PID for cleanup", async () =
     script.indexOf("function Test-AllowedRemoteAddress"),
   )
 
-  expect(launch).toContain("$knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()")
-  expect(launch).toContain("[void]$knownProcessIDs.Add([int]$process.Id)")
-  expect(launch).toContain("Observe-ProcessTreeConnections -RootProcessId $process.Id")
-  expect(launch).toContain("-KnownProcessIDs $knownProcessIDs")
-  expect(launch).toContain("Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs")
-  expect(observe).toContain("[System.Collections.Generic.HashSet[int]] $KnownProcessIDs")
-  expect(observe).toContain("Add-KnownProcessIDs -KnownProcessIDs $KnownProcessIDs -ProcessIDs $processIDs")
-  expect(observe).toMatch(/Get-ProcessTreeIds[\s\S]*Add-KnownProcessIDs[\s\S]*Add-ObservedConnections/)
-  expect(stop).toContain("[System.Collections.Generic.HashSet[int]] $KnownProcessIDs")
-  expect(stop).toContain("foreach ($knownProcessID in $KnownProcessIDs)")
-  expect(stop).toContain("[void]$KnownProcessIDs.Add($processID)")
+  expect(launch).toContain("$knownProcessIdentities = [System.Collections.Generic.Dictionary[string, object]]::new()")
+  expect(observe).toContain("[System.Collections.Generic.Dictionary[string, object]] $KnownProcessIdentities")
+  expect(stop).toContain("[System.Collections.Generic.Dictionary[string, object]] $KnownProcessIdentities")
+  expect(script).toContain("CreationTime")
+  expect(script).toContain("Get-ProcessIdentityKey")
+
+  expect(launch).toContain("Get-ProcessIdentity -ProcessId $process.Id")
+  expect(launch).toContain("-RootProcessIdentity $rootProcessIdentity")
+  expect(observe).toContain("Get-ProcessTreeIdentities")
+  expect(observe).toContain("Add-KnownProcessIdentities")
+  expect(stop).toContain("Get-ProcessTreeIdentities")
+  expect(stop).toContain("Test-ProcessIdentity")
+  expect(stop).not.toContain("[System.Collections.Generic.HashSet[int]]")
+  expect(stop).not.toContain("Stop-Process -Id $RootProcessId")
+})
+
+test("portable smoke repeatedly rediscovers owned descendants with a bounded cleanup timeout", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const stop = script.slice(
+    script.indexOf("function Stop-ProcessTree"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+
+  expect(stop).toContain("$deadline = [DateTime]::UtcNow.AddSeconds(10)")
+  expect(stop).toContain("while ([DateTime]::UtcNow -lt $deadline)")
+  expect(stop).toContain("Get-ProcessTreeIdentities")
+  expect(stop).toContain("Start-Sleep -Milliseconds 100")
+  expect(stop).toContain("Portable process tree did not stop before the cleanup deadline")
   expect(stop).toMatch(
-    /foreach \(\$knownProcessID in \$KnownProcessIDs\)[\s\S]*Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop/,
+    /while \(\[DateTime\]::UtcNow -lt \$deadline\)[\s\S]*Get-ProcessTreeIdentities[\s\S]*Stop-Process[\s\S]*Start-Sleep/,
   )
 })
 
@@ -297,7 +349,7 @@ test.if(process.platform === "win32")(
     const script = await Bun.file(scriptPath).text()
     const reader = script.slice(
       script.indexOf("function Read-EnterpriseReleaseMetadata"),
-      script.indexOf("function Get-ProcessTreeIds"),
+      script.indexOf("function Read-PortableChecksum"),
     )
     const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
     const harness = join(temp, "read-release.ps1")
@@ -350,39 +402,123 @@ test.if(process.platform === "win32")(
 )
 
 test.if(process.platform === "win32")(
-  "PowerShell rethrows CIM cleanup failures after stopping retained PIDs",
+  "PowerShell checksum fixtures reject any record outside the exact artifact schema",
   async () => {
     const script = await Bun.file(scriptPath).text()
-    const stop = script.slice(
-      script.indexOf("function Stop-ProcessTree"),
-      script.indexOf("function Test-AllowedRemoteAddress"),
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+    const harness = join(temp, "read-checksum.ps1")
+    const checksum = script.slice(
+      script.indexOf("function Read-PortableChecksum"),
+      script.indexOf("function Get-ProcessCreationTime"),
+    )
+    const hash = "a".repeat(64)
+
+    try {
+      await Bun.write(harness, `${checksum}\n$null = Read-PortableChecksum -Path $args[0] -Archive $args[1]`)
+      const archive = join(temp, "Company OpenCode Pilot.zip")
+      for (const [name, fixture, expected] of [
+        ["valid", `${hash}  Company OpenCode Pilot.zip\n`, 0],
+        ["missing-line-end", `${hash}  Company OpenCode Pilot.zip`, 1],
+        ["uppercase", `${hash.toUpperCase()}  Company OpenCode Pilot.zip\n`, 1],
+        ["wrong-name", `${hash}  other.zip\n`, 1],
+        ["extra-record", `${hash}  Company OpenCode Pilot.zip\n${hash}  Company OpenCode Pilot.zip\n`, 1],
+        ["extra-line-end", `${hash}  Company OpenCode Pilot.zip\n\n`, 1],
+      ] as const) {
+        const checksumPath = join(temp, `${name}.sha256`)
+        await Bun.write(checksumPath, fixture)
+        const process = Bun.spawn(
+          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, checksumPath, archive],
+          { stdout: "pipe", stderr: "pipe" },
+        )
+        expect(await process.exited).toBe(expected)
+      }
+    } finally {
+      await rm(temp, { force: true, recursive: true })
+    }
+  },
+)
+
+test.if(process.platform === "win32")("PowerShell cleanup fixture does not stop a reused retained PID", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const processFunctions = script.slice(
+    script.indexOf("function Get-ProcessCreationTime"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+  const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+  const harness = join(temp, "stop-process-tree.ps1")
+
+  try {
+    await Bun.write(
+      harness,
+      `$ErrorActionPreference = "Stop"
+function Get-CimInstance {
+  [CmdletBinding()]
+  param([string] $ClassName)
+  return [PSCustomObject]@{ ProcessId = 20; ParentProcessId = 0; CreationDate = [DateTime]"2026-07-15T00:00:20Z" }
+}
+function Stop-Process { [CmdletBinding()] param([int] $Id, [switch] $Force) exit 2 }
+${processFunctions}
+$knownProcessIdentities = [System.Collections.Generic.Dictionary[string, object]]::new()
+$root = [PSCustomObject]@{ ProcessId = 10; CreationTime = "2026-07-15T00:00:10.0000000Z" }
+$retained = [PSCustomObject]@{ ProcessId = 20; CreationTime = "2026-07-15T00:00:15.0000000Z" }
+Add-KnownProcessIdentities -KnownProcessIdentities $knownProcessIdentities -ProcessIdentities @($root, $retained)
+Stop-ProcessTree -RootProcessIdentity $root -KnownProcessIdentities $knownProcessIdentities`,
+    )
+    const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(await process.exited).toBe(0)
+  } finally {
+    await rm(temp, { force: true, recursive: true })
+  }
+})
+
+test.if(process.platform === "win32")(
+  "PowerShell extracted-resource fixtures require each named payload to be a file",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const payload = script.slice(
+      script.indexOf("function Assert-PortablePayload"),
+      script.indexOf("function Expand-PortableArchive"),
     )
     const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
-    const harness = join(temp, "stop-process-tree.ps1")
+    const harness = join(temp, "assert-payload.ps1")
 
     try {
       await Bun.write(
         harness,
-        `$ErrorActionPreference = "Stop"
-function Get-ProcessTreeIds { param([int] $RootProcessId) throw "CIM discovery failed" }
-function Stop-Process { [CmdletBinding()] param([int] $Id, [switch] $Force) $script:stoppedProcessIDs += $Id }
-function Get-Process { [CmdletBinding()] param([int] $Id) }
-${stop}
-$script:stoppedProcessIDs = @()
-$knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()
-[void]$knownProcessIDs.Add(20)
-$failure = $null
-try { Stop-ProcessTree -RootProcessId 10 -KnownProcessIDs $knownProcessIDs } catch { $failure = $_ }
-if ((@($script:stoppedProcessIDs | Sort-Object) -join ",") -ne "10,20") { exit 2 }
-if ($null -eq $failure) { exit 3 }
-if ($failure.Exception.Message -ne "CIM discovery failed") { exit 4 }`,
+        `${payload}\n$null = Assert-PortablePayload -ApplicationDirectory $args[0] -RelativePath $args[1]`,
       )
-      const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness], {
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-
-      expect(await process.exited).toBe(0)
+      for (const resource of [
+        "resources/app.asar",
+        "resources/enterprise/opencode.jsonc",
+        "resources/enterprise/company-guide.md",
+        "resources/enterprise/models.json",
+        "resources/licenses/OpenCode-LICENSE",
+      ]) {
+        const file = join(temp, resource)
+        await mkdir(dirname(file), { recursive: true })
+        await Bun.write(file, "payload")
+        const valid = Bun.spawn(
+          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, temp, resource],
+          {
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        )
+        expect(await valid.exited).toBe(0)
+        await rm(file)
+        const missing = Bun.spawn(
+          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, temp, resource],
+          {
+            stdout: "pipe",
+            stderr: "pipe",
+          },
+        )
+        expect(await missing.exited).not.toBe(0)
+      }
     } finally {
       await rm(temp, { force: true, recursive: true })
     }
