@@ -44,6 +44,9 @@ export async function verifyEnterpriseArchive(archive: string, root?: string): P
   if (normalizedEntries.some((name) => name === undefined)) {
     throw new Error("Portable package archive contains an unsafe entry")
   }
+  if (entries.some((entry) => !isSafeArchiveEntry(entry))) {
+    throw new Error("Portable package archive contains an unsafe entry")
+  }
   const normalized = normalizedEntries.filter((name): name is string => name !== undefined)
   if (new Set(normalized.map(windowsEntryKey)).size !== normalized.length) {
     throw new Error("Portable package archive contains duplicate entries")
@@ -208,6 +211,7 @@ function isSafeWindowsPathComponent(component: string) {
     component === "" ||
     component === "." ||
     component === ".." ||
+    component.startsWith(" ") ||
     component.endsWith(".") ||
     component.endsWith(" ") ||
     /[\u0000-\u001f\u007f-\u009f<>:"|?*]/.test(component)
@@ -216,6 +220,14 @@ function isSafeWindowsPathComponent(component: string) {
   }
   const basename = component.split(".", 1)[0]
   return !/^(?:con|prn|aux|nul|clock\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])$/i.test(basename)
+}
+
+function isSafeArchiveEntry(entry: Entry) {
+  if (entry.versionMadeBy >> 8 !== 3) return true
+  const type = (entry.externalFileAttributes >>> 16) & 0o170000
+  if (entry.directory) return type === 0 || type === 0o040000
+  // ZIP.js and common Windows ZIP writers omit Unix type bits for ordinary files; reject only explicit special types.
+  return type === 0 || type === 0o100000
 }
 
 if (import.meta.main) {

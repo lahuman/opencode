@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { BlobWriter, TextReader, ZipWriter } from "@zip.js/zip.js"
+import { BlobWriter, TextReader, ZipWriter, type ZipWriterAddDataOptions } from "@zip.js/zip.js"
 
 import { verifyEnterpriseArchive, verifyEnterprisePackage } from "./verify-enterprise-package"
 
@@ -183,10 +183,59 @@ test.each([
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
 })
 
+test.each(["resources/ app.asar", "resources/enterprise/ company-guide.md"])(
+  "rejects a leading-space Windows archive component %s",
+  async (entry) => {
+    const archive = await archiveFixture([...required, entry])
+
+    await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+  },
+)
+
 test("rejects archive entries that collide on Windows", async () => {
   const archive = await archiveFixture([...required, "resources/APP.ASAR"])
 
   await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains duplicate entries")
+})
+
+test("rejects a leading-space Windows collision before canonical matching", async () => {
+  const archive = await archiveFixture([...required, "xresources/app.asar"])
+  await rewriteArchiveEntryName(archive, "xresources/app.asar", " resources/app.asar")
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test.each([
+  ["Unix symlink", 0o120777],
+  ["Unix FIFO", 0o010644],
+])("rejects a required archive payload marked as a %s", async (_, mode) => {
+  const root = await portableFixture()
+  const archive = await archiveFixture(
+    required,
+    {},
+    {
+      "resources/app.asar": {
+        versionMadeBy: 3 << 8,
+        externalFileAttributes: (mode << 16) >>> 0,
+      },
+    },
+  )
+
+  await expect(verifyEnterpriseArchive(archive, root)).rejects.toThrow(
+    "Portable package archive contains an unsafe entry",
+  )
+})
+
+test("accepts a DOS directory entry", async () => {
+  const archive = await archiveFixture(
+    [...required, "resources/"],
+    {},
+    {
+      "resources/": { msDosCompatible: true, externalFileAttributes: 0x10 },
+    },
+  )
+
+  await expect(verifyEnterpriseArchive(archive)).resolves.toEqual(required)
 })
 
 test("rejects archive entries that collide on a Windows path component", async () => {
@@ -256,7 +305,11 @@ async function writePortableFixture(root: string) {
   ])
 }
 
-async function archiveFixture(entries: string[], contents: Record<string, string> = {}) {
+async function archiveFixture(
+  entries: string[],
+  contents: Record<string, string> = {},
+  options: Record<string, ZipWriterAddDataOptions> = {},
+) {
   const root = await temporaryDirectory("enterprise-portable-archive-")
   const writer = new ZipWriter(new BlobWriter("application/zip"))
   for (const entry of entries) {
@@ -265,6 +318,7 @@ async function archiveFixture(entries: string[], contents: Record<string, string
       entry.endsWith("/")
         ? undefined
         : new TextReader(contents[entry] ?? portableContents[entry] ?? "portable content"),
+      options[entry],
     )
   }
   const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
@@ -276,6 +330,18 @@ async function temporaryDirectory(prefix: string) {
   const root = await mkdtemp(path.join(await realpath(tmpdir()), prefix))
   roots.push(root)
   return root
+}
+
+async function rewriteArchiveEntryName(archive: string, source: string, target: string) {
+  const sourceBytes = new TextEncoder().encode(source)
+  const targetBytes = new TextEncoder().encode(target)
+  if (sourceBytes.byteLength !== targetBytes.byteLength)
+    throw new Error("Archive entry names must have the same length")
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  for (let index = 0; index <= bytes.byteLength - sourceBytes.byteLength; index++) {
+    if (sourceBytes.every((byte, offset) => bytes[index + offset] === byte)) bytes.set(targetBytes, index)
+  }
+  await Bun.write(archive, bytes)
 }
 
 const portableContents: Record<string, string> = {

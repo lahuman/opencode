@@ -190,6 +190,108 @@ test("stops after an unpacked-package verification failure", async () => {
   expect(steps).toEqual(["build", "package:win", "verify-unpacked"])
 })
 
+test("stops after an archive verification failure", async () => {
+  const steps: string[] = []
+
+  await expect(
+    runEnterpriseWindowsPackage({
+      platform: "win32",
+      arch: "x64",
+      env: valid,
+      version: "1.17.18",
+      spawn(command) {
+        steps.push(command[2] ?? command[1])
+        return { exited: Promise.resolve(0) }
+      },
+      verifyPackage() {
+        steps.push("verify-unpacked")
+        return Promise.resolve({})
+      },
+      verifyArchive() {
+        steps.push("verify-zip")
+        return Promise.reject(new Error("Portable archive is invalid"))
+      },
+      gitCommit() {
+        steps.push("git-commit")
+        return Promise.resolve("0123456789abcdef")
+      },
+      release() {
+        steps.push("release")
+        return Promise.resolve({})
+      },
+    }),
+  ).rejects.toThrow("Portable archive")
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip"])
+})
+
+test("stops after git revision resolution failure", async () => {
+  const steps: string[] = []
+
+  await expect(
+    runEnterpriseWindowsPackage({
+      platform: "win32",
+      arch: "x64",
+      env: valid,
+      version: "1.17.18",
+      spawn(command) {
+        steps.push(command[2] ?? command[1])
+        return { exited: Promise.resolve(0) }
+      },
+      verifyPackage() {
+        steps.push("verify-unpacked")
+        return Promise.resolve({})
+      },
+      verifyArchive() {
+        steps.push("verify-zip")
+        return Promise.resolve([])
+      },
+      gitCommit() {
+        steps.push("git-commit")
+        return Promise.reject(new Error("Unable to resolve the enterprise package git commit"))
+      },
+      release() {
+        steps.push("release")
+        return Promise.resolve({})
+      },
+    }),
+  ).rejects.toThrow("Unable to resolve")
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip", "git-commit"])
+})
+
+test("stops after release metadata write failure", async () => {
+  const steps: string[] = []
+
+  await expect(
+    runEnterpriseWindowsPackage({
+      platform: "win32",
+      arch: "x64",
+      env: valid,
+      version: "1.17.18",
+      spawn(command) {
+        steps.push(command[2] ?? command[1])
+        return { exited: Promise.resolve(0) }
+      },
+      verifyPackage() {
+        steps.push("verify-unpacked")
+        return Promise.resolve({})
+      },
+      verifyArchive() {
+        steps.push("verify-zip")
+        return Promise.resolve([])
+      },
+      gitCommit() {
+        steps.push("git-commit")
+        return Promise.resolve("0123456789abcdef")
+      },
+      release() {
+        steps.push("release")
+        return Promise.reject(new Error("Unable to write release metadata"))
+      },
+    }),
+  ).rejects.toThrow("Unable to write")
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip", "git-commit", "release"])
+})
+
 test("exposes the exact Bun TypeScript enterprise package script", async () => {
   const pkg = await Bun.file(path.resolve(import.meta.dir, "../package.json")).json()
   expect(pkg.scripts["package:enterprise:win"]).toBe("bun ./scripts/package-enterprise-win.ts")
