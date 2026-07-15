@@ -192,6 +192,49 @@ function Read-VerifiedPortableReleaseMetadata {
   Assert-WindowsAcceptanceRecords -Records ([object[]]$metadata.windowsAcceptance)
   return $metadata
 }
+
+function Assert-ReleaseMetadataMatchesPristine {
+  param(
+    [PSCustomObject] $Metadata,
+    [PSCustomObject] $Pristine
+  )
+
+  if ($Pristine.windowsAcceptance.Count -ne 0) { throw "Pristine release metadata is not pristine" }
+  foreach ($field in @(
+    "schemaVersion", "appVersion", "gitCommit", "artifact", "sha256", "defaultsVersion", "guideVersion", "modelID",
+    "builtAt", "authenticode"
+  )) {
+    if ($Metadata.$field -ne $Pristine.$field) { throw "Release metadata immutable field mismatch: $field" }
+  }
+  if ($Metadata.target.os -ne $Pristine.target.os -or $Metadata.target.arch -ne $Pristine.target.arch) {
+    throw "Release metadata immutable target mismatch"
+  }
+}
+
+function Assert-ExpectedWindowsAcceptance {
+  param(
+    [PSCustomObject] $Record,
+    [string] $ExpectedWindows
+  )
+
+  Assert-WindowsAcceptanceRecords -Records @($Record)
+  if ($Record.windowsVersion -notmatch [regex]::Escape($ExpectedWindows)) {
+    throw "Windows acceptance OS identity mismatch"
+  }
+  if ($Record.result -ne "pass") { throw "Windows acceptance result mismatch" }
+}
+
+function Assert-ExactWindowsAcceptanceRecord {
+  param(
+    [PSCustomObject] $Actual,
+    [PSCustomObject] $Expected
+  )
+
+  Assert-WindowsAcceptanceRecords -Records @($Actual, $Expected)
+  foreach ($field in @("windowsVersion", "windowsBuild", "testedAt", "tester", "result")) {
+    if ($Actual.$field -cne $Expected.$field) { throw "Windows acceptance record mismatch: $field" }
+  }
+}
 ```
 
 ### Pristine build-host validation
@@ -205,24 +248,31 @@ if ($metadata.windowsAcceptance.Count -ne 0) {
 }
 ```
 
-The ZIP and checksum remain immutable throughout acceptance. The smoke script changes only the JSON by appending its fixed-schema acceptance records.
+### Preserve the pristine metadata baseline
+
+The three release artifacts remain the ZIP, checksum, and release JSON. Preserve this additional read-only acceptance-control copy on the build host and transfer it with the acceptance materials; it is evidence, not a fourth release artifact. It lets Windows 11 and the final gate prove that every immutable metadata value still matches the original build JSON.
+
+```powershell
+$evidenceRoot = "\\release-evidence.corp.example\opencode-pilot"
+$evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$expectedCommit"
+$pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
+New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+if (Test-Path -LiteralPath $pristineReleaseMetadata) { throw "Pristine release metadata already exists" }
+Copy-Item -LiteralPath $releaseMetadata -Destination $pristineReleaseMetadata
+$pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
+if ($pristineMetadata.windowsAcceptance.Count -ne 0) { throw "Pristine release metadata is not empty" }
+Get-FileHash -Algorithm SHA256 -LiteralPath $pristineReleaseMetadata |
+  Format-Table Algorithm, Hash, Path -AutoSize |
+  Out-File -LiteralPath (Join-Path $evidenceDirectory "release.pristine.json.sha256.txt")
+```
+
+`EnterpriseReleaseMetadata` has these actual immutable values: `schemaVersion`, `appVersion`, `gitCommit`, `artifact`, `sha256`, `defaultsVersion`, `guideVersion`, `modelID`, `target`, `builtAt`, and `authenticode`. It does not contain `size` or `modelName`; do not invent fields or add them to `.release.json`. The ZIP and checksum remain immutable throughout acceptance. The only allowed release-JSON mutation is the smoke script appending valid fixed-schema Windows acceptance records.
 
 ## Acceptance-transfer validation
 
 Deliver the ZIP, `.sha256`, and `.release.json` through the approved trusted internal channel as one release set. Do not publish the unsigned ZIP to a public channel and do not rely on SmartScreen reputation as an integrity mechanism. Record the internal channel, sender, recipient, transfer time, and the SHA-256 value in the release record.
 
-On Windows 10, run the shared identity helper followed by the pristine build-host validation before smoke. On Windows 11, run the shared identity helper but do not run the pristine assertion: it would reject the valid Windows 10 record that the smoke script needs to preserve. Instead, use the acceptance-transfer validation below. It verifies the same archive checksum, artifact name, and reviewed git commit, permits exactly one valid Windows 10 record, and rejects any other metadata shape or acceptance state.
-
-```powershell
-# Run the shared identity helper above in the clean checkout at the reviewed build commit.
-$metadata = Read-VerifiedPortableReleaseMetadata -Path $releaseMetadata
-if ($metadata.windowsAcceptance.Count -ne 1) { throw "Windows 11 requires exactly one Windows 10 acceptance record" }
-$windows10 = $metadata.windowsAcceptance[0]
-if ($windows10.windowsVersion -notmatch "Windows 10") { throw "Windows 11 requires a Windows 10 acceptance record" }
-if ($windows10.result -ne "pass") { throw "Windows 10 acceptance did not pass" }
-```
-
-Transfer the Windows 10-updated `.release.json` with the unchanged ZIP and `.sha256` to Windows 11. The transfer is invalid if the ZIP SHA-256, artifact name, or git commit differs from the reviewed build values. A transfer that changes the ZIP or checksum is always a failure; a transfer that changes the release JSON outside its single valid Windows 10 record is also a failure. Quarantine a failed set and obtain a fresh copy from the controlled build output.
+On Windows 10, run the shared identity helper followed by the pristine build-host validation before smoke. On Windows 11, run the shared identity helper but do not run the pristine assertion: it would reject the valid Windows 10 record that the smoke script needs to preserve. Instead, after the Windows 10 smoke and control capture below, run the Windows 11 transfer validation. It verifies the same archive checksum, artifact name, and reviewed git commit, permits exactly one exact valid Windows 10 record, and rejects any other metadata shape or acceptance state.
 
 ## Windows 10 and Windows 11 acceptance
 
@@ -241,32 +291,130 @@ bun run smoke:enterprise:portable -- `
 
 The `smoke:enterprise:portable` wrapper uses PowerShell execution-policy scope only to run the local reviewed script. It is not a TLS or certificate bypass. The smoke validates the ZIP hash before extraction, requires `Get-AuthenticodeSignature` to report `NotSigned`, tracks the process tree's established TCP destinations through startup and shutdown, permits only the resolved allowed host plus exact loopback, validates AppData persistence across folder replacement, preserves the sentinel project, removes only its temporary extraction directory, and then appends a passing record atomically.
 
-After both successful runs, validate the final metadata on the controlled release host:
+### Preserve the Windows 10 acceptance control
+
+Immediately after the Windows 10 smoke succeeds, preserve the exact accepted record before transfer:
 
 ```powershell
-$metadata = Get-Content -Raw -LiteralPath $releaseMetadata | ConvertFrom-Json
-$records = @($metadata.windowsAcceptance)
-if ($records.Count -ne 2) { throw "Expected exactly two Windows acceptance records" }
-if (@($records | Where-Object { $_.result -ne "pass" }).Count -ne 0) { throw "Windows acceptance did not pass" }
-if (@($records | Where-Object { $_.windowsVersion -match "Windows 10" }).Count -ne 1) { throw "Missing Windows 10 acceptance" }
-if (@($records | Where-Object { $_.windowsVersion -match "Windows 11" }).Count -ne 1) { throw "Missing Windows 11 acceptance" }
-$records | Format-Table windowsVersion, windowsBuild, testedAt, tester, result -AutoSize
+$pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
+$windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json"
+if (Test-Path -LiteralPath $windows10ReleaseMetadata) { throw "Windows 10 release metadata already exists" }
+Copy-Item -LiteralPath $releaseMetadata -Destination $windows10ReleaseMetadata
+$pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
+$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
+Assert-ReleaseMetadataMatchesPristine -Metadata $windows10Metadata -Pristine $pristineMetadata
+if ($windows10Metadata.windowsAcceptance.Count -ne 1) { throw "Windows 10 metadata must contain exactly one record" }
+Assert-ExpectedWindowsAcceptance -Record $windows10Metadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
 ```
 
-Record the final ZIP SHA-256 and the two acceptance records with the candidate commit. Confirm the extracted executable’s Authenticode state is `NotSigned` on both VMs. Do not accept an artifact that is signed, has a different hash, has fewer or more than two records, or contains a failed record.
+Transfer the Windows 10-updated `.release.json`, the unchanged ZIP and `.sha256`, and the read-only `release.pristine.json` and `release.windows10.json` control copies to Windows 11. The transfer is invalid if any immutable metadata field, ZIP SHA-256, artifact name, or git commit differs from the reviewed build values. A transfer that changes the ZIP or checksum is always a failure; a transfer that changes the release JSON outside its single exact valid Windows 10 record is also a failure. Quarantine a failed set and obtain a fresh copy from the controlled build output.
+
+### Windows 11 transfer validation
+
+```powershell
+# Run the shared identity helper above in the clean checkout at the reviewed build commit.
+$evidenceRoot = "\\release-evidence.corp.example\opencode-pilot"
+$evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$expectedCommit"
+$pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
+$windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json"
+$pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
+$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
+$metadata = Read-VerifiedPortableReleaseMetadata -Path $releaseMetadata
+Assert-ReleaseMetadataMatchesPristine -Metadata $metadata -Pristine $pristineMetadata
+if ($metadata.windowsAcceptance.Count -ne 1) { throw "Windows 11 requires exactly one Windows 10 acceptance record" }
+$windows10 = $metadata.windowsAcceptance[0]
+Assert-ExpectedWindowsAcceptance -Record $windows10 -ExpectedWindows "Windows 10"
+Assert-ExactWindowsAcceptanceRecord -Actual $windows10 -Expected $windows10Metadata.windowsAcceptance[0]
+```
+
+## Final distribution gate
+
+After Windows 11 succeeds, run the shared identity helper again against the ZIP, then run this final gate on the controlled release host. It revalidates the final JSON and the pristine baseline with the same helper used at transfer time, verifies the exact two acceptance shapes and OS families, and independently records the unsigned executable state before distribution.
+
+```powershell
+$evidenceRoot = "\\release-evidence.corp.example\opencode-pilot"
+$evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$expectedCommit"
+$pristineReleaseMetadata = Join-Path $evidenceDirectory "release.pristine.json"
+$windows10ReleaseMetadata = Join-Path $evidenceDirectory "release.windows10.json"
+$pristineMetadata = Read-VerifiedPortableReleaseMetadata -Path $pristineReleaseMetadata
+$windows10Metadata = Read-VerifiedPortableReleaseMetadata -Path $windows10ReleaseMetadata
+$metadata = Read-VerifiedPortableReleaseMetadata -Path $releaseMetadata
+Assert-ReleaseMetadataMatchesPristine -Metadata $metadata -Pristine $pristineMetadata
+if ($metadata.windowsAcceptance.Count -ne 2) { throw "Expected exactly two Windows acceptance records" }
+Assert-ExpectedWindowsAcceptance -Record $metadata.windowsAcceptance[0] -ExpectedWindows "Windows 10"
+Assert-ExactWindowsAcceptanceRecord -Actual $metadata.windowsAcceptance[0] -Expected $windows10Metadata.windowsAcceptance[0]
+Assert-ExpectedWindowsAcceptance -Record $metadata.windowsAcceptance[1] -ExpectedWindows "Windows 11"
+
+$signatureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-signature-$([Guid]::NewGuid().ToString('N'))"
+try {
+  Expand-Archive -LiteralPath $archive.FullName -DestinationPath $signatureRoot
+  $executables = @(Get-ChildItem -LiteralPath $signatureRoot -Recurse -File -Filter "Company OpenCode Pilot.exe")
+  if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one executable" }
+  $signature = Get-AuthenticodeSignature -FilePath $executables[0].FullName
+  $signature | Select-Object Path, Status, StatusMessage |
+    Format-List |
+    Out-File -LiteralPath (Join-Path $evidenceDirectory "authenticode-final.txt")
+  if ($signature.Status -ne "NotSigned") { throw "Portable executable must remain unsigned" }
+} finally {
+  if (Test-Path -LiteralPath $signatureRoot) { Remove-Item -LiteralPath $signatureRoot -Recurse -Force }
+}
+$metadata.windowsAcceptance | Format-Table windowsVersion, windowsBuild, testedAt, tester, result -AutoSize
+```
+
+Do not distribute or tag the release until this gate passes. Record the final ZIP SHA-256, the two acceptance records, and `authenticode-final.txt` in the external evidence folder. Do not accept an artifact that is signed, has a changed immutable field, has fewer or more than two records, or contains a failed record.
 
 ## External acceptance evidence
 
 Keep `.release.json` limited to its exact machine schema: it has no evidence-reference field. Store the human evidence outside the release set at `\\release-evidence.corp.example\opencode-pilot\<zip-sha256>\<git-commit>\windows-acceptance.md`. For the current release, derive the exact location as follows:
 
 ```powershell
-$evidenceRoot = "\\release-evidence.corp.example\opencode-pilot"
-$evidenceDirectory = Join-Path $evidenceRoot "$actualHash\$($metadata.gitCommit)"
 $evidenceFile = Join-Path $evidenceDirectory "windows-acceptance.md"
 $evidenceFile
 ```
 
-The external file must identify the artifact, ZIP SHA-256, git commit, and release-metadata filename, then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, network/egress capture, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
+The external file must identify the artifact, ZIP SHA-256, git commit, release-metadata filename, and `release.pristine.json` control-copy hash, then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, retained egress trace, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
+
+### Retained egress evidence
+
+The smoke script is an automated fail-closed process-tree polling check for its own launch sequence. It does not perform the operator's credential setup or chat workflow, and it does not retain a chat trace. On each VM, run the following built-in Windows capture from an elevated PowerShell session for the complete manual workflow. Start it before launching the pilot and stop it only after the pilot has shut down.
+
+```powershell
+$vmEvidenceDirectory = Join-Path $evidenceDirectory "windows-10-egress"
+New-Item -ItemType Directory -Path $vmEvidenceDirectory -Force | Out-Null
+$traceFile = Join-Path $vmEvidenceDirectory "manual-workflow.etl"
+$stepsFile = Join-Path $vmEvidenceDirectory "operator-steps.txt"
+function Add-EgressEvidenceStep {
+  param([string] $Step)
+  "$([DateTime]::UtcNow.ToString('o'))`t$Step" | Add-Content -LiteralPath $stepsFile
+}
+
+Add-EgressEvidenceStep "Trace requested before pilot launch"
+& netsh trace start capture=yes scenario=InternetClient tracefile="$traceFile" filemode=single maxsize=512 report=yes persistent=no |
+  Tee-Object -FilePath (Join-Path $vmEvidenceDirectory "netsh-trace-start.txt")
+if ($LASTEXITCODE -ne 0) { throw "Unable to start retained egress trace" }
+Add-EgressEvidenceStep "Trace started; launch pilot now"
+Read-Host "Launch the pilot and press Enter after startup completes" | Out-Null
+Add-EgressEvidenceStep "Startup complete"
+Read-Host "Leave the pilot idle for 60 seconds and press Enter when complete" | Out-Null
+Add-EgressEvidenceStep "Idle observation complete"
+Read-Host "Complete credential setup and save, then press Enter" | Out-Null
+Add-EgressEvidenceStep "Credential setup and save complete"
+Read-Host "Complete one basic streamed chat and tool-call diagnostic, then press Enter" | Out-Null
+Add-EgressEvidenceStep "Basic streamed chat and tool-call diagnostic complete"
+Read-Host "Shut down the pilot normally and press Enter only after it exits" | Out-Null
+Add-EgressEvidenceStep "Pilot shutdown complete; stopping trace"
+& netsh trace stop | Tee-Object -FilePath (Join-Path $vmEvidenceDirectory "netsh-trace-stop.txt")
+if ($LASTEXITCODE -ne 0) { throw "Unable to stop retained egress trace" }
+& tracerpt $traceFile -o (Join-Path $vmEvidenceDirectory "manual-workflow.xml") -of XML
+if ($LASTEXITCODE -ne 0) { throw "Unable to write retained egress report" }
+Get-ChildItem -LiteralPath $vmEvidenceDirectory -File |
+  Get-FileHash -Algorithm SHA256 |
+  Sort-Object Path |
+  Format-Table Algorithm, Hash, Path -AutoSize |
+  Out-File -LiteralPath (Join-Path $vmEvidenceDirectory "sha256.txt")
+```
+
+Use `windows-11-egress` instead of `windows-10-egress` on the Windows 11 VM. The operator must retain the ETL, XML report, `netsh-trace-stop.txt`, timestamps, step log, and hashes in the SHA-256/git-commit evidence directory. Review the trace/report and the smoke output together. Any endpoint outside the configured allowed origin, required DNS, exact loopback, or separately approved enterprise infrastructure is a release blocker until the release owner and security reviewer document approval in `windows-acceptance.md`.
 
 Complete every item on both VMs and retain its reference in that external evidence file. The automated smoke appends only its exact structured record to `.release.json`.
 
