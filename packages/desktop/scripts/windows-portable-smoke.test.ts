@@ -64,6 +64,41 @@ test("portable smoke script preserves the required verification and cleanup boun
   expect(script).toContain('$record["result"]')
 })
 
+test("portable smoke script requires a JSON acceptance array before normalization", async () => {
+  const script = await Bun.file(scriptPath).text()
+
+  expect(script).toContain("-not ($metadata.windowsAcceptance -is [System.Array])")
+  expect(script).toContain("$existingAcceptance = [object[]]$metadata.windowsAcceptance")
+  expect(script).not.toContain("$existingAcceptance = @($metadata.windowsAcceptance)")
+})
+
+test("portable smoke cleanup completes before acceptance persistence", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const cleanup = script.indexOf("Remove-Item -LiteralPath $extractRoot -Recurse -Force")
+  const acceptance = script.indexOf("$metadata.windowsAcceptance =")
+
+  expect(cleanup).toBeGreaterThan(-1)
+  expect(acceptance).toBeGreaterThan(cleanup)
+})
+
+test("portable smoke polls descendant egress through shutdown", async () => {
+  const script = await Bun.file(scriptPath).text()
+
+  for (const token of [
+    "Observe-ProcessTreeConnections",
+    "Add-ObservedConnections",
+    "$observedRemoteAddresses",
+    "Start-Sleep -Milliseconds 250",
+    "Get-NetTCPConnection -State Established -ErrorAction Stop",
+    "Get-ProcessTreeIds",
+    "Stop-ProcessTree",
+  ]) {
+    expect(script).toContain(token)
+  }
+
+  expect(script).not.toContain("Assert-AllowedConnections")
+})
+
 test("desktop package exposes the portable smoke command", async () => {
   const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json()
 

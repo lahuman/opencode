@@ -91,9 +91,18 @@ function Get-ProcessTreeIds {
 function Stop-ProcessTree {
   param([int] $RootProcessId)
 
-  foreach ($processID in @(Get-ProcessTreeIds -RootProcessId $RootProcessId | Sort-Object -Descending)) {
-    Stop-Process -Id $processID -Force -ErrorAction SilentlyContinue
+  $processIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId | Sort-Object -Descending)
+  foreach ($processID in $processIDs) {
+    try {
+      Stop-Process -Id $processID -Force -ErrorAction Stop
+    } catch {
+      if (Get-Process -Id $processID -ErrorAction SilentlyContinue) { throw }
+    }
   }
+  if (@(Get-Process -Id $processIDs -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw "Portable process tree did not stop"
+  }
+  return $processIDs
 }
 
 function Test-AllowedRemoteAddress {
@@ -109,21 +118,33 @@ function Test-AllowedRemoteAddress {
   return $AllowedAddresses -contains $address.ToString()
 }
 
-function Assert-AllowedConnections {
+function Add-ObservedConnections {
+  param(
+    [int[]] $ProcessIDs,
+    [string[]] $AllowedAddresses,
+    [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses
+  )
+
+  if ($ProcessIDs.Count -eq 0) { return }
+  foreach ($connection in @(Get-NetTCPConnection -State Established -ErrorAction Stop)) {
+    if ($ProcessIDs -notcontains [int]$connection.OwningProcess) { continue }
+    [void]$ObservedRemoteAddresses.Add($connection.RemoteAddress)
+    if (-not (Test-AllowedRemoteAddress -RemoteAddress $connection.RemoteAddress -AllowedAddresses $AllowedAddresses)) {
+      throw "Portable process tree established an unexpected TCP connection"
+    }
+  }
+}
+
+function Observe-ProcessTreeConnections {
   param(
     [int] $RootProcessId,
-    [string[]] $AllowedAddresses
+    [string[]] $AllowedAddresses,
+    [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses
   )
 
   $processIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId)
-  $unexpected = @(
-    Get-NetTCPConnection -State Established |
-      Where-Object { $processIDs -contains [int]$_.OwningProcess } |
-      Where-Object { -not (Test-AllowedRemoteAddress -RemoteAddress $_.RemoteAddress -AllowedAddresses $AllowedAddresses) }
-  )
-  if ($unexpected.Count -gt 0) {
-    throw "Portable process tree established an unexpected TCP connection"
-  }
+  Add-ObservedConnections -ProcessIDs $processIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $ObservedRemoteAddresses
+  return $processIDs
 }
 
 function Expand-PortableArchive {
@@ -149,15 +170,26 @@ function Test-PortableLaunch {
     [string[]] $AllowedAddresses
   )
 
+  $observedRemoteAddresses = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
   $process = $null
   try {
     $process = Start-Process -FilePath $Application.Executable -WorkingDirectory $Application.Directory -PassThru
-    Start-Sleep -Seconds 10
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline) {
+      $process.Refresh()
+      if ($process.HasExited) { throw "Portable executable exited during startup" }
+      [void](Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
+      Start-Sleep -Milliseconds 250
+    }
     $process.Refresh()
     if ($process.HasExited) { throw "Portable executable exited during startup" }
-    Assert-AllowedConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses
   } finally {
-    if ($null -ne $process) { Stop-ProcessTree -RootProcessId $process.Id }
+    if ($null -ne $process) {
+      $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
+      $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)
+      $finalProcessIDs = @($shutdownProcessIDs + $stoppedProcessIDs | Select-Object -Unique)
+      Add-ObservedConnections -ProcessIDs $finalProcessIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
+    }
   }
 }
 
@@ -172,10 +204,10 @@ if ($metadata.authenticode -ne "NotSigned") { throw "Release metadata signature 
 if ($null -eq $metadata.target -or $metadata.target.os -ne "win32" -or $metadata.target.arch -ne "x64") {
   throw "Release metadata target mismatch"
 }
-if ($null -eq $metadata.windowsAcceptance -or $metadata.windowsAcceptance -is [string]) {
+if ($null -eq $metadata.windowsAcceptance -or -not ($metadata.windowsAcceptance -is [System.Array])) {
   throw "Release metadata Windows acceptance is invalid"
 }
-$existingAcceptance = @($metadata.windowsAcceptance)
+$existingAcceptance = [object[]]$metadata.windowsAcceptance
 Assert-WindowsAcceptanceRecords -Records $existingAcceptance
 
 $allowedAddresses = Get-AllowedAddresses -TargetHost $AllowedHost
@@ -183,7 +215,6 @@ $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-sm
 $appData = Join-Path $env:LOCALAPPDATA "com.company.opencode.pilot"
 $projectSentinel = Join-Path $SentinelProject "keep.txt"
 $appDataSentinel = Join-Path $appData "portable-smoke-sentinel.txt"
-$metadataTemporary = $null
 
 try {
   New-Item -ItemType Directory -Path $SentinelProject -Force | Out-Null
@@ -222,8 +253,15 @@ try {
     result = "pass"
   }
   Assert-WindowsAcceptanceRecords -Records @($record)
-  $metadata.windowsAcceptance = @($existingAcceptance) + $record
-  $metadataTemporary = "$ReleaseMetadata.$([Guid]::NewGuid().ToString('N')).tmp"
+} finally {
+  if (Test-Path -LiteralPath $extractRoot) {
+    Remove-Item -LiteralPath $extractRoot -Recurse -Force
+  }
+}
+
+$metadata.windowsAcceptance = @($existingAcceptance) + $record
+$metadataTemporary = "$ReleaseMetadata.$([Guid]::NewGuid().ToString('N')).tmp"
+try {
   [System.IO.File]::WriteAllText(
     $metadataTemporary,
     (($metadata | ConvertTo-Json -Depth 8) + [Environment]::NewLine),
@@ -234,8 +272,5 @@ try {
 } finally {
   if ($null -ne $metadataTemporary -and (Test-Path -LiteralPath $metadataTemporary)) {
     Remove-Item -LiteralPath $metadataTemporary -Force
-  }
-  if (Test-Path -LiteralPath $extractRoot) {
-    Remove-Item -LiteralPath $extractRoot -Recurse -Force
   }
 }
