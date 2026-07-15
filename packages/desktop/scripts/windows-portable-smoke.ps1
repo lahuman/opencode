@@ -111,6 +111,19 @@ function Assert-EnterpriseReleaseMetadata {
   Assert-WindowsAcceptanceRecords -Records ([object[]]$Metadata.windowsAcceptance)
 }
 
+function Read-EnterpriseReleaseMetadata {
+  param([string] $Path)
+
+  $releaseJson = (Get-Content -Raw -LiteralPath $Path).Trim()
+  $releaseJson = $releaseJson.TrimStart([char[]]@([char]0xFEFF)).Trim()
+  if ($releaseJson.Length -lt 2 -or $releaseJson[0] -ne "{" -or $releaseJson[$releaseJson.Length - 1] -ne "}") {
+    throw "Release metadata must be a JSON object"
+  }
+  $metadata = $releaseJson | ConvertFrom-Json
+  if ($metadata -isnot [PSCustomObject]) { throw "Release metadata must be a JSON object" }
+  return $metadata
+}
+
 function Get-ProcessTreeIds {
   param([int] $RootProcessId)
 
@@ -132,15 +145,36 @@ function Get-ProcessTreeIds {
   return @($ids)
 }
 
+function Add-KnownProcessIDs {
+  param(
+    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs,
+    [int[]] $ProcessIDs
+  )
+
+  foreach ($processID in $ProcessIDs) {
+    [void]$KnownProcessIDs.Add($processID)
+  }
+}
+
 function Stop-ProcessTree {
-  param([int] $RootProcessId)
+  param(
+    [int] $RootProcessId,
+    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs
+  )
 
   $processIDs = @($RootProcessId)
+  [void]$KnownProcessIDs.Add($RootProcessId)
+  foreach ($knownProcessID in $KnownProcessIDs) {
+    $processIDs += $knownProcessID
+  }
   try {
-    $discoveredProcessIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId | Sort-Object -Descending)
-    $processIDs = @($processIDs + $discoveredProcessIDs | Select-Object -Unique)
+    foreach ($processID in @(Get-ProcessTreeIds -RootProcessId $RootProcessId)) {
+      $processIDs += $processID
+      [void]$KnownProcessIDs.Add($processID)
+    }
   } catch {
   }
+  $processIDs = @($processIDs | Select-Object -Unique)
   $stopFailures = @{}
   $descendantProcessIDs = @($processIDs | Where-Object { $_ -ne $RootProcessId } | Sort-Object -Descending)
   foreach ($processID in $descendantProcessIDs) {
@@ -204,10 +238,12 @@ function Observe-ProcessTreeConnections {
   param(
     [int] $RootProcessId,
     [string[]] $AllowedAddresses,
-    [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses
+    [System.Collections.Generic.HashSet[string]] $ObservedRemoteAddresses,
+    [System.Collections.Generic.HashSet[int]] $KnownProcessIDs
   )
 
   $processIDs = @(Get-ProcessTreeIds -RootProcessId $RootProcessId)
+  Add-KnownProcessIDs -KnownProcessIDs $KnownProcessIDs -ProcessIDs $processIDs
   Add-ObservedConnections -ProcessIDs $processIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $ObservedRemoteAddresses
   return $processIDs
 }
@@ -236,14 +272,16 @@ function Test-PortableLaunch {
   )
 
   $observedRemoteAddresses = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()
   $process = $null
   try {
     $process = Start-Process -FilePath $Application.Executable -WorkingDirectory $Application.Directory -PassThru
+    [void]$knownProcessIDs.Add([int]$process.Id)
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
       $process.Refresh()
       if ($process.HasExited) { throw "Portable executable exited during startup" }
-      [void](Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
+      [void](Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIDs $knownProcessIDs)
       Start-Sleep -Milliseconds 250
     }
     $process.Refresh()
@@ -254,17 +292,21 @@ function Test-PortableLaunch {
       $shutdownProcessIDs = @()
       $stoppedProcessIDs = @()
       try {
-        $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
+        $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses -KnownProcessIDs $knownProcessIDs)
       } catch {
         $cleanupFailure = $_
       }
       try {
-        $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)
+        $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs)
       } catch {
         if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
       }
       try {
         $finalProcessIDs = @($process.Id + $shutdownProcessIDs + $stoppedProcessIDs | Select-Object -Unique)
+        foreach ($knownProcessID in $knownProcessIDs) {
+          $finalProcessIDs += $knownProcessID
+        }
+        $finalProcessIDs = @($finalProcessIDs | Select-Object -Unique)
         Add-ObservedConnections -ProcessIDs $finalProcessIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
       } catch {
         if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
@@ -278,7 +320,7 @@ $expectedHash = ((Get-Content -Raw $Checksum).Trim() -split "\s+")[0].ToUpperInv
 $actualHash = (Get-FileHash -Algorithm SHA256 $Archive).Hash.ToUpperInvariant()
 if ($actualHash -ne $expectedHash) { throw "Portable archive checksum mismatch" }
 
-$metadata = Get-Content -Raw $ReleaseMetadata | ConvertFrom-Json
+$metadata = Read-EnterpriseReleaseMetadata -Path $ReleaseMetadata
 Assert-EnterpriseReleaseMetadata -Metadata $metadata
 if ($metadata.sha256.ToUpperInvariant() -ne $actualHash) { throw "Release metadata checksum mismatch" }
 if ($metadata.artifact -ne [System.IO.Path]::GetFileName($Archive)) { throw "Release metadata artifact mismatch" }

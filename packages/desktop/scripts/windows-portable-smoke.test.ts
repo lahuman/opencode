@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const scriptPath = new URL("./windows-portable-smoke.ps1", import.meta.url)
@@ -104,7 +107,9 @@ test("portable smoke continues cleanup after final observation failures", async 
   const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
 
   expect(launch).toContain("$cleanupFailure = $null")
-  expect(launch).toContain("$stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)")
+  expect(launch).toContain(
+    "$stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs)",
+  )
   expect(launch).toContain("if ($null -ne $cleanupFailure) { throw $cleanupFailure }")
   expect(launch).toContain("$process.Id + $shutdownProcessIDs + $stoppedProcessIDs")
   expect(launch).toMatch(
@@ -161,7 +166,10 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
     script.indexOf("function Assert-EnterpriseReleaseMetadata"),
     script.indexOf("function Get-ProcessTreeIds"),
   )
-  const metadataLoad = script.slice(script.indexOf("$metadata = Get-Content"), script.indexOf("$allowedAddresses"))
+  const metadataLoad = script.slice(
+    script.indexOf("$metadata = Read-EnterpriseReleaseMetadata"),
+    script.indexOf("$allowedAddresses"),
+  )
 
   for (const token of [
     "$Metadata -isnot [PSCustomObject]",
@@ -190,6 +198,55 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
   )
 })
 
+test("portable smoke gates raw release JSON to a single top-level object", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const reader = script.slice(
+    script.indexOf("function Read-EnterpriseReleaseMetadata"),
+    script.indexOf("function Get-ProcessTreeIds"),
+  )
+
+  for (const token of [
+    "Get-Content -Raw -LiteralPath $Path",
+    "TrimStart([char[]]@([char]0xFEFF)).Trim()",
+    '$releaseJson[0] -ne "{"',
+    '$releaseJson[$releaseJson.Length - 1] -ne "}"',
+    "$releaseJson | ConvertFrom-Json",
+    "$metadata -isnot [PSCustomObject]",
+  ]) {
+    expect(reader).toContain(token)
+  }
+
+  expect(reader).not.toContain("-NoEnumerate")
+})
+
+test("portable smoke retains every observed process PID for cleanup", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
+  const observe = script.slice(
+    script.indexOf("function Observe-ProcessTreeConnections"),
+    script.indexOf("function Expand-PortableArchive"),
+  )
+  const stop = script.slice(
+    script.indexOf("function Stop-ProcessTree"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+
+  expect(launch).toContain("$knownProcessIDs = [System.Collections.Generic.HashSet[int]]::new()")
+  expect(launch).toContain("[void]$knownProcessIDs.Add([int]$process.Id)")
+  expect(launch).toContain("Observe-ProcessTreeConnections -RootProcessId $process.Id")
+  expect(launch).toContain("-KnownProcessIDs $knownProcessIDs")
+  expect(launch).toContain("Stop-ProcessTree -RootProcessId $process.Id -KnownProcessIDs $knownProcessIDs")
+  expect(observe).toContain("[System.Collections.Generic.HashSet[int]] $KnownProcessIDs")
+  expect(observe).toContain("Add-KnownProcessIDs -KnownProcessIDs $KnownProcessIDs -ProcessIDs $processIDs")
+  expect(observe).toMatch(/Get-ProcessTreeIds[\s\S]*Add-KnownProcessIDs[\s\S]*Add-ObservedConnections/)
+  expect(stop).toContain("[System.Collections.Generic.HashSet[int]] $KnownProcessIDs")
+  expect(stop).toContain("foreach ($knownProcessID in $KnownProcessIDs)")
+  expect(stop).toContain("[void]$KnownProcessIDs.Add($processID)")
+  expect(stop).toMatch(
+    /foreach \(\$knownProcessID in \$KnownProcessIDs\)[\s\S]*Get-ProcessTreeIds[\s\S]*catch \{[\s\S]*Stop-Process -Id \$RootProcessId -Force -ErrorAction Stop/,
+  )
+})
+
 test("desktop package exposes the portable smoke command", async () => {
   const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json()
 
@@ -212,3 +269,61 @@ test.if(process.platform === "win32")("portable smoke script parses in PowerShel
 
   expect(await process.exited).toBe(0)
 })
+
+test.if(process.platform === "win32")(
+  "PowerShell rejects array and scalar release JSON before PS5 enumeration",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const reader = script.slice(
+      script.indexOf("function Read-EnterpriseReleaseMetadata"),
+      script.indexOf("function Get-ProcessTreeIds"),
+    )
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+    const harness = join(temp, "read-release.ps1")
+    const metadata = {
+      schemaVersion: 1,
+      appVersion: "1.0.0",
+      gitCommit: "commit",
+      artifact: "company-opencode-pilot-win-x64.zip",
+      sha256: "hash",
+      defaultsVersion: "defaults",
+      guideVersion: "guide",
+      modelID: "model",
+      target: { os: "win32", arch: "x64" },
+      builtAt: "2026-07-15T00:00:00.000Z",
+      authenticode: "NotSigned",
+      windowsAcceptance: [],
+    }
+
+    try {
+      await Bun.write(harness, `${reader}\n$null = Read-EnterpriseReleaseMetadata -Path $args[0]`)
+      const valid = join(temp, "valid.json")
+      await Bun.write(valid, `\ufeff\n${JSON.stringify(metadata)}\n`)
+      const validProcess = Bun.spawn(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, valid],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
+      expect(await validProcess.exited).toBe(0)
+
+      for (const [name, fixture] of Object.entries({
+        "one-element-array": JSON.stringify([metadata]),
+        scalar: "1",
+        null: "null",
+        string: JSON.stringify(JSON.stringify(metadata)),
+      })) {
+        const file = join(temp, `${name}.json`)
+        await Bun.write(file, `\ufeff \n${fixture}\n`)
+        const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, file], {
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        expect(await process.exited).not.toBe(0)
+      }
+    } finally {
+      await rm(temp, { force: true, recursive: true })
+    }
+  },
+)
