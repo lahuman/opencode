@@ -136,6 +136,30 @@ test("accepts an archive with the required portable entries", async () => {
   await expect(verifyEnterpriseArchive(archive, root)).resolves.toEqual(required)
 })
 
+test("rejects an EOCD count that hides a valid central directory record", async () => {
+  const archive = await archiveFixture([...required, "extra.txt"])
+  await rewriteEndOfCentralDirectory(archive, (view, offset) => {
+    view.setUint16(offset + 8, required.length, true)
+    view.setUint16(offset + 10, required.length, true)
+  })
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects trailing bytes in the declared central directory span", async () => {
+  const archive = await archiveFixture(required)
+  await insertCentralDirectoryByte(archive)
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
+test("rejects a central directory record that crosses its declared span", async () => {
+  const archive = await archiveFixture(required)
+  await extendFirstCentralRecordExtraField(archive)
+
+  await expect(verifyEnterpriseArchive(archive)).rejects.toThrow("Portable package archive contains an unsafe entry")
+})
+
 test.each([
   "resources\\app.asar",
   "resources/../Company OpenCode Pilot.exe",
@@ -420,6 +444,43 @@ async function rewriteArchiveEntryName(archive: string, source: string, target: 
     if (sourceBytes.every((byte, offset) => bytes[index + offset] === byte)) bytes.set(targetBytes, index)
   }
   await Bun.write(archive, bytes)
+}
+
+async function rewriteEndOfCentralDirectory(archive: string, rewrite: (view: DataView, offset: number) => void) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  rewrite(new DataView(bytes.buffer), endOfCentralDirectoryOffset(bytes))
+  await Bun.write(archive, bytes)
+}
+
+async function insertCentralDirectoryByte(archive: string) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const offset = endOfCentralDirectoryOffset(bytes)
+  const view = new DataView(bytes.buffer)
+  const result = new Uint8Array(bytes.byteLength + 1)
+  result.set(bytes.subarray(0, offset))
+  result[offset] = 0
+  result.set(bytes.subarray(offset), offset + 1)
+  new DataView(result.buffer).setUint32(offset + 13, view.getUint32(offset + 12, true) + 1, true)
+  await Bun.write(archive, result)
+}
+
+async function extendFirstCentralRecordExtraField(archive: string) {
+  const bytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const view = new DataView(bytes.buffer)
+  view.setUint16(view.getUint32(endOfCentralDirectoryOffset(bytes) + 16, true) + 30, 0xffff, true)
+  await Bun.write(archive, bytes)
+}
+
+function endOfCentralDirectoryOffset(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer)
+  for (let offset = bytes.byteLength - 22; offset >= Math.max(0, bytes.byteLength - 22 - 0xffff); offset--) {
+    if (
+      view.getUint32(offset, true) === 0x06054b50 &&
+      offset + 22 + view.getUint16(offset + 20, true) === bytes.byteLength
+    )
+      return offset
+  }
+  throw new Error("Archive does not contain an end of central directory record")
 }
 
 function unicodePathExtraField(rawName: string, filename: string) {

@@ -22,6 +22,16 @@ const requiredEntries = [
 
 type RequiredEntry = (typeof requiredEntries)[number]
 type EnterprisePackageFiles = Record<RequiredEntry, Uint8Array>
+type CentralDirectoryEntry = {
+  diskNumberStart: number
+  externalFileAttributes: number
+  filenameUTF8: boolean
+  offset: number
+  rawComment: Uint8Array
+  rawExtraField: Uint8Array
+  rawFilename: Uint8Array
+  versionMadeBy: number
+}
 
 export async function verifyEnterprisePackage(root: string): Promise<EnterprisePackageSummary> {
   validateEnterprisePackageFiles(await readEnterprisePackage(root))
@@ -36,9 +46,18 @@ export async function verifyEnterprisePackage(root: string): Promise<EnterpriseP
 }
 
 export async function verifyEnterpriseArchive(archive: string, root?: string): Promise<string[]> {
-  const reader = new ZipReader(new Uint8ArrayReader(new Uint8Array(await Bun.file(archive).arrayBuffer())))
+  const archiveBytes = new Uint8Array(await Bun.file(archive).arrayBuffer())
+  const centralDirectory = readCentralDirectory(archiveBytes)
+  if (!centralDirectory) throw new Error("Portable package archive contains an unsafe entry")
+  const reader = new ZipReader(new Uint8ArrayReader(archiveBytes))
   const entries = await reader.getEntries()
   await reader.close()
+  if (
+    entries.length !== centralDirectory.length ||
+    !entries.every((entry, index) => matchesCentralDirectoryEntry(entry, centralDirectory[index]))
+  ) {
+    throw new Error("Portable package archive contains an unsafe entry")
+  }
   const rawNames = entries.map(readRawCentralName)
   if (rawNames.some((name) => name === undefined)) {
     throw new Error("Portable package archive contains an unsafe entry")
@@ -180,6 +199,80 @@ function getRequiredFile<T>(files: Map<RequiredEntry, T>, entry: RequiredEntry) 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function readCentralDirectory(bytes: Uint8Array): CentralDirectoryEntry[] | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const endOfCentralDirectory = endOfCentralDirectoryOffset(view, bytes.byteLength)
+  if (endOfCentralDirectory === undefined) return undefined
+  const diskNumber = view.getUint16(endOfCentralDirectory + 4, true)
+  const centralDirectoryDisk = view.getUint16(endOfCentralDirectory + 6, true)
+  const entriesOnDisk = view.getUint16(endOfCentralDirectory + 8, true)
+  const entries = view.getUint16(endOfCentralDirectory + 10, true)
+  const size = view.getUint32(endOfCentralDirectory + 12, true)
+  const offset = view.getUint32(endOfCentralDirectory + 16, true)
+  if (
+    diskNumber !== 0 ||
+    centralDirectoryDisk !== 0 ||
+    entriesOnDisk !== entries ||
+    entries === 0xffff ||
+    size === 0xffffffff ||
+    offset === 0xffffffff ||
+    offset + size !== endOfCentralDirectory
+  ) {
+    return undefined
+  }
+
+  const end = offset + size
+  const directory: CentralDirectoryEntry[] = []
+  for (let cursor = offset; cursor < end; ) {
+    if (end - cursor < 46 || view.getUint32(cursor, true) !== 0x02014b50) return undefined
+    const filenameLength = view.getUint16(cursor + 28, true)
+    const extraFieldLength = view.getUint16(cursor + 30, true)
+    const commentLength = view.getUint16(cursor + 32, true)
+    const recordEnd = cursor + 46 + filenameLength + extraFieldLength + commentLength
+    if (recordEnd > end || view.getUint16(cursor + 34, true) !== 0) return undefined
+    const filenameOffset = cursor + 46
+    const extraFieldOffset = filenameOffset + filenameLength
+    const commentOffset = extraFieldOffset + extraFieldLength
+    directory.push({
+      diskNumberStart: 0,
+      externalFileAttributes: view.getUint32(cursor + 38, true),
+      filenameUTF8: Boolean(view.getUint16(cursor + 8, true) & 0x800),
+      offset: view.getUint32(cursor + 42, true),
+      rawComment: bytes.slice(commentOffset, recordEnd),
+      rawExtraField: bytes.slice(extraFieldOffset, commentOffset),
+      rawFilename: bytes.slice(filenameOffset, extraFieldOffset),
+      versionMadeBy: view.getUint16(cursor + 4, true),
+    })
+    cursor = recordEnd
+  }
+  return directory.length === entries ? directory : undefined
+}
+
+function endOfCentralDirectoryOffset(view: DataView, length: number) {
+  for (let offset = length - 22; offset >= Math.max(0, length - 22 - 0xffff); offset--) {
+    if (view.getUint32(offset, true) === 0x06054b50 && offset + 22 + view.getUint16(offset + 20, true) === length)
+      return offset
+  }
+  return undefined
+}
+
+function matchesCentralDirectoryEntry(entry: Entry, central: CentralDirectoryEntry) {
+  return (
+    entry.diskNumberStart === central.diskNumberStart &&
+    entry.externalFileAttributes === central.externalFileAttributes &&
+    entry.filenameUTF8 === central.filenameUTF8 &&
+    entry.offset === central.offset &&
+    entry.versionMadeBy === central.versionMadeBy &&
+    bytesEqual(entry.rawComment, central.rawComment) &&
+    bytesEqual(entry.rawExtraField, central.rawExtraField) &&
+    bytesEqual(entry.rawFilename, central.rawFilename)
+  )
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array) {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
 }
 
 function readRawCentralName(entry: Entry) {
