@@ -197,6 +197,7 @@ test("stages an opaque restricted certificate and preserves enterprise installer
       winTarget: ["nsis"],
       ordinarySignFunction: false,
       standardCSC: true,
+      forceCodeSigning: true,
       effectiveCscPinned: true,
       nsis: { oneClick: true, perMachine: false },
       certificateStaged: true,
@@ -237,6 +238,9 @@ test("rejects merged signing source and identity overrides without diagnostic di
       { cscKeyPassword: overrideMarker },
       { win: { cscLink: overrideMarker } },
       { win: { cscKeyPassword: overrideMarker } },
+      { win: { signtoolOptions: {} } },
+      { win: { signtoolOptions: { signingHashAlgorithms: [] } } },
+      { win: { signtoolOptions: { timeStampServer: overrideMarker } } },
       { win: { signtoolOptions: { certificateFile: overrideMarker } } },
       { win: { signtoolOptions: { certificatePassword: overrideMarker } } },
       { win: { signtoolOptions: { certificateSubjectName: overrideMarker } } },
@@ -254,6 +258,8 @@ test("rejects merged signing source and identity overrides without diagnostic di
       },
       { win: { signExecutable: false } },
       { win: { signAndEditExecutable: false } },
+      { win: { signExts: ["!.exe"] } },
+      { win: { forceCodeSigning: false } },
     ]
 
     for (const override of overrides) {
@@ -339,48 +345,53 @@ test("removes the opaque certificate through the packager failure disposer befor
   })
 })
 
-test("removes the opaque certificate before exiting on SIGTERM", async () => {
-  await withCertificate(async (certificate) => {
-    const directory = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "opencode-builder-signal-")))
-    const resultPath = path.join(directory, "staged-path.txt")
-    const child = Bun.spawn([process.execPath, "test/electron-builder-config-entrypoint.ts"], {
-      cwd: import.meta.dir,
-      env: builderEnvironment({
-        ...enterprise,
-        CSC_LINK: certificate,
-        CSC_KEY_PASSWORD: passwordMarker,
-        OPENCODE_TEST_BUILDER_SCENARIO: "signal",
-        OPENCODE_TEST_RESULT_PATH: resultPath,
-      }),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+for (const [signal, expectedExitCode] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+] as const) {
+  test(`removes the opaque certificate before exiting on ${signal}`, async () => {
+    await withCertificate(async (certificate) => {
+      const directory = await realpath(await mkdtemp(path.join(await realpath(tmpdir()), "opencode-builder-signal-")))
+      const resultPath = path.join(directory, "staged-path.txt")
+      const child = Bun.spawn([process.execPath, "test/electron-builder-config-entrypoint.ts"], {
+        cwd: import.meta.dir,
+        env: builderEnvironment({
+          ...enterprise,
+          CSC_LINK: certificate,
+          CSC_KEY_PASSWORD: passwordMarker,
+          OPENCODE_TEST_BUILDER_SCENARIO: "signal",
+          OPENCODE_TEST_RESULT_PATH: resultPath,
+        }),
+        stdout: "pipe",
+        stderr: "pipe",
+      })
 
-    try {
-      await waitForFile(resultPath)
-      const stagedPath = await Bun.file(resultPath).text()
-      child.kill("SIGTERM")
-      const exitCode = await withDeadline(child.exited, 5_000)
-      const result = {
-        stdout: await new Response(child.stdout).text(),
-        stderr: await new Response(child.stderr).text(),
+      try {
+        await waitForFile(resultPath)
+        const stagedPath = await Bun.file(resultPath).text()
+        child.kill(signal)
+        const exitCode = await withDeadline(child.exited, 5_000)
+        const result = {
+          stdout: await new Response(child.stdout).text(),
+          stderr: await new Response(child.stderr).text(),
+        }
+
+        expect(exitCode).toBe(expectedExitCode)
+        expect(path.basename(stagedPath)).toBe("certificate.pfx")
+        expect(await Bun.file(stagedPath).exists()).toBeFalse()
+        expectDiagnosticsSafe(result, [
+          path.basename(path.dirname(certificate)),
+          path.basename(certificate),
+          passwordMarker,
+        ])
+      } finally {
+        child.kill("SIGKILL")
+        await child.exited
+        await rm(directory, { recursive: true, force: true })
       }
-
-      expect(exitCode).toBe(143)
-      expect(path.basename(stagedPath)).toBe("certificate.pfx")
-      expect(await Bun.file(stagedPath).exists()).toBeFalse()
-      expectDiagnosticsSafe(result, [
-        path.basename(path.dirname(certificate)),
-        path.basename(certificate),
-        passwordMarker,
-      ])
-    } finally {
-      child.kill("SIGKILL")
-      await child.exited
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
-})
+}
 
 test("isolated builder scenarios leave the parent environment untouched", () => {
   const keys = ["OPENCODE_CHANNEL", "OPENCODE_ENTERPRISE", "CSC_LINK", "CSC_KEY_PASSWORD"] as const

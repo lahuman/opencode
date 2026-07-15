@@ -1,3 +1,5 @@
+import { isIP } from "node:net"
+
 type Env = Record<string, string | undefined>
 
 export function validateEnterpriseBuild(env: Env) {
@@ -8,11 +10,15 @@ export function validateEnterpriseBuild(env: Env) {
   if (/[?#]/.test(baseURL)) {
     throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment")
   }
-  const base = parseHTTPURL(
+  const rawBase = parseRawHTTPURL(
     baseURL,
     "OPENCODE_ENTERPRISE_BASE_URL",
     "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL",
   )
+  if (hasDotPathSegment(rawBase.remainder)) {
+    throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain dot path segments")
+  }
+  const base = createHTTPURL(baseURL, "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
   const allowedOrigins = Array.from(
     new Set(
       requireValue(env, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
@@ -61,23 +67,70 @@ function requireValue(env: Env, key: string) {
   return value
 }
 
-function parseHTTPURL(value: string, key: string, invalid: string) {
-  if (!URL.canParse(value)) throw new Error(invalid)
-
-  const url = new URL(value)
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(invalid)
-  if (url.username || url.password) throw new Error(`${key} must not contain credentials`)
-  return url
-}
-
 function parseAllowedOrigin(value: string) {
-  const url = parseHTTPURL(
-    value,
-    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
-    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs",
-  )
-  if (!/^https?:\/\/[^\s/?#\\]+\/?$/i.test(value)) {
+  const invalid = "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs"
+  const raw = parseRawHTTPURL(value, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS", invalid)
+  if (raw.remainder !== "" && raw.remainder !== "/") {
     throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins")
   }
+  return createHTTPURL(value, invalid)
+}
+
+function parseRawHTTPURL(value: string, key: string, invalid: string) {
+  const scheme = /^(?:https?):\/\//i.exec(value)
+  if (!scheme) throw new Error(invalid)
+
+  const remainder = value.slice(scheme[0].length)
+  const delimiter = remainder.search(/[/?#]/)
+  const authority = delimiter === -1 ? remainder : remainder.slice(0, delimiter)
+  const suffix = delimiter === -1 ? "" : remainder.slice(delimiter)
+  if (authority.includes("@")) throw new Error(`${key} must not contain credentials`)
+  if (!authority || /[%\\\s]/.test(authority) || !isValidAuthority(authority)) throw new Error(invalid)
+  return { remainder: suffix }
+}
+
+function isValidAuthority(authority: string) {
+  if (authority.startsWith("[")) {
+    const closing = authority.indexOf("]")
+    if (closing <= 1 || authority.indexOf("[", 1) !== -1 || authority.indexOf("]", closing + 1) !== -1) {
+      return false
+    }
+    const suffix = authority.slice(closing + 1)
+    if (suffix && !isValidPortSuffix(suffix)) return false
+    return isIP(authority.slice(1, closing)) === 6
+  }
+  if (authority.includes("[") || authority.includes("]")) return false
+
+  const parts = authority.split(":")
+  if (parts.length > 2 || !isValidHost(parts[0])) return false
+  if (parts.length === 2 && !isValidPort(parts[1])) return false
+  return true
+}
+
+function isValidHost(host: string) {
+  if (!host) return false
+  if (isIP(host) === 4) return true
+  if (/^[\d.]+$/.test(host)) return false
+  return host
+    .split(".")
+    .every((label) => label.length > 0 && label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))
+}
+
+function isValidPortSuffix(value: string) {
+  return value.startsWith(":") && isValidPort(value.slice(1))
+}
+
+function isValidPort(value: string) {
+  return /^(?:0|[1-9]\d*)$/.test(value) && Number(value) <= 65535
+}
+
+function hasDotPathSegment(remainder: string) {
+  return remainder.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))
+}
+
+function createHTTPURL(value: string, invalid: string) {
+  if (!URL.canParse(value)) throw new Error(invalid)
+  const url = new URL(value)
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(invalid)
   return url
 }

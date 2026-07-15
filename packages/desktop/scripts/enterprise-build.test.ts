@@ -18,7 +18,7 @@ test("returns only normalized non-secret enterprise build metadata", () => {
   expect(
     validateEnterpriseBuild({
       ...valid,
-      OPENCODE_ENTERPRISE_BASE_URL: "  HTTPS://LLM.CORP.EXAMPLE:443/v1/../v2  ",
+      OPENCODE_ENTERPRISE_BASE_URL: "  HTTPS://LLM.CORP.EXAMPLE:443/v2  ",
       OPENCODE_ENTERPRISE_MODEL_ID: "  company-code  ",
       OPENCODE_ENTERPRISE_MODEL_NAME: "  Company Code  ",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "  pilot-1  ",
@@ -113,7 +113,7 @@ test("rejects malformed base URLs without exposing parser input or native errors
     }),
   )
 
-  expect(message).toBe("OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
+  expect(message).toBe("OPENCODE_ENTERPRISE_BASE_URL must not contain credentials")
   expect(message).not.toContain("parser-marker")
   expect(message).not.toContain("Invalid URL")
 })
@@ -163,7 +163,7 @@ test("rejects non-HTTP, credentialed, and malformed allowed origins with generic
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example, https://name:parser-marker@[/",
     }),
   )
-  expect(message).toBe("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs")
+  expect(message).toBe("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must not contain credentials")
   expect(message).not.toContain("parser-marker")
   expect(message).not.toContain("Invalid URL")
 })
@@ -189,6 +189,101 @@ test("rejects allowed-origin paths, queries, and fragments with fixed input-free
     expect(message).not.toContain("path-secret-marker")
     expect(message).not.toContain("query-secret-marker")
     expect(message).not.toContain("fragment-secret-marker")
+  }
+})
+
+test("rejects exact deceptive matching-origin forms before URL normalization", () => {
+  const cases = [
+    ["https://:@llm.corp.example", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must not contain credentials"],
+    ["https://%6c%6cm.corp.example", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs"],
+    ["https://llm.corp.example:", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only absolute HTTP(S) URLs"],
+    ["https://llm.corp.example?", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins"],
+    ["https://llm.corp.example#", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins"],
+    ["https://llm.corp.example/segment/..", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins"],
+    ["https://llm.corp.example/%2e", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must contain only HTTP(S) origins"],
+  ] as const
+
+  for (const [origin, expected] of cases) {
+    const message = errorMessage(() =>
+      validateEnterpriseBuild({
+        ...valid,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: origin,
+      }),
+    )
+
+    expect(message).toBe(expected)
+    expect(message).not.toContain(origin)
+  }
+})
+
+test("rejects deceptive base authorities and raw dot paths before normalization", () => {
+  const cases = [
+    ["https://:@llm.corp.example/v1", "OPENCODE_ENTERPRISE_BASE_URL must not contain credentials"],
+    ["https://%6c%6cm.corp.example/v1", "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL"],
+    ["https://llm.corp.example:/v1", "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL"],
+    ["https://llm.corp.example/v1?", "OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment"],
+    ["https://llm.corp.example/v1#", "OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment"],
+    ["https://llm.corp.example/segment/..", "OPENCODE_ENTERPRISE_BASE_URL must not contain dot path segments"],
+    ["https://llm.corp.example/%2e", "OPENCODE_ENTERPRISE_BASE_URL must not contain dot path segments"],
+  ] as const
+
+  for (const [baseURL, expected] of cases) {
+    const message = errorMessage(() =>
+      validateEnterpriseBuild({
+        ...valid,
+        OPENCODE_ENTERPRISE_BASE_URL: baseURL,
+      }),
+    )
+
+    expect(message).toBe(expected)
+    expect(message).not.toContain(baseURL)
+  }
+})
+
+test("rejects malformed raw authorities without parser diagnostics", () => {
+  for (const baseURL of [
+    "https://llm .corp.example/v1",
+    "https://llm.corp.example\\deceptive/v1",
+    "https://[2001:db8::1/v1",
+    "https://llm.corp.example:000443/v1",
+  ]) {
+    const message = errorMessage(() => validateEnterpriseBuild({ ...valid, OPENCODE_ENTERPRISE_BASE_URL: baseURL }))
+
+    expect(message).toBe("OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
+    expect(message).not.toContain(baseURL)
+    expect(message).not.toContain("Invalid URL")
+  }
+})
+
+test("accepts strict DNS, numeric-port, and bracketed-IPv6 enterprise URLs", () => {
+  for (const [baseURL, origin, normalizedBase, normalizedOrigin] of [
+    [
+      "https://llm.corp.example/v1",
+      "https://llm.corp.example/",
+      "https://llm.corp.example/v1",
+      "https://llm.corp.example",
+    ],
+    [
+      "https://llm.corp.example:8443/v1",
+      "https://llm.corp.example:8443",
+      "https://llm.corp.example:8443/v1",
+      "https://llm.corp.example:8443",
+    ],
+    [
+      "https://[2001:db8::1]:8443/v1",
+      "https://[2001:db8::1]:8443/",
+      "https://[2001:db8::1]:8443/v1",
+      "https://[2001:db8::1]:8443",
+    ],
+  ]) {
+    const metadata = validateEnterpriseBuild({
+      ...valid,
+      OPENCODE_ENTERPRISE_BASE_URL: baseURL,
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: origin,
+    })
+
+    expect(metadata.baseURL).toBe(normalizedBase)
+    expect(metadata.allowedOrigins).toEqual([normalizedOrigin])
   }
 })
 

@@ -7,10 +7,19 @@ import type { BeforePackContext, Configuration } from "electron-builder"
 
 type Env = Record<string, string | undefined>
 type RemoveOptions = { recursive: true; force: true }
+type LifecycleEvent = "exit" | "SIGINT" | "SIGTERM"
+type Lifecycle = {
+  on: (event: LifecycleEvent, listener: () => void) => void
+  off: (event: LifecycleEvent, listener: () => void) => void
+  exit: (code: number) => never
+}
 type StageDependencies = {
   remove?: (target: string, options: RemoveOptions) => Promise<void>
   removeSync?: (target: string, options: RemoveOptions) => void
   wait?: (milliseconds: number) => Promise<void>
+  waitSync?: (milliseconds: number) => void
+  writeCertificate?: (target: string, contents: Uint8Array) => Promise<void>
+  lifecycle?: Lifecycle
 }
 
 const invalidCertificate = "CSC_LINK must reference an existing readable local PFX certificate file"
@@ -19,6 +28,12 @@ const cleanupFailed = "Enterprise certificate cleanup failed"
 const stageActive = "Enterprise certificate staging is already active"
 const invalidSigningConfiguration = "Enterprise signing configuration is invalid"
 const removeOptions = { recursive: true, force: true } as const
+const syncWaitState = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
+const processLifecycle: Lifecycle = {
+  on: (event, listener) => process.on(event, listener),
+  off: (event, listener) => process.off(event, listener),
+  exit: (code) => process.exit(code),
+}
 
 let activeStage: symbol | undefined
 
@@ -40,36 +55,36 @@ export async function stageEnterpriseCertificate(env: Env, dependencies: StageDe
     throw new Error(stagingFailed)
   })
   const certificate = path.join(directory, "certificate.pfx")
-  try {
-    if (process.platform !== "win32") await chmod(directory, 0o700)
-    await writeFile(certificate, contents, { flag: "wx", mode: 0o600 })
-    if (process.platform !== "win32") await chmod(certificate, 0o600)
-  } catch {
-    await rm(directory, removeOptions).catch(() => undefined)
-    releaseStage(token)
-    throw new Error(stagingFailed)
-  }
-
   const password = env.CSC_KEY_PASSWORD
   const remove = dependencies.remove ?? ((target, options) => rm(target, options))
   const removeSyncStage = dependencies.removeSync ?? ((target, options) => rmSync(target, options))
-  const wait = dependencies.wait ?? ((milliseconds) => Bun.sleep(milliseconds))
-  const state: { cleaned: boolean; registered: boolean; cleaning?: Promise<void> } = {
+  const wait =
+    dependencies.wait ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const waitSync = dependencies.waitSync ?? ((milliseconds) => Atomics.wait(syncWaitState, 0, 0, milliseconds))
+  const writeCertificate =
+    dependencies.writeCertificate ?? ((target, value) => writeFile(target, value, { flag: "wx", mode: 0o600 }))
+  const lifecycle = dependencies.lifecycle ?? processLifecycle
+  const state: { cleaned: boolean; registered: boolean; restoreSource: boolean; cleaning?: Promise<void> } = {
     cleaned: false,
     registered: false,
+    restoreSource: true,
   }
 
   const finishCleanup = () => {
+    if (state.cleaned) return
     const ownsEnvironment = activeStage === token && env.CSC_LINK === certificate
     if (ownsEnvironment) {
-      delete env.CSC_LINK
-      if (env.CSC_KEY_PASSWORD === password) delete env.CSC_KEY_PASSWORD
+      if (state.restoreSource) env.CSC_LINK = source
+      if (!state.restoreSource) {
+        delete env.CSC_LINK
+        if (env.CSC_KEY_PASSWORD === password) delete env.CSC_KEY_PASSWORD
+      }
     }
     releaseStage(token)
     state.cleaned = true
-    process.off("exit", onExit)
-    process.off("SIGINT", onSigint)
-    process.off("SIGTERM", onSigterm)
+    lifecycle.off("exit", onExit)
+    lifecycle.off("SIGINT", onSigint)
+    lifecycle.off("SIGTERM", onSigterm)
   }
   const cleanup = () => {
     if (state.cleaned) return Promise.resolve()
@@ -86,25 +101,34 @@ export async function stageEnterpriseCertificate(env: Env, dependencies: StageDe
   const onExit = () => {
     if (state.cleaned) return
     try {
-      removeSyncStage(directory, removeOptions)
+      removeWithRetrySync(removeSyncStage, waitSync, directory)
       finishCleanup()
     } catch {
-      // Exit cleanup cannot retry asynchronously, so signal handlers and ownership remain intact.
+      // Ownership and handlers remain active so another exit path can retry cleanup.
     }
   }
   const exitAfterCleanup = (code: number) => {
     void cleanup().then(
-      () => process.exit(code),
-      () => process.exit(1),
+      () => lifecycle.exit(code),
+      () => lifecycle.exit(1),
     )
   }
   const onSigint = () => exitAfterCleanup(130)
   const onSigterm = () => exitAfterCleanup(143)
 
-  process.on("exit", onExit)
-  process.on("SIGINT", onSigint)
-  process.on("SIGTERM", onSigterm)
+  lifecycle.on("exit", onExit)
+  lifecycle.on("SIGINT", onSigint)
+  lifecycle.on("SIGTERM", onSigterm)
   env.CSC_LINK = certificate
+
+  try {
+    if (process.platform !== "win32") await chmod(directory, 0o700)
+    await writeCertificate(certificate, contents)
+    state.restoreSource = false
+  } catch {
+    await cleanup().catch(() => undefined)
+    throw new Error(stagingFailed)
+  }
 
   return {
     cleanup,
@@ -179,6 +203,24 @@ async function removeWithRetry(
   }
 }
 
+function removeWithRetrySync(
+  remove: (target: string, options: RemoveOptions) => void,
+  wait: (milliseconds: number) => void,
+  directory: string,
+  attempt = 1,
+): void {
+  try {
+    remove(directory, removeOptions)
+  } catch (error) {
+    if (!isTransientRemovalError(error) || attempt >= 3) {
+      // oxlint-disable-next-line eslint/preserve-caught-error -- Native cleanup errors can disclose the staged path.
+      throw new Error(cleanupFailed)
+    }
+    wait(100)
+    removeWithRetrySync(remove, wait, directory, attempt + 1)
+  }
+}
+
 function isTransientRemovalError(error: unknown) {
   if (!error || typeof error !== "object" || !("code" in error)) return false
   return error.code === "EPERM" || error.code === "EBUSY"
@@ -192,21 +234,17 @@ function guardEnterpriseSigningConfiguration(context: BeforePackContext, certifi
   const config = context.packager.config
   const win = context.packager.platformSpecificBuildOptions
   if (!isWindowsConfiguration(win)) throw new Error(invalidSigningConfiguration)
-  const signing = win.signtoolOptions
   if (
     config.cscLink !== certificate ||
     config.cscKeyPassword != null ||
     win.cscLink !== certificate ||
     win.cscKeyPassword != null ||
     win.azureSignOptions != null ||
+    win.signtoolOptions != null ||
     win.signExecutable === false ||
     win.signAndEditExecutable === false ||
-    signing?.certificateFile != null ||
-    signing?.certificatePassword != null ||
-    signing?.certificateSubjectName != null ||
-    signing?.certificateSha1 != null ||
-    signing?.additionalCertificateFile != null ||
-    signing?.sign != null
+    win.signExts != null ||
+    win.forceCodeSigning !== true
   ) {
     throw new Error(invalidSigningConfiguration)
   }

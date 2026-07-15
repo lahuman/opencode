@@ -170,6 +170,7 @@ async function getEnterpriseConfig() {
     win: {
       ...base.win,
       cscLink: certificate.cscLink,
+      forceCodeSigning: true,
       target: ["nsis"],
       signtoolOptions: undefined,
     },

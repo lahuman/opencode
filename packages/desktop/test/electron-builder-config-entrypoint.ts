@@ -103,6 +103,7 @@ process.stdout.write(
     winTarget: config.win?.target,
     ordinarySignFunction: typeof config.win?.signtoolOptions?.sign === "function",
     standardCSC: config.win?.signtoolOptions === undefined,
+    forceCodeSigning: config.win?.forceCodeSigning,
     effectiveCscPinned: config.cscLink === stagedLink && config.win?.cscLink === stagedLink,
     nsis: config.nsis,
     extraResources,

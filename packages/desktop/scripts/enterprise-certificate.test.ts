@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, realpath, rm, symlink } from "node:fs/promises"
+import { rmSync } from "node:fs"
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 import { isEnterpriseCertificatePathLocal, stageEnterpriseCertificate } from "./enterprise-certificate"
 
 const invalidCertificate = "CSC_LINK must reference an existing readable local PFX certificate file"
+const stagingFailed = "Enterprise certificate staging failed"
 const cleanupFailed = "Enterprise certificate cleanup failed"
 
 test("rejects Windows UNC, device, rooted, and drive-relative certificate paths", () => {
@@ -87,6 +89,183 @@ test("keeps cleanup retryable and state owned after persistent transient failure
   })
 })
 
+test("retries synchronous transient exit cleanup before releasing ownership", async () => {
+  await withCertificate(async (certificate) => {
+    const env = signingEnv(certificate)
+    const lifecycle = createLifecycle()
+    const state = { attempts: 0 }
+    const staged = await stageEnterpriseCertificate(env, {
+      lifecycle,
+      removeSync(target, options) {
+        state.attempts++
+        if (state.attempts < 3) throw filesystemError("EPERM")
+        rmSync(target, options)
+      },
+      waitSync: () => undefined,
+    })
+
+    try {
+      lifecycle.emit("exit")
+
+      expect(state.attempts).toBe(3)
+      expect(lifecycle.size).toBe(0)
+      expect(env.CSC_LINK).toBeUndefined()
+      expect(env.CSC_KEY_PASSWORD).toBeUndefined()
+      expect(await Bun.file(staged.cscLink).exists()).toBeFalse()
+    } finally {
+      await staged.cleanup().catch(() => undefined)
+    }
+  })
+})
+
+test("keeps synchronous exit cleanup owned and retryable after persistent failures", async () => {
+  await withCertificate(async (certificate) => {
+    const env = signingEnv(certificate)
+    const lifecycle = createLifecycle()
+    const state = { attempts: 0, failing: true }
+    const staged = await stageEnterpriseCertificate(env, {
+      lifecycle,
+      removeSync(target, options) {
+        state.attempts++
+        if (state.failing) throw filesystemError("EBUSY")
+        rmSync(target, options)
+      },
+      waitSync: () => undefined,
+    })
+
+    try {
+      lifecycle.emit("exit")
+      expect(state.attempts).toBe(3)
+      expect(lifecycle.size).toBe(3)
+      expect(env.CSC_LINK).toBe(staged.cscLink)
+      expect(await Bun.file(staged.cscLink).exists()).toBeTrue()
+      expect((await captureStage(signingEnv(certificate))).error).toBe(
+        "Enterprise certificate staging is already active",
+      )
+
+      state.failing = false
+      lifecycle.emit("exit")
+      expect(state.attempts).toBe(4)
+      expect(lifecycle.size).toBe(0)
+      expect(env.CSC_LINK).toBeUndefined()
+      expect(await Bun.file(staged.cscLink).exists()).toBeFalse()
+    } finally {
+      state.failing = false
+      await staged.cleanup().catch(() => undefined)
+    }
+  })
+})
+
+test("cleans a partial staging write with transient removal retries before releasing ownership", async () => {
+  await withCertificate(async (certificate) => {
+    const env = signingEnv(certificate)
+    const lifecycle = createLifecycle()
+    const state = { attempts: 0 }
+    let partial = ""
+    const result = await captureStage(env, {
+      lifecycle,
+      async remove(target, options) {
+        state.attempts++
+        if (state.attempts < 3) throw filesystemError("EPERM")
+        await rm(target, options)
+      },
+      wait: () => Promise.resolve(),
+      async writeCertificate(target, contents) {
+        partial = target
+        expect(lifecycle.size).toBe(3)
+        expect(env.CSC_LINK).toBe(target)
+        await writeFile(target, contents.subarray(0, 1), { flag: "wx", mode: 0o600 })
+        throw new Error("injected partial write failure")
+      },
+    })
+
+    try {
+      expect(result.error).toBe(stagingFailed)
+      expect(state.attempts).toBe(3)
+      expect(lifecycle.size).toBe(0)
+      expect(env.CSC_LINK).toBe(certificate)
+      expect(env.CSC_KEY_PASSWORD).toBe("operator-password")
+      expect(await Bun.file(partial).exists()).toBeFalse()
+    } finally {
+      await result.stage?.cleanup().catch(() => undefined)
+    }
+  })
+})
+
+test("retains partial-write cleanup ownership until persistent removal later succeeds", async () => {
+  await withCertificate(async (certificate) => {
+    const env = signingEnv(certificate)
+    const lifecycle = createLifecycle()
+    const state = { attempts: 0, failing: true }
+    let partial = ""
+    const result = await captureStage(env, {
+      lifecycle,
+      async remove(target, options) {
+        state.attempts++
+        if (state.failing) throw filesystemError("EBUSY")
+        await rm(target, options)
+      },
+      removeSync(target, options) {
+        if (state.failing) throw filesystemError("EBUSY")
+        rmSync(target, options)
+      },
+      wait: () => Promise.resolve(),
+      waitSync: () => undefined,
+      async writeCertificate(target, contents) {
+        partial = target
+        await writeFile(target, contents.subarray(0, 1), { flag: "wx", mode: 0o600 })
+        throw new Error("injected partial write failure")
+      },
+    })
+
+    try {
+      expect(result.error).toBe(stagingFailed)
+      expect(state.attempts).toBe(3)
+      expect(lifecycle.size).toBe(3)
+      expect(env.CSC_LINK).toBe(partial)
+      expect(await Bun.file(partial).exists()).toBeTrue()
+      expect((await captureStage(signingEnv(certificate))).error).toBe(
+        "Enterprise certificate staging is already active",
+      )
+
+      state.failing = false
+      lifecycle.emit("exit")
+      expect(lifecycle.size).toBe(0)
+      expect(env.CSC_LINK).toBe(certificate)
+      expect(env.CSC_KEY_PASSWORD).toBe("operator-password")
+      expect(await Bun.file(partial).exists()).toBeFalse()
+    } finally {
+      state.failing = false
+      lifecycle.emit("exit")
+      await result.stage?.cleanup().catch(() => undefined)
+    }
+  })
+})
+
+test("uses runtime-neutral cleanup defaults when loaded by electron-builder under Node", () => {
+  const result = Bun.spawnSync(["node", "test/enterprise-certificate-node-entrypoint.cjs"], {
+    cwd: path.resolve(import.meta.dir, ".."),
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      TMPDIR: process.env.TMPDIR,
+      TEMP: process.env.TEMP,
+      TMP: process.env.TMP,
+      SystemRoot: process.env.SystemRoot,
+      WINDIR: process.env.WINDIR,
+      USERPROFILE: process.env.USERPROFILE,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const stdout = new TextDecoder().decode(result.stdout)
+  const stderr = new TextDecoder().decode(result.stderr)
+
+  expect(result.exitCode).toBe(0)
+  expect(stderr).toBe("")
+  expect(JSON.parse(stdout)).toEqual({ attempts: 2, cleaned: true })
+})
+
 test("does not retry non-transient cleanup failures and remains retryable", async () => {
   await withCertificate(async (certificate) => {
     const env = signingEnv(certificate)
@@ -150,11 +329,36 @@ async function stageError(certificate: string) {
   return result.error
 }
 
-async function captureStage(env: Record<string, string | undefined>) {
+async function captureStage(
+  env: Record<string, string | undefined>,
+  dependencies?: Parameters<typeof stageEnterpriseCertificate>[1],
+) {
   try {
-    return { stage: await stageEnterpriseCertificate(env), error: undefined }
+    return { stage: await stageEnterpriseCertificate(env, dependencies), error: undefined }
   } catch (error) {
     return { stage: undefined, error: error instanceof Error ? error.message : undefined }
+  }
+}
+
+function createLifecycle() {
+  type Event = "exit" | "SIGINT" | "SIGTERM"
+  const listeners = new Map<Event, () => void>()
+  return {
+    on(event: Event, listener: () => void) {
+      listeners.set(event, listener)
+    },
+    off(event: Event, listener: () => void) {
+      if (listeners.get(event) === listener) listeners.delete(event)
+    },
+    exit(code: number): never {
+      throw new Error(`Unexpected injected exit ${code}`)
+    },
+    emit(event: Event) {
+      listeners.get(event)?.()
+    },
+    get size() {
+      return listeners.size
+    },
   }
 }
 
