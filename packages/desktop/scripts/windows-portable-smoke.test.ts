@@ -99,6 +99,25 @@ test("portable smoke polls descendant egress through shutdown", async () => {
   expect(script).not.toContain("Assert-AllowedConnections")
 })
 
+test("portable smoke continues cleanup after final observation failures", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const launch = script.slice(script.indexOf("function Test-PortableLaunch"), script.indexOf("$expectedHash"))
+
+  expect(launch).toContain("$cleanupFailure = $null")
+  expect(launch).toContain("$stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)")
+  expect(launch).toContain("if ($null -ne $cleanupFailure) { throw $cleanupFailure }")
+  expect(launch).toContain("$process.Id + $shutdownProcessIDs + $stoppedProcessIDs")
+  expect(launch).toMatch(
+    /Observe-ProcessTreeConnections[\s\S]*catch \{[\s\S]*\$cleanupFailure = \$_[\s\S]*Stop-ProcessTree[\s\S]*catch \{/,
+  )
+  expect(script.indexOf("Remove-Item -LiteralPath $extractRoot -Recurse -Force")).toBeGreaterThan(
+    script.indexOf("Test-PortableLaunch -Application $application"),
+  )
+  expect(script.indexOf("$metadata.windowsAcceptance =")).toBeGreaterThan(
+    script.indexOf("Remove-Item -LiteralPath $extractRoot -Recurse -Force"),
+  )
+})
+
 test("desktop package exposes the portable smoke command", async () => {
   const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json()
 

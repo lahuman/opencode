@@ -185,10 +185,26 @@ function Test-PortableLaunch {
     if ($process.HasExited) { throw "Portable executable exited during startup" }
   } finally {
     if ($null -ne $process) {
-      $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
-      $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)
-      $finalProcessIDs = @($shutdownProcessIDs + $stoppedProcessIDs | Select-Object -Unique)
-      Add-ObservedConnections -ProcessIDs $finalProcessIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
+      $cleanupFailure = $null
+      $shutdownProcessIDs = @()
+      $stoppedProcessIDs = @()
+      try {
+        $shutdownProcessIDs = @(Observe-ProcessTreeConnections -RootProcessId $process.Id -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses)
+      } catch {
+        $cleanupFailure = $_
+      }
+      try {
+        $stoppedProcessIDs = @(Stop-ProcessTree -RootProcessId $process.Id)
+      } catch {
+        if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+      }
+      try {
+        $finalProcessIDs = @($process.Id + $shutdownProcessIDs + $stoppedProcessIDs | Select-Object -Unique)
+        Add-ObservedConnections -ProcessIDs $finalProcessIDs -AllowedAddresses $AllowedAddresses -ObservedRemoteAddresses $observedRemoteAddresses
+      } catch {
+        if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+      }
+      if ($null -ne $cleanupFailure) { throw $cleanupFailure }
     }
   }
 }
