@@ -75,10 +75,32 @@ type PlatformBase = {
 
   /** Enterprise credential management through desktop secure storage */
   enterprise?: {
-    credentialStatus(): Promise<{ configured: boolean }>
+    credentialStatus(): Promise<{ configured: boolean; errorCode?: string }>
     setCredentials(input: { apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
     clearCredentials(): Promise<{ restartRequired: boolean }>
     readGuide(): Promise<{ version: string; markdown: string }>
+    readiness(provider?: {
+      ok: boolean
+      checks: {
+        basic: "pass" | "fail" | "skipped"
+        streaming: "pass" | "fail" | "skipped"
+        toolCall: "pass" | "fail" | "skipped"
+      }
+      failure?: { kind: string; message: string }
+    }): Promise<{
+      schemaVersion: 1
+      generatedAt: string
+      overall: "pass" | "warn" | "fail"
+      checks: {
+        id: string
+        status: "pass" | "warn" | "fail"
+        code: string
+        message: string
+        detail?: string
+      }[]
+    }>
+    stateBackups(): Promise<{ id: string; appVersion: string; createdAt: string }[]>
+    restoreStateBackup(backupID: string): Promise<{ restartRequired: boolean }>
   }
 
   /** Fetch override */

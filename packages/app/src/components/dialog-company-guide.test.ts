@@ -21,6 +21,9 @@ describe("company guide command", () => {
         setCredentials: async () => ({ restartRequired: false }),
         clearCredentials: async () => ({ restartRequired: false }),
         readGuide: async () => ({ version: "2026.07", markdown: "# Company guide" }),
+        readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
+        stateBackups: async () => [],
+        restoreStateBackup: async () => ({ restartRequired: false }),
       },
       category: "Settings",
       open: (guide) => opened.push(guide),
@@ -41,6 +44,9 @@ describe("company guide command", () => {
         credentialStatus: async () => ({ configured: true }),
         setCredentials: async () => ({ restartRequired: false }),
         clearCredentials: async () => ({ restartRequired: false }),
+        readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
+        stateBackups: async () => [],
+        restoreStateBackup: async () => ({ restartRequired: false }),
         readGuide: async () => {
           throw new Error("read failed")
         },

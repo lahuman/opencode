@@ -67,6 +67,8 @@ export function companyProviderCredentialStatus(
   failureMessage: string,
 ) {
   if (status.loading) return "Checking credentials..."
+  if (status.error === "credential_decryption_failed" || status.error === "credential_encryption_unavailable")
+    return "Credentials must be re-entered"
   if (status.error) return failureMessage
   return status.configured ? "Credentials configured" : "Credentials not configured"
 }

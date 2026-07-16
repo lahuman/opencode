@@ -78,6 +78,7 @@ const isTimeout = (error: AppProcess.AppProcessError) =>
 
 const shellTokens = (command: string) => command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []
 const unquote = (value: string) => value.replace(/^(['"])(.*)\1$/, "$2")
+const hasEmptyEcho = (command: string) => /(?:^|[;&|]\s*)echo(?=\s*(?:[;&|]|$))/i.test(command)
 const externalCommandDirectories = Effect.fn("BashTool.externalCommandDirectories")(function* (
   fs: FSUtil.Interface,
   command: string,
@@ -121,6 +122,9 @@ const layer = Layer.effectDiscard(
           ],
           execute: (input, context) =>
             Effect.gen(function* () {
+              if (process.platform === "win32" && hasEmptyEcho(input.command))
+                return yield* Effect.fail(new Error("Windows echo requires an argument"))
+
               const source = {
                 type: "tool" as const,
                 messageID: context.assistantMessageID,

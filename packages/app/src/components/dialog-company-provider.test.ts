@@ -108,6 +108,12 @@ describe("company provider operation state", () => {
     expect(companyProviderCredentialStatus({ loading: false, configured: false }, "Request failed")).toBe(
       "Credentials not configured",
     )
+    expect(
+      companyProviderCredentialStatus(
+        { loading: false, configured: false, error: "credential_decryption_failed" },
+        "Request failed",
+      ),
+    ).toBe("Credentials must be re-entered")
     expect(companyProviderCredentialStatus({ loading: false, error: new Error("offline") }, "Request failed")).toBe(
       "Request failed",
     )

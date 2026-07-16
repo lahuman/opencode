@@ -37,7 +37,6 @@ export function useCompanyProviderSettingsState() {
     () => platform.enterprise,
     (enterprise) => enterprise.credentialStatus(),
   )
-
   const testConnection = async () => {
     const model = config().models[0]
     if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model))) return
@@ -65,7 +64,11 @@ export function useCompanyProviderSettingsState() {
 
   const statusLabel = () => {
     return companyProviderCredentialStatus(
-      { loading: status.loading, error: status.error, configured: status.latest?.configured },
+      {
+        loading: status.loading,
+        error: status.error ?? status.latest?.errorCode,
+        configured: status.latest?.configured,
+      },
       language.t("common.requestFailed"),
     )
   }
@@ -97,6 +100,11 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const [status, statusActions] = createResource(
     () => platform.enterprise,
     (enterprise) => enterprise.credentialStatus(),
+  )
+  const [readinessProvider, setReadinessProvider] = createSignal<CompanyProviderDiagnosticResult>()
+  const [readiness] = createResource(
+    () => ({ enterprise: platform.enterprise, provider: readinessProvider() }),
+    (input) => input.enterprise?.readiness(input.provider),
   )
 
   createEffect(() => {
@@ -161,13 +169,19 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     )
       .then((value) => value.data)
       .catch(() => undefined)
-    setState("result", companyProviderDiagnosticResult(response, language.t("common.requestFailed")))
+    const result = companyProviderDiagnosticResult(response, language.t("common.requestFailed"))
+    setState("result", result)
+    setReadinessProvider(result)
     setState("action", undefined)
   }
 
   const statusLabel = () => {
     return companyProviderCredentialStatus(
-      { loading: status.loading, error: status.error, configured: status.latest?.configured },
+      {
+        loading: status.loading,
+        error: status.error ?? status.latest?.errorCode,
+        configured: status.latest?.configured,
+      },
       language.t("common.requestFailed"),
     )
   }
@@ -352,6 +366,24 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                 )}
               </Show>
             </div>
+          )}
+        </Show>
+
+        <Show when={readiness.latest}>
+          {(report) => (
+            <details class="border-t border-border-weak-base pt-3 text-12-regular">
+              <summary class="cursor-pointer text-text-strong capitalize">Offline readiness: {report().overall}</summary>
+              <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
+                <For each={report().checks}>
+                  {(check) => (
+                    <>
+                      <span class="min-w-0 break-words text-text-weak">{check.message}</span>
+                      <span class="min-w-0 break-words text-right text-text-strong capitalize">{check.status}</span>
+                    </>
+                  )}
+                </For>
+              </div>
+            </details>
           )}
         </Show>
       </form>

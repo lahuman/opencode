@@ -133,6 +133,21 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  if (process.platform === "win32") {
+    it.live("rejects Windows echo without arguments before execution", () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          return withTool(tmp.path, (registry) => executeTool(registry, call({ command: "echo" }))).pipe(
+            Effect.andThen(Effect.sync(() => expect(runs).toEqual([]))),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
+
   it.live("registers and returns structured successful output from the active Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

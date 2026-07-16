@@ -22,6 +22,7 @@ test("applies enterprise credentials only to the company provider", () => {
     }),
   ).toEqual({
     baseURL: "https://llm.corp.example/v1",
+    fetch: expect.any(Function),
     apiKey: "secret-key",
     headers: {
       Authorization: "secret-authorization",
@@ -65,6 +66,7 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
     name: "company-llm",
     baseURL: `${server.url}v1`,
     headers: options.headers as Record<string, string>,
+    fetch: options.fetch as typeof fetch,
   })
 
   await generateText({ model: provider("company-code"), prompt: "hello" })
@@ -76,6 +78,28 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
   expect(headers.get("x-company-token")).not.toContain("project-custom-secret")
 })
 
+test("rejects Company LLM redirects without contacting the redirect target", async () => {
+  let redirected = 0
+  using server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(input) {
+      if (new URL(input.url).pathname === "/redirected") {
+        redirected++
+        return new Response("unexpected")
+      }
+      return Response.redirect(new URL("/redirected", input.url), 302)
+    },
+  })
+  const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), {})
+
+  await expect((options.fetch as typeof fetch)(`${server.url}v1`)).rejects.toThrow(
+    "Company LLM redirects are disabled",
+  )
+  expect(redirected).toBe(0)
+  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), {})).toEqual({})
+})
+
 test("invalid enterprise credentials are discarded without exposing prior values", () => {
   ProviderEnterprise.setCredentials({ apiKey: "secret-key", headers: { Authorization: "secret-header" } })
   ProviderEnterprise.setCredentials({ apiKey: 42, headers: { Authorization: false } })
@@ -84,5 +108,5 @@ test("invalid enterprise credentials are discarded without exposing prior values
     ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), {
       baseURL: "https://llm.corp.example/v1",
     }),
-  ).toEqual({ baseURL: "https://llm.corp.example/v1" })
+  ).toEqual({ baseURL: "https://llm.corp.example/v1", fetch: expect.any(Function) })
 })

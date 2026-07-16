@@ -243,6 +243,8 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
   let recordedFatalError: Promise<void> | undefined
   const [store, setStore] = createStore({
     actionError: undefined as string | undefined,
+    backups: [] as { id: string; appVersion: string; createdAt: string }[],
+    recovering: false,
   })
   const companyGuide = createCompanyGuideCommand({
     enterprise: platform.enterprise,
@@ -271,7 +273,21 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
 
   onMount(() => {
     void ensureFatalErrorRecorded().catch(() => undefined)
+    void platform.enterprise
+      ?.stateBackups()
+      .then((backups) => setStore("backups", backups))
+      .catch(() => undefined)
   })
+
+  async function restoreStateBackup(backupID: string) {
+    const enterprise = platform.enterprise
+    if (!enterprise || store.recovering) return
+    setStore("recovering", true)
+    await enterprise.restoreStateBackup(backupID).catch((err) => {
+      setStore("recovering", false)
+      setStore("actionError", formatError(err, language.t))
+    })
+  }
 
   async function checkForUpdates() {
     const state = await platform.updater?.check()
@@ -324,6 +340,29 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           label={language.t("error.page.details.label")}
           hideLabel
         />
+        <Show when={store.backups.length > 0}>
+          <section class="flex w-full flex-col items-center gap-3 rounded-md border border-border-weak-base p-4 text-center">
+            <div>
+              <h2 class="text-sm font-medium text-text-strong">Enterprise state recovery</h2>
+              <p class="text-xs text-text-weak">Restore a compatible backup, or run the latest application version.</p>
+            </div>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              {store.backups
+                .slice()
+                .reverse()
+                .map((backup) => (
+                  <Button
+                    size="large"
+                    variant="secondary"
+                    disabled={store.recovering}
+                    onClick={() => restoreStateBackup(backup.id)}
+                  >
+                    Restore {backup.appVersion}
+                  </Button>
+                ))}
+            </div>
+          </section>
+        </Show>
         <div class="flex flex-row items-center justify-center gap-3 flex-wrap max-w-64">
           <Button size="large" onClick={platform.restart}>
             {language.t("error.page.action.restart")}
