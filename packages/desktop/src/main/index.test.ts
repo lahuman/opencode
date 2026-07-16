@@ -96,7 +96,7 @@ test("ordinary packaged and unpackaged main entrypoints preserve their identitie
 test("onboarding test roots override the desktop user data location", async () => {
   const { result } = await runMain("enterprise", { OPENCODE_TEST_ONBOARDING: "1" })
 
-  expect(result.identity.userData).toMatch(/opencode-onboarding-[^/]+\/desktop$/)
+  expect(result.identity.userData).toMatch(/opencode-onboarding-[^/\\]+[/\\]desktop$/)
 })
 
 describe("desktop initialization", () => {

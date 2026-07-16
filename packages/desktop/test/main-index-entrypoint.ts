@@ -25,6 +25,7 @@ let rendererProtocolRegistrations = 0
 let appName = "Electron"
 let appUserModelId = ""
 const appData = join(tmpdir(), "opencode-main-index-app-data")
+process.env.LOCALAPPDATA = appData
 
 const app = {
   commandLine: {
@@ -110,7 +111,9 @@ mock.module("../src/main/markdown", () => ({ parseMarkdown: async (value: string
 mock.module("../src/main/menu", () => ({ createMenu() {} }))
 mock.module("../src/main/onboarding", () => ({
   finishFirstLaunchOnboarding: () => null,
+  initializeOldLayoutEligibility: () => false,
   isFirstLaunchOnboardingPending: () => false,
+  isOldLayoutEligible: () => false,
 }))
 mock.module("../src/main/server", () => ({
   getDefaultServerUrl: () => null,

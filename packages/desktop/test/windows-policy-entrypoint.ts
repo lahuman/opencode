@@ -27,7 +27,7 @@ type RequestHandler = (details: RequestDetails, callback: (result: RequestResult
 type WindowOpenHandler = (details: { url: string }) => { action: "allow" | "deny" }
 type NavigationEvent = { preventDefault(): void }
 type NavigationHandler = (event: NavigationEvent, url: string) => void
-type ProtocolHandler = (request: { url: string }) => Promise<Response>
+type ProtocolHandler = (request: { url: string; headers: Headers }) => Promise<Response>
 
 const logs: Array<{
   service: string
@@ -232,7 +232,7 @@ function navigate(callback: NavigationHandler | undefined, url: string) {
 
 async function protocolRequest(url: string) {
   if (!protocolState.handler) throw new Error("protocol boundary was not registered")
-  return protocolState.handler({ url }).catch(() => new Response("threw", { status: 599 }))
+  return protocolState.handler({ url, headers: new Headers() }).catch(() => new Response("threw", { status: 599 }))
 }
 
 async function protocolAssets(paths: string[]) {
