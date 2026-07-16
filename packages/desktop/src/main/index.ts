@@ -19,7 +19,12 @@ import { forwardInitializationFailure } from "./initialization"
 import { exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
-import { finishFirstLaunchOnboarding, isFirstLaunchOnboardingPending } from "./onboarding"
+import {
+  finishFirstLaunchOnboarding,
+  initializeOldLayoutEligibility,
+  isFirstLaunchOnboardingPending,
+  isOldLayoutEligible,
+} from "./onboarding"
 import {
   getDefaultServerUrl,
   preferAppEnv,
@@ -144,6 +149,7 @@ const main = Effect.gen(function* () {
         }),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
+  initializeOldLayoutEligibility(app.getPath("userData"))
   logger = initLogging()
   initCrashReporter()
 
@@ -314,6 +320,7 @@ const main = Effect.gen(function* () {
       setDefaultServerUrl: (url) => setDefaultServerUrl(url),
       isFirstLaunchOnboardingPending,
       finishFirstLaunchOnboarding,
+      isOldLayoutEligible,
       getDisplayBackend: async () => null,
       setDisplayBackend: async () => undefined,
       parseMarkdown: async (markdown) => parseMarkdown(markdown),

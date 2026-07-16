@@ -44,6 +44,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       standard: true,
       supportFetchAPI: true,
+      stream: true,
     },
   },
 ])
@@ -326,7 +327,10 @@ export function registerRendererProtocol(options: { rendererRoot?: string } = {}
     }
 
     try {
-      const response = await assetSession.fetch(pathToFileURL(file).toString())
+      const range = request.headers.get("range")
+      const response = await assetSession.fetch(pathToFileURL(file).toString(), {
+        headers: range ? { range } : undefined,
+      })
       if (response.status >= 400) {
         writeLog(
           "protocol",
