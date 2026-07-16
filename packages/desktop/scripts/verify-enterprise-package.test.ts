@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, realpath, rename, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -13,9 +14,12 @@ const required = [
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
   "resources/enterprise/models.json",
+  "resources/enterprise/enterprise-manifest.json",
   "resources/licenses/OpenCode-LICENSE",
 ]
 const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
+const enterpriseDefaults = JSON.stringify({ enabled_providers: ["company-llm"] })
+const enterpriseModels = JSON.stringify({ providers: [] })
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -29,6 +33,7 @@ test("accepts a complete portable enterprise tree", async () => {
     defaults: true,
     guide: true,
     models: true,
+    manifest: true,
     appArchive: true,
     license: true,
   })
@@ -131,6 +136,16 @@ test("rejects invalid models JSON", async () => {
   await Bun.write(path.join(root, "resources/enterprise/models.json"), "not json")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package catalog")
+})
+
+test("rejects enterprise resources changed after manifest creation", async () => {
+  const root = await portableFixture()
+  await Bun.write(
+    path.join(root, "resources/enterprise/opencode.jsonc"),
+    JSON.stringify({ enabled_providers: ["company-llm"], theme: "company" }),
+  )
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package enterprise manifest")
 })
 
 test("rejects an empty app archive", async () => {
@@ -579,10 +594,11 @@ async function writePortableFixture(root: string) {
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
     Bun.write(
       path.join(root, "resources/enterprise/opencode.jsonc"),
-      JSON.stringify({ enabled_providers: ["company-llm"] }),
+      enterpriseDefaults,
     ),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
-    Bun.write(path.join(root, "resources/enterprise/models.json"), JSON.stringify({ providers: [] })),
+    Bun.write(path.join(root, "resources/enterprise/models.json"), enterpriseModels),
+    Bun.write(path.join(root, "resources/enterprise/enterprise-manifest.json"), enterpriseManifest()),
     Bun.write(path.join(root, "resources/licenses/OpenCode-LICENSE"), "MIT License\n"),
   ])
 }
@@ -844,8 +860,31 @@ async function rewriteArchiveExtraFieldType(archive: string, name: string, sourc
 const portableContents: Record<string, string> = {
   "Company OpenCode Pilot.exe": "portable executable",
   "resources/app.asar": "application archive",
-  "resources/enterprise/opencode.jsonc": JSON.stringify({ enabled_providers: ["company-llm"] }),
+  "resources/enterprise/opencode.jsonc": enterpriseDefaults,
   "resources/enterprise/company-guide.md": enterpriseGuide,
-  "resources/enterprise/models.json": JSON.stringify({ providers: [] }),
+  "resources/enterprise/models.json": enterpriseModels,
+  "resources/enterprise/enterprise-manifest.json": enterpriseManifest(),
   "resources/licenses/OpenCode-LICENSE": "MIT License\n",
+}
+
+function enterpriseManifest() {
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex")
+  return `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      appVersion: "1.17.18",
+      defaultsVersion: "pilot-1",
+      guideVersion: "pilot-1",
+      catalogVersion: "pilot-1",
+      modelID: "company-code",
+      allowedOrigins: ["https://llm.corp.example"],
+      resources: {
+        "company-guide.md": digest(enterpriseGuide),
+        "models.json": digest(enterpriseModels),
+        "opencode.jsonc": digest(enterpriseDefaults),
+      },
+    },
+    null,
+    2,
+  )}\n`
 }

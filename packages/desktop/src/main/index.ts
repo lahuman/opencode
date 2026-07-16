@@ -10,13 +10,20 @@ import { app, safeStorage, shell } from "electron"
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
 
-import type { ServerReadyData } from "../preload/types"
+import type { EnterpriseProviderDiagnostic, ServerReadyData } from "../preload/types"
 import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseEnvironment } from "../enterprise"
 import { checkAppExists, resolveAppPath } from "./apps"
 import { CHANNEL, desktopIdentity, RUNTIME_FEATURES } from "./constants"
 import { registerMainIpcHandlers, sendDeepLinks, sendMenuCommand } from "./ipc"
 import { forwardInitializationFailure } from "./initialization"
-import { exportDebugLogs, initCrashReporter, initLogging, startNetLog, write as writeLog } from "./logging"
+import {
+  configureEnterpriseSupport,
+  exportDebugLogs,
+  initCrashReporter,
+  initLogging,
+  startNetLog,
+  write as writeLog,
+} from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
 import {
@@ -53,6 +60,20 @@ import {
   createEnterpriseCredentialStore,
   enterpriseSidecarEnvironment,
 } from "./enterprise-credentials"
+import { runEnterprisePreflight } from "./enterprise-preflight"
+import {
+  EnterpriseStateError,
+  listCompatibleEnterpriseBackups,
+  markEnterpriseStateHealthy,
+  prepareEnterpriseState,
+  restoreEnterpriseBackup,
+} from "./enterprise-state"
+import { adoptEnterpriseLegacyState } from "./enterprise-adoption"
+import {
+  checkEnterpriseAppData,
+  createEnterpriseReadinessReport,
+  findEnterpriseExecutable,
+} from "./enterprise-readiness"
 
 const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
@@ -149,9 +170,53 @@ const main = Effect.gen(function* () {
         }),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
-  initializeOldLayoutEligibility(app.getPath("userData"))
-  logger = initLogging()
-  initCrashReporter()
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+    return
+  }
+  const enterpriseDir = app.isPackaged
+    ? join(process.resourcesPath, "enterprise")
+    : join(import.meta.dirname, "../../resources/enterprise")
+  const enterpriseGuide = join(enterpriseDir, "company-guide.md")
+  const enterpriseStartupFailure = yield* Effect.promise(async () => {
+    try {
+      await runEnterprisePreflight({
+        profile: ENTERPRISE_PROFILE,
+        appVersion: app.getVersion(),
+        enterpriseDir,
+      })
+      await adoptEnterpriseLegacyState({
+        enabled: ENTERPRISE_ENABLED,
+        userData: app.getPath("userData"),
+        sources: {
+          data: process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+          config: process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"),
+          state: process.env.XDG_STATE_HOME ?? app.getPath("userData"),
+        },
+      })
+      await prepareEnterpriseState({
+        enabled: ENTERPRISE_ENABLED,
+        userData: app.getPath("userData"),
+        appVersion: app.getVersion(),
+      })
+      return undefined
+    } catch (error) {
+      return error
+    }
+  })
+  if (!enterpriseStartupFailure) initializeOldLayoutEligibility(app.getPath("userData"))
+  logger = initLogging({ persistent: !enterpriseStartupFailure })
+  if (!enterpriseStartupFailure) initCrashReporter()
+  if (enterpriseStartupFailure) {
+    logger.error("enterprise startup verification failed", {
+      kind:
+        typeof enterpriseStartupFailure === "object" &&
+        enterpriseStartupFailure !== null &&
+        "kind" in enterpriseStartupFailure
+          ? enterpriseStartupFailure.kind
+          : "unknown",
+    })
+  }
 
   const wslServers = createWslServersController(
     app.getVersion(),
@@ -207,20 +272,12 @@ const main = Effect.gen(function* () {
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
   if (!app.isPackaged) app.commandLine.appendSwitch("remote-debugging-port", "9222")
 
-  if (!app.requestSingleInstanceLock()) {
-    app.quit()
-    return
-  }
-
-  const enterpriseDir = app.isPackaged
-    ? join(process.resourcesPath, "enterprise")
-    : join(import.meta.dirname, "../../resources/enterprise")
-  const enterpriseGuide = join(enterpriseDir, "company-guide.md")
   preferAppEnv(
     app.getPath("userData"),
     enterpriseEnvironment(ENTERPRISE_PROFILE, {
       defaults: join(enterpriseDir, "opencode.jsonc"),
       guide: enterpriseGuide,
+      userData: app.getPath("userData"),
     }),
   )
 
@@ -283,21 +340,47 @@ const main = Effect.gen(function* () {
     decrypt: (value) => safeStorage.decryptString(value),
   })
   const enterpriseCredentialHandlers = createEnterpriseCredentialHandlers(ENTERPRISE_ENABLED, enterpriseCredentials)
+  const enterpriseRecoveryAllowed =
+    enterpriseStartupFailure instanceof EnterpriseStateError &&
+    (enterpriseStartupFailure.kind === "recovery_required" || enterpriseStartupFailure.kind === "downgrade")
 
-  if (!TEST_ONBOARDING) migrate()
-  yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
-    Effect.tap((result) =>
-      Effect.sync(() => {
-        if (result.deleted.length === 0) return
-        logger.log("cleaned scoped store files", { count: result.deleted.length, scanned: result.scanned })
-      }),
-    ),
-    Effect.catch((error) =>
-      Effect.sync(() => {
-        logger.warn("failed to clean scoped store files", error)
-      }),
-    ),
-  )
+  let lastEnterpriseProviderDiagnostic: EnterpriseProviderDiagnostic | undefined
+  const enterpriseReadiness = async (provider?: EnterpriseProviderDiagnostic) => {
+    if (provider) lastEnterpriseProviderDiagnostic = provider
+    const credentialStatus = await enterpriseCredentialHandlers.status()
+    return createEnterpriseReadinessReport({
+      packageVerified: !enterpriseStartupFailure,
+      appDataWritable: () => checkEnterpriseAppData(app.getPath("userData")),
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+      credentialConfigured: credentialStatus.configured,
+      credentialError: "errorCode" in credentialStatus ? credentialStatus.errorCode : undefined,
+      findExecutable: findEnterpriseExecutable,
+      provider: provider ?? lastEnterpriseProviderDiagnostic,
+    })
+  }
+  configureEnterpriseSupport(async () => {
+    const credentials = await enterpriseCredentials.get()
+    return {
+      readiness: await enterpriseReadiness(),
+      secrets: [...(credentials.apiKey ? [credentials.apiKey] : []), ...Object.values(credentials.headers)],
+    }
+  })
+  if (!enterpriseStartupFailure && !TEST_ONBOARDING) migrate()
+  if (!enterpriseStartupFailure) {
+    yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          if (result.deleted.length === 0) return
+          logger.log("cleaned scoped store files", { count: result.deleted.length, scanned: result.scanned })
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          logger.warn("failed to clean scoped store files", error)
+        }),
+      ),
+    )
+  }
   if (!ENTERPRISE_ENABLED) app.setAsDefaultProtocolClient("opencode")
   registerRendererProtocol()
   setDockIcon()
@@ -335,6 +418,22 @@ const main = Effect.gen(function* () {
         credentialStatus: enterpriseCredentialHandlers.status,
         setCredentials: enterpriseCredentialHandlers.set,
         clearCredentials: enterpriseCredentialHandlers.clear,
+        readiness: enterpriseReadiness,
+        stateBackups: () =>
+          enterpriseRecoveryAllowed
+            ? listCompatibleEnterpriseBackups(app.getPath("userData"), app.getVersion())
+            : Promise.resolve([]),
+        restoreStateBackup: async (backupID: string) => {
+          if (!enterpriseRecoveryAllowed) throw new Error("Enterprise state recovery is unavailable")
+          const compatible = await listCompatibleEnterpriseBackups(app.getPath("userData"), app.getVersion())
+          if (!compatible.some((backup) => backup.id === backupID)) {
+            throw new Error("Enterprise state backup is incompatible")
+          }
+          await stopSidecars()
+          await restoreEnterpriseBackup({ userData: app.getPath("userData"), backupID })
+          relaunch()
+          return { restartRequired: true as const }
+        },
         guide: {
           enabled: ENTERPRISE_PROFILE.enabled,
           path: enterpriseGuide,
@@ -354,13 +453,15 @@ const main = Effect.gen(function* () {
     updateTimer.unref()
     app.once("will-quit", () => clearInterval(updateTimer))
   }
-  yield* Effect.promise(() => startNetLog()).pipe(
-    Effect.catch((error) =>
-      Effect.sync(() => {
-        logger.warn("failed to start net log", error)
-      }),
-    ),
-  )
+  if (!enterpriseStartupFailure) {
+    yield* Effect.promise(() => startNetLog()).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          logger.warn("failed to start net log", error)
+        }),
+      ),
+    )
+  }
 
   const port = yield* Effect.gen(function* () {
     const fromEnv = process.env.OPENCODE_PORT
@@ -390,9 +491,9 @@ const main = Effect.gen(function* () {
   const password = randomUUID()
 
   const loadingTask = yield* Effect.gen(function* () {
+    if (enterpriseStartupFailure) return yield* Effect.fail(enterpriseStartupFailure)
     logger.log("sidecar connection started", { url })
     if (!app.isPackaged) {
-      logger.log("sidecar credentials (dev only)", { url, username: "opencode", password })
       // Write server info to app/.env.local so the Vite dev server picks it up automatically.
       const authToken = Buffer.from(`opencode:${password}`).toString("base64")
       const envLocal = join(import.meta.dirname, "../../../app/.env.local")
@@ -425,14 +526,25 @@ const main = Effect.gen(function* () {
       void wslServers.initialize().catch((error) => logger.error("wsl server initialization failed", error))
     }
 
-    yield* Effect.promise(() => health.wait).pipe(
+    const healthy = yield* Effect.promise(() => health.wait).pipe(
       Effect.timeout("30 seconds"),
+      Effect.as(true),
       Effect.catch((e) =>
         Effect.sync(() => {
           logger.error("sidecar health check failed", e.toString())
+          return false
         }),
       ),
     )
+    if (healthy) {
+      yield* Effect.promise(() =>
+        markEnterpriseStateHealthy({
+          enabled: ENTERPRISE_ENABLED,
+          userData: app.getPath("userData"),
+          appVersion: app.getVersion(),
+        }),
+      )
+    }
 
     logger.log("loading task finished")
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)

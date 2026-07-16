@@ -1,12 +1,14 @@
 import { lstat, readdir } from "node:fs/promises"
 import path from "node:path"
 import { type Entry, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
+import { verifyEnterpriseManifestContents } from "../src/main/enterprise-preflight"
 
 export type EnterprisePackageSummary = {
   executable: string
   defaults: true
   guide: true
   models: true
+  manifest: true
   appArchive: true
   license: true
 }
@@ -17,6 +19,7 @@ const requiredEntries = [
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
   "resources/enterprise/models.json",
+  "resources/enterprise/enterprise-manifest.json",
   "resources/licenses/OpenCode-LICENSE",
 ] as const
 const enterpriseGuide = new Uint8Array(
@@ -61,6 +64,7 @@ export async function verifyEnterprisePackage(root: string): Promise<EnterpriseP
     defaults: true,
     guide: true,
     models: true,
+    manifest: true,
     appArchive: true,
     license: true,
   }
@@ -215,6 +219,18 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
   if (!bytesEqual(files["resources/enterprise/company-guide.md"], enterpriseGuide)) {
     throw new Error("Portable package guide is invalid")
   }
+  try {
+    verifyEnterpriseManifestContents({
+      manifest: new TextDecoder().decode(files["resources/enterprise/enterprise-manifest.json"]),
+      resources: {
+        "opencode.jsonc": files["resources/enterprise/opencode.jsonc"],
+        "company-guide.md": files["resources/enterprise/company-guide.md"],
+        "models.json": files["resources/enterprise/models.json"],
+      },
+    })
+  } catch {
+    throw new Error("Portable package enterprise manifest is invalid")
+  }
   if (files["Company OpenCode Pilot.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
   if (files["resources/app.asar"].byteLength === 0) throw new Error("Portable package archive is empty")
   if (!new TextDecoder().decode(files["resources/licenses/OpenCode-LICENSE"]).includes("MIT License")) {
@@ -237,6 +253,7 @@ function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEnt
     "resources/enterprise/opencode.jsonc": read("resources/enterprise/opencode.jsonc"),
     "resources/enterprise/company-guide.md": read("resources/enterprise/company-guide.md"),
     "resources/enterprise/models.json": read("resources/enterprise/models.json"),
+    "resources/enterprise/enterprise-manifest.json": read("resources/enterprise/enterprise-manifest.json"),
     "resources/licenses/OpenCode-LICENSE": read("resources/licenses/OpenCode-LICENSE"),
   }
 }

@@ -11,6 +11,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
@@ -54,6 +55,7 @@ test("validates enterprise inputs before spawning", async () => {
 
 test("runs validation, build, package, verification, git, and release in order", async () => {
   const steps: string[] = []
+  let sourceChecks = 0
   const env = {
     ...valid,
     CSC_LINK: "csc-link-secret-marker",
@@ -71,6 +73,11 @@ test("runs validation, build, package, verification, git, and release in order",
     validate(value) {
       steps.push("validate")
       return validateEnterpriseBuild(value)
+    },
+    verifySource() {
+      steps.push("source")
+      sourceChecks++
+      return Promise.resolve("0123456789abcdef")
     },
     spawn(command, options) {
       steps.push(command[2] ?? command[1])
@@ -100,9 +107,17 @@ test("runs validation, build, package, verification, git, and release in order",
       expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve([])
     },
-    gitCommit() {
-      steps.push("git-commit")
-      return Promise.resolve("0123456789abcdef")
+    authenticode(executable) {
+      steps.push("authenticode")
+      expect(executable).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked/Company OpenCode Pilot.exe"))
+      return Promise.resolve("NotSigned")
+    },
+    supplyChain({ archive }) {
+      steps.push("supply-chain")
+      return Promise.resolve({
+        sbom: archive.replace(/\.zip$/, ".sbom.cdx.json"),
+        licenses: archive.replace(/\.zip$/, ".third-party-licenses.txt"),
+      })
     },
     release(input) {
       steps.push("release")
@@ -116,7 +131,19 @@ test("runs validation, build, package, verification, git, and release in order",
   })
 
   expect(code).toBe(0)
-  expect(steps).toEqual(["validate", "build", "package:win", "verify-unpacked", "verify-zip", "git-commit", "release"])
+  expect(steps).toEqual([
+    "validate",
+    "source",
+    "build",
+    "package:win",
+    "verify-unpacked",
+    "verify-zip",
+    "source",
+    "authenticode",
+    "supply-chain",
+    "release",
+  ])
+  expect(sourceChecks).toBe(2)
 })
 
 test("returns the first nonzero exit code without spawning the package command", async () => {
@@ -134,6 +161,22 @@ test("returns the first nonzero exit code without spawning the package command",
 
   expect(code).toBe(17)
   expect(commands).toEqual([["bun", "run", "build"]])
+})
+
+test("rejects a source revision change after packaging", async () => {
+  let checks = 0
+  await expect(
+    runEnterpriseWindowsPackage({
+      platform: "win32",
+      arch: "x64",
+      env: valid,
+      version: "1.17.18",
+      spawn: () => ({ exited: Promise.resolve(0) }),
+      verifyPackage: async () => ({}),
+      verifyArchive: async () => [],
+      verifySource: async () => (++checks === 1 ? "reviewed" : "changed"),
+    }),
+  ).rejects.toThrow("source changed during the build")
 })
 
 test("returns the package exit code after a successful build", async () => {
@@ -283,13 +326,28 @@ test("stops after release metadata write failure", async () => {
         steps.push("git-commit")
         return Promise.resolve("0123456789abcdef")
       },
+      supplyChain({ archive }) {
+        steps.push("supply-chain")
+        return Promise.resolve({
+          sbom: archive.replace(/\.zip$/, ".sbom.cdx.json"),
+          licenses: archive.replace(/\.zip$/, ".third-party-licenses.txt"),
+        })
+      },
       release() {
         steps.push("release")
         return Promise.reject(new Error("Unable to write release metadata"))
       },
     }),
   ).rejects.toThrow("Unable to write")
-  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip", "git-commit", "release"])
+  expect(steps).toEqual([
+    "build",
+    "package:win",
+    "verify-unpacked",
+    "verify-zip",
+    "git-commit",
+    "supply-chain",
+    "release",
+  ])
 })
 
 test("exposes the exact Bun TypeScript enterprise package script", async () => {

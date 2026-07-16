@@ -5,10 +5,11 @@ import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } f
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
-import type { FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
+import type { EnterpriseProviderDiagnostic, FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
 import { createEnterpriseURLHandler, type EnterpriseProfile } from "../enterprise"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { readEnterpriseGuide } from "./enterprise-guide"
+import { parseEnterpriseProviderDiagnostic } from "./enterprise-readiness"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
@@ -44,9 +45,12 @@ type Deps = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   openExternalURL: (url: string) => Promise<void> | void
   enterprise: {
-    credentialStatus: () => Promise<{ configured: boolean }>
+    credentialStatus: () => Promise<{ configured: boolean; errorCode?: string }>
     setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
     clearCredentials: () => Promise<{ restartRequired: true }>
+    readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
+    stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
+    restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
     guide: {
       enabled: boolean
       path: string
@@ -123,6 +127,13 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
       deps.enterprise.setCredentials(input),
   )
   registry.handle("enterprise-clear-credentials", () => deps.enterprise.clearCredentials())
+  registry.handle("enterprise-readiness", (_event: IpcMainInvokeEvent, provider?: unknown) =>
+    deps.enterprise.readiness(parseEnterpriseProviderDiagnostic(provider)),
+  )
+  registry.handle("enterprise-state-backups", () => deps.enterprise.stateBackups())
+  registry.handle("enterprise-state-restore", (_event: IpcMainInvokeEvent, backupID: string) =>
+    deps.enterprise.restoreStateBackup(backupID),
+  )
   registry.handle("enterprise-guide-read", () => readEnterpriseGuide(deps.enterprise.guide))
   registry.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     try {

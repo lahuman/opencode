@@ -14,6 +14,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
@@ -34,6 +35,10 @@ test("writes checksum and non-secret release metadata", async () => {
   roots.push(root)
   const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
   await Bun.write(archive, "portable archive")
+  const sbom = archive.replace(/\.zip$/, ".sbom.cdx.json")
+  const licenses = archive.replace(/\.zip$/, ".third-party-licenses.txt")
+  await Bun.write(sbom, "sbom")
+  await Bun.write(licenses, "licenses")
 
   const result = await writeEnterpriseRelease({
     archive,
@@ -41,16 +46,24 @@ test("writes checksum and non-secret release metadata", async () => {
     gitCommit: "0123456789abcdef",
     builtAt: new Date("2026-07-15T00:00:00.000Z"),
     profile: validateEnterpriseBuild(valid),
+    sbom,
+    licenses,
+    authenticode: "NotSigned",
   })
 
   expect(result).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifact: "company-opencode-pilot-1.17.18-win-x64.zip",
     appVersion: "1.17.18",
     gitCommit: "0123456789abcdef",
     target: { os: "win32", arch: "x64" },
     authenticode: "NotSigned",
     windowsAcceptance: [],
+    sbom: { file: "company-opencode-pilot-1.17.18-win-x64.sbom.cdx.json", sha256: expect.any(String) },
+    thirdPartyLicenses: {
+      file: "company-opencode-pilot-1.17.18-win-x64.third-party-licenses.txt",
+      sha256: expect.any(String),
+    },
   })
   expect(result.sha256).toBe("d0290b9062401137b81620928d54bc40e808f35a7f2fc550d2821d01c95488f5")
   expect(await Bun.file(`${archive}.sha256`).text()).toBe(`${result.sha256}  ${result.artifact}\n`)

@@ -10,6 +10,7 @@ const enterprise = {
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
 const channels = [

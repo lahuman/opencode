@@ -62,6 +62,9 @@ test("real enterprise main entrypoint applies isolated identity without claiming
 
   expect(result).toEqual({
     rendererProtocolRegistrations: 1,
+    preflightCalls: 1,
+    statePrepared: 1,
+    stateHealthy: 1,
     ipcRegistered: true,
     shellOpenExternalURLs: ["https://llm.corp.example/docs"],
     identity: {

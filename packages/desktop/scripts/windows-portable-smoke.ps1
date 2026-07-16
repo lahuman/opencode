@@ -74,7 +74,7 @@ function Assert-EnterpriseReleaseMetadata {
 
   $requiredFields = @(
     "appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID",
-    "schemaVersion", "sha256", "target", "windowsAcceptance"
+    "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
   )
   $metadataFields = @($Metadata.PSObject.Properties.Name | Sort-Object)
   if (($metadataFields -join ",") -ne ($requiredFields -join ",")) { throw "Release metadata shape is invalid" }
@@ -94,7 +94,7 @@ function Assert-EnterpriseReleaseMetadata {
   } catch {
     throw "Release metadata schema version is invalid"
   }
-  if ([decimal]::Truncate($numericSchemaVersion) -ne $numericSchemaVersion -or $numericSchemaVersion -ne 1) {
+  if ([decimal]::Truncate($numericSchemaVersion) -ne $numericSchemaVersion -or $numericSchemaVersion -ne 2) {
     throw "Release metadata schema version is invalid"
   }
 
@@ -109,6 +109,19 @@ function Assert-EnterpriseReleaseMetadata {
 
   if ($Metadata.windowsAcceptance -isnot [System.Array]) { throw "Release metadata Windows acceptance is invalid" }
   Assert-WindowsAcceptanceRecords -Records ([object[]]$Metadata.windowsAcceptance)
+
+  foreach ($artifact in @($Metadata.sbom, $Metadata.thirdPartyLicenses)) {
+    if ($artifact -isnot [PSCustomObject]) { throw "Release supplemental artifact is invalid" }
+    $artifactFields = @($artifact.PSObject.Properties.Name | Sort-Object)
+    if (($artifactFields -join ",") -ne "file,sha256") { throw "Release supplemental artifact is invalid" }
+    if ($artifact.file -isnot [string] -or [string]::IsNullOrWhiteSpace($artifact.file)) {
+      throw "Release supplemental artifact is invalid"
+    }
+    if ([System.IO.Path]::GetFileName($artifact.file) -ne $artifact.file) { throw "Release supplemental artifact is invalid" }
+    if ($artifact.sha256 -isnot [string] -or $artifact.sha256 -notmatch "\A[0-9a-f]{64}\z") {
+      throw "Release supplemental artifact is invalid"
+    }
+  }
 }
 
 function Read-EnterpriseReleaseMetadata {
@@ -379,6 +392,7 @@ function Expand-PortableArchive {
     "resources/enterprise/opencode.jsonc",
     "resources/enterprise/company-guide.md",
     "resources/enterprise/models.json",
+    "resources/enterprise/enterprise-manifest.json",
     "resources/licenses/OpenCode-LICENSE"
   )) {
     [void](Assert-PortablePayload -ApplicationDirectory $executables[0].DirectoryName -RelativePath $resource)
@@ -453,6 +467,12 @@ if ($metadata.artifact -ne [System.IO.Path]::GetFileName($Archive)) { throw "Rel
 if ($metadata.authenticode -ne "NotSigned") { throw "Release metadata signature status mismatch" }
 if ($null -eq $metadata.target -or $metadata.target.os -ne "win32" -or $metadata.target.arch -ne "x64") {
   throw "Release metadata target mismatch"
+}
+foreach ($supplemental in @($metadata.sbom, $metadata.thirdPartyLicenses)) {
+  $supplementalPath = Join-Path ([System.IO.Path]::GetDirectoryName($ReleaseMetadata)) $supplemental.file
+  if (-not (Test-Path -LiteralPath $supplementalPath -PathType Leaf)) { throw "Release supplemental artifact is missing" }
+  $supplementalHash = (Get-FileHash -Algorithm SHA256 $supplementalPath).Hash.ToLowerInvariant()
+  if ($supplementalHash -ne $supplemental.sha256) { throw "Release supplemental artifact checksum mismatch" }
 }
 $existingAcceptance = [object[]]$metadata.windowsAcceptance
 

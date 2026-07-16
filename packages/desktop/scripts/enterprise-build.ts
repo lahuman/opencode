@@ -8,6 +8,7 @@ export type EnterpriseBuildMetadata = {
   modelName: string
   defaultsVersion: string
   guideVersion: string
+  catalogVersion: string
   allowedOrigins: string[]
 }
 
@@ -56,13 +57,14 @@ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
     modelName: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_NAME"),
     defaultsVersion: requireValue(env, "OPENCODE_ENTERPRISE_DEFAULTS_VERSION"),
     guideVersion: requireValue(env, "OPENCODE_ENTERPRISE_GUIDE_VERSION"),
+    catalogVersion: requireValue(env, "OPENCODE_ENTERPRISE_CATALOG_VERSION"),
     allowedOrigins,
   }
 }
 
 function requireValue(env: Env, key: string) {
   const value = env[key]?.trim()
-  if (!value) throw new Error(`${key} is required for an enterprise Windows package`)
+  if (!value) throw new Error(`${key} is required for enterprise mode`)
   return value
 }
 

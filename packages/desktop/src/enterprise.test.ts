@@ -16,6 +16,7 @@ function enabledProfile() {
     OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
     OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
   })
 }
@@ -35,6 +36,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
     ).toThrow("OPENCODE_ENTERPRISE_BASE_URL")
   })
@@ -64,6 +66,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "file:///C:/tmp",
       }),
     ).toThrow("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
@@ -78,6 +81,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
     ).toThrow("must not contain credentials")
   })
@@ -90,6 +94,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
     })
 
@@ -97,6 +102,7 @@ describe("enterprise profile", () => {
       enterpriseEnvironment(profile, {
         defaults: "C:/app/enterprise/opencode.jsonc",
         guide: "C:/app/enterprise/company-guide.md",
+        userData: "C:/Users/person/AppData/Local/company-opencode",
       }),
     ).toEqual({
       OPENCODE_ENTERPRISE_OFFLINE: "1",
@@ -104,10 +110,15 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_GUIDE_PATH: "C:/app/enterprise/company-guide.md",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
       OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
       OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      XDG_DATA_HOME: "C:/Users/person/AppData/Local/company-opencode/data",
+      XDG_CONFIG_HOME: "C:/Users/person/AppData/Local/company-opencode/config",
+      XDG_CACHE_HOME: "C:/Users/person/AppData/Local/company-opencode/cache",
+      XDG_STATE_HOME: "C:/Users/person/AppData/Local/company-opencode/state",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
       OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
@@ -166,6 +177,74 @@ describe("enterprise URL policy", () => {
     expect(enterpriseRendererRequestAllowed(profile, "file:///Users/person/private.css")).toBe(false)
     expect(enterpriseRendererRequestAllowed(profile, "javascript:alert(1)")).toBe(false)
     expect(enterpriseRendererRequestAllowed(profile, "not a renderer URL")).toBe(false)
+  })
+
+  test("allows only websocket requests paired with the same loopback development renderer", () => {
+    const profile = enabledProfile()
+
+    expect(
+      enterpriseRendererRequestAllowed(
+        profile,
+        "ws://localhost:5173/@vite/client",
+        "http://localhost:5173/index.html",
+      ),
+    ).toBe(true)
+    expect(
+      enterpriseRendererRequestAllowed(profile, "wss://[::1]:8443/hmr", "https://[::1]:8443/nested/index.html"),
+    ).toBe(true)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://LOCALHOST:80/hmr", "http://localhost/index.html")).toBe(
+      true,
+    )
+  })
+
+  test("allows only authenticated loopback PTY websockets outside development", () => {
+    const profile = enabledProfile()
+
+    expect(
+      enterpriseRendererRequestAllowed(
+        profile,
+        "ws://127.0.0.1:4096/pty/pty_test/connect?directory=C%3A%2Fproject&cursor=0&ticket=one-time",
+      ),
+    ).toBe(true)
+    expect(
+      enterpriseRendererRequestAllowed(
+        profile,
+        "ws://localhost:4096/pty/pty_test/connect?directory=C%3A%2Fproject&cursor=0&auth_token=encoded",
+      ),
+    ).toBe(true)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:4096/pty/pty_test/connect")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:4096/events?ticket=one-time")).toBe(false)
+    expect(
+      enterpriseRendererRequestAllowed(profile, "ws://external.example/pty/pty_test/connect?ticket=one-time"),
+    ).toBe(false)
+  })
+
+  test("denies websocket requests that are not the exact development renderer endpoint", () => {
+    const profile = enabledProfile()
+
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5174/hmr", "http://localhost:5173")).toBe(
+      false,
+    )
+    expect(enterpriseRendererRequestAllowed(profile, "ws://127.0.0.1:5173/hmr", "http://localhost:5173")).toBe(
+      false,
+    )
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "https://localhost:5173")).toBe(
+      false,
+    )
+    expect(enterpriseRendererRequestAllowed(profile, "wss://localhost:5173/hmr", "http://localhost:5173")).toBe(
+      false,
+    )
+    expect(
+      enterpriseRendererRequestAllowed(profile, "wss://llm.corp.example/hmr", "https://llm.corp.example"),
+    ).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "not a renderer URL")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "not a websocket URL", "http://localhost:5173")).toBe(false)
+    expect(
+      enterpriseRendererRequestAllowed(profile, "ws://user:secret@localhost:5173/hmr", "http://localhost:5173"),
+    ).toBe(false)
+    expect(
+      enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "http://user:secret@localhost:5173"),
+    ).toBe(false)
   })
 })
 

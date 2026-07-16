@@ -197,13 +197,15 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
     "$schemaVersion -isnot [System.IConvertible]",
     "[decimal]$schemaVersion",
     "[decimal]::Truncate($numericSchemaVersion)",
-    "$numericSchemaVersion -ne 1",
+    "$numericSchemaVersion -ne 2",
     '"appVersion"',
     '"gitCommit"',
     '"defaultsVersion"',
     '"guideVersion"',
     '"modelID"',
     '"windowsAcceptance"',
+    '"sbom"',
+    '"thirdPartyLicenses"',
   ]) {
     expect(validation).toContain(token)
   }
@@ -298,6 +300,7 @@ test("portable smoke validates every required extracted payload and a nonempty e
     "resources/enterprise/opencode.jsonc",
     "resources/enterprise/company-guide.md",
     "resources/enterprise/models.json",
+    "resources/enterprise/enterprise-manifest.json",
     "resources/licenses/OpenCode-LICENSE",
   ]) {
     expect(archive).toContain(`"${resource}"`)
@@ -389,7 +392,7 @@ test.if(process.platform === "win32")(
     const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
     const harness = join(temp, "read-release.ps1")
     const metadata = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       appVersion: "1.0.0",
       gitCommit: "commit",
       artifact: "company-opencode-pilot-win-x64.zip",
@@ -401,6 +404,11 @@ test.if(process.platform === "win32")(
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",
       windowsAcceptance: [],
+      sbom: { file: "company-opencode-pilot-win-x64.sbom.cdx.json", sha256: "a".repeat(64) },
+      thirdPartyLicenses: {
+        file: "company-opencode-pilot-win-x64.third-party-licenses.txt",
+        sha256: "b".repeat(64),
+      },
     }
 
     try {
@@ -434,6 +442,7 @@ test.if(process.platform === "win32")(
       await rm(temp, { force: true, recursive: true })
     }
   },
+  15_000,
 )
 
 test.if(process.platform === "win32")(
@@ -472,6 +481,7 @@ test.if(process.platform === "win32")(
       await rm(temp, { force: true, recursive: true })
     }
   },
+  15_000,
 )
 
 test.if(process.platform === "win32")(
@@ -520,6 +530,7 @@ if ((@($script:stopped | Sort-Object) -join ",") -ne "10,30") { exit 3 }`,
       await rm(temp, { force: true, recursive: true })
     }
   },
+  15_000,
 )
 
 test.if(process.platform === "win32")("PowerShell cleanup fixture does not stop a reused retained PID", async () => {
@@ -580,6 +591,7 @@ test.if(process.platform === "win32")(
         "resources/enterprise/opencode.jsonc",
         "resources/enterprise/company-guide.md",
         "resources/enterprise/models.json",
+        "resources/enterprise/enterprise-manifest.json",
         "resources/licenses/OpenCode-LICENSE",
       ]) {
         const file = join(temp, resource)
@@ -607,4 +619,5 @@ test.if(process.platform === "win32")(
       await rm(temp, { force: true, recursive: true })
     }
   },
+  15_000,
 )

@@ -78,6 +78,9 @@ try {
         credentialStatus: async () => ({ configured: false }),
         setCredentials: async () => ({ restartRequired: true }),
         clearCredentials: async () => ({ restartRequired: true }),
+        readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "warn", checks: [] }),
+        stateBackups: async () => [],
+        restoreStateBackup: async () => ({ restartRequired: true }),
         guide: { enabled: true, path, version: "2026.08" },
       },
     },
@@ -89,6 +92,7 @@ try {
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
       openExternal: (url) => shellOpenExternalURLs.push(url),
       registry: {

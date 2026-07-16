@@ -263,8 +263,9 @@ export function installEnterpriseWindowPolicy(
     throw new Error("Enterprise session policy cannot change after installation")
   }
   if (installed === undefined) {
+    const devRendererURL = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
     win.webContents.session.webRequest.onBeforeRequest((details, callback) => {
-      const allowed = enterpriseRendererRequestAllowed(profile, details.url)
+      const allowed = enterpriseRendererRequestAllowed(profile, details.url, devRendererURL)
       callback({ cancel: !allowed })
       if (!allowed) blocked(details.url, details.resourceType)
     })
@@ -370,7 +371,7 @@ function loadWindow(win: BrowserWindow) {
 }
 
 function trustedRendererDocumentURL() {
-  const devUrl = process.env.ELECTRON_RENDERER_URL
+  const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
   if (!devUrl) return `${rendererProtocol}://${rendererHost}/index.html`
 
   const url = new URL("index.html", devUrl)
@@ -491,7 +492,7 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
     sampler.stopAndFlush()
   })
   win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level === 3 || message.includes("health")) {
+    if (level === 3) {
       writeLog("renderer", "console-error", { window: name, level, message, line, sourceId }, "error")
     }
     if (message.toLowerCase().includes("terminal") || sourceId.toLowerCase().includes("terminal")) {
@@ -581,7 +582,7 @@ function isRendererUrl(value?: string, html = false) {
   const url = new URL(value)
   if (html && !url.pathname.endsWith(".html")) return false
   if (url.protocol === `${rendererProtocol}:` && url.host === rendererHost) return true
-  const devUrl = process.env.ELECTRON_RENDERER_URL
+  const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
   if (!devUrl || !URL.canParse(devUrl)) return false
   return url.origin === new URL(devUrl).origin
 }

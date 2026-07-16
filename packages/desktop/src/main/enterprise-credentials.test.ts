@@ -79,6 +79,7 @@ describe("enterprise credential store", () => {
     })
 
     expect(await store.get()).toEqual({ headers: {} })
+    expect(await store.health()).toEqual({ state: "corrupt" })
   })
 
   test("treats invalid decrypted content as unconfigured", async () => {

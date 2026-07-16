@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const mode = process.argv[2] ?? "packaged"
 const publicProtocol = mode === "public-protocol"
+Object.defineProperty(process, "resourcesPath", { value: tmpdir() })
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: publicProtocol ? "0" : "1",
   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
@@ -13,12 +14,14 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
     "https://telemetry.corp.example:8443/private?token=csp-origin-secret,https://*.wildcard.example/private",
 })
 if (mode === "dev-origin") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
 if (mode === "dev-slash") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/"
 if (mode === "dev-index") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173/index.html"
+if (mode === "packaged-renderer-env") process.env.ELECTRON_RENDERER_URL = "http://localhost:5173"
 if (mode === "packaged" || publicProtocol) delete process.env.ELECTRON_RENDERER_URL
 
 type RequestResult = { cancel: boolean }
@@ -176,7 +179,7 @@ mock.module("electron", () => ({
     exit() {},
     getName: () => "Company OpenCode Pilot",
     getPath: () => tmpdir(),
-    isPackaged: false,
+    isPackaged: mode === "packaged" || mode === "packaged-renderer-env" || publicProtocol,
     quit() {},
     relaunch() {},
   },
@@ -289,6 +292,18 @@ try {
   registerRendererProtocol({ rendererRoot: assetRoot })
 
   const requests = {
+    loopbackHealth: request(sessionRequest, {
+      url: "http://127.0.0.1:4096/global/health",
+      resourceType: "xhr",
+    }),
+    hmrWebSocket: request(sessionRequest, {
+      url: "ws://localhost:5173/@vite/client",
+      resourceType: "webSocket",
+    }),
+    terminalWebSocket: request(sessionRequest, {
+      url: "ws://127.0.0.1:4096/pty/pty_test/connect?directory=C%3A%2Fproject&cursor=0&ticket=one-time",
+      resourceType: "webSocket",
+    }),
     markdownImage: request(sessionRequest, {
       url: "https://cdn.example/private.png?token=renderer-secret",
       resourceType: "image",

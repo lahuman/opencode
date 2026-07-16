@@ -10,6 +10,7 @@ export const ENTERPRISE_PROFILE = parseEnterpriseProfile({
   OPENCODE_ENTERPRISE_MODEL_NAME: import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME,
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION,
   OPENCODE_ENTERPRISE_GUIDE_VERSION: import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION,
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION,
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: import.meta.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS,
 })
 
@@ -29,11 +30,23 @@ export function enterpriseURLAllowed(profile: EnterpriseProfile, input: string |
   return profile.allowedOrigins.includes(url.origin)
 }
 
-export function enterpriseRendererRequestAllowed(profile: EnterpriseProfile, input: string | URL) {
+export function enterpriseRendererRequestAllowed(
+  profile: EnterpriseProfile,
+  input: string | URL,
+  devRendererURL?: string | URL,
+) {
   if (!profile.enabled) return true
   const url = parseURL(input)
   if (!url) return false
   if (url.username || url.password) return false
+  if (url.protocol === "ws:" || url.protocol === "wss:") {
+    if (url.protocol === "ws:" && isLoopback(url) && isAuthenticatedPtyWebSocket(url)) return true
+    const renderer = devRendererURL ? parseURL(devRendererURL) : undefined
+    if (!renderer || renderer.username || renderer.password) return false
+    if (renderer.protocol !== (url.protocol === "ws:" ? "http:" : "https:")) return false
+    if (!isLoopback(url)) return false
+    return url.hostname === renderer.hostname && url.port === renderer.port
+  }
   if (url.protocol === "opencode:") return url.host === "app"
   if (url.protocol === "oc:") return url.host === "renderer"
   if (url.protocol === "data:" || url.protocol === "blob:") return true
@@ -83,4 +96,13 @@ function parseURL(input: string | URL) {
   } catch {
     return undefined
   }
+}
+
+function isLoopback(url: URL) {
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]"
+}
+
+function isAuthenticatedPtyWebSocket(url: URL) {
+  if (!/^\/pty\/pty[^/]*\/connect$/.test(url.pathname)) return false
+  return Boolean(url.searchParams.get("ticket") || url.searchParams.get("auth_token"))
 }

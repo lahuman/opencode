@@ -12,6 +12,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_PORT: "4096",
 })
 Object.defineProperty(process, "resourcesPath", { value: tmpdir(), configurable: true })
@@ -22,6 +23,9 @@ const shellOpenExternalURLs: string[] = []
 const protocolClients: string[] = []
 const paths = new Map<string, string>()
 let rendererProtocolRegistrations = 0
+let preflightCalls = 0
+let statePrepared = 0
+let stateHealthy = 0
 let appName = "Electron"
 let appUserModelId = ""
 const appData = join(tmpdir(), "opencode-main-index-app-data")
@@ -101,6 +105,7 @@ mock.module("electron", () => ({
 mock.module("electron-context-menu", () => ({ default() {} }))
 mock.module("../src/main/apps", () => ({ checkAppExists: () => false, resolveAppPath: async () => null }))
 mock.module("../src/main/logging", () => ({
+  configureEnterpriseSupport() {},
   exportDebugLogs: async () => "logs.zip",
   initCrashReporter() {},
   initLogging: () => ({ error() {}, log() {}, warn() {} }),
@@ -136,6 +141,27 @@ mock.module("../src/main/store", () => ({
 }))
 mock.module("../src/main/store-cleanup", () => ({ cleanupStoreFiles: async () => ({ deleted: [], scanned: 0 }) }))
 mock.module("../src/main/migrate", () => ({ migrate() {} }))
+mock.module("../src/main/enterprise-preflight", () => ({
+  runEnterprisePreflight: async () => {
+    preflightCalls++
+  },
+}))
+mock.module("../src/main/enterprise-adoption", () => ({ adoptEnterpriseLegacyState: async () => ({ adopted: [] }) }))
+mock.module("../src/main/enterprise-state", () => ({
+  EnterpriseStateError: class extends Error {
+    kind = "recovery_required"
+  },
+  listCompatibleEnterpriseBackups: async () => [],
+  prepareEnterpriseState: async () => {
+    statePrepared++
+    return { status: "pending" }
+  },
+  markEnterpriseStateHealthy: async () => {
+    stateHealthy++
+  },
+  readEnterpriseStateMetadata: async () => ({ backups: [] }),
+  restoreEnterpriseBackup: async () => undefined,
+}))
 
 const updater = {
   check: async () => undefined,
@@ -188,6 +214,7 @@ if (mode === "identity") {
 await import("../src/main/index")
 
 for (let attempts = 0; attempts < 100 && !listeners.has("open-link"); attempts++) await Bun.sleep(10)
+for (let attempts = 0; attempts < 100 && enterprise && stateHealthy === 0; attempts++) await Bun.sleep(10)
 
 await listeners.get("open-link")?.({}, "https://opencode.ai/docs?token=main-index-secret")
 await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
@@ -196,6 +223,9 @@ await listeners.get("open-link")?.({}, "https://user:secret@llm.corp.example/doc
 console.log(
   JSON.stringify({
     rendererProtocolRegistrations,
+    preflightCalls,
+    statePrepared,
+    stateHealthy,
     ipcRegistered: handlers.has("enterprise-guide-read") && listeners.has("open-link"),
     shellOpenExternalURLs,
     identity: {

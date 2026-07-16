@@ -7,6 +7,7 @@ const enabledProfile = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
 function evaluateConfig(env: Record<string, string> = {}) {
@@ -37,6 +38,7 @@ function evaluateConfig(env: Record<string, string> = {}) {
         OPENCODE_ENTERPRISE_MODEL_NAME: "",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "",
+        OPENCODE_ENTERPRISE_CATALOG_VERSION: "",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "",
         ...env,
       },
@@ -64,10 +66,12 @@ describe("enterprise Vite configuration", () => {
         main: {
           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
         },
         renderer: {
           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
         },
       },
     })

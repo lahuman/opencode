@@ -2,6 +2,7 @@ import path from "node:path"
 
 import { enterprisePackageEnvironment, validateEnterpriseBuild, type EnterpriseBuildMetadata } from "./enterprise-build"
 import { writeEnterpriseRelease, type EnterpriseReleaseInput } from "./enterprise-release"
+import { writeEnterpriseSupplyChain } from "./enterprise-supply-chain"
 import { verifyEnterpriseArchive, verifyEnterprisePackage } from "./verify-enterprise-package"
 
 type Env = Record<string, string | undefined>
@@ -26,6 +27,9 @@ type EnterprisePackageInput = {
   verifyArchive?: (archive: string, root?: string) => Promise<unknown>
   gitCommit?: () => Promise<string>
   release?: (input: EnterpriseReleaseInput) => Promise<unknown>
+  supplyChain?: typeof writeEnterpriseSupplyChain
+  verifySource?: (cwd: string, env: Env) => Promise<string>
+  authenticode?: (executable: string, env: Env) => Promise<"NotSigned">
 }
 
 export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput) {
@@ -41,6 +45,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
     stdout: "inherit" as const,
     stderr: "inherit" as const,
   }
+  const reviewedCommit = await input.verifySource?.(options.cwd, env)
   const build = await input.spawn(["bun", "run", "build"], options).exited
   if (build !== 0) return build
   const packageCode = await input.spawn(["bun", "run", "package:win", "--x64"], options).exited
@@ -52,8 +57,24 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
   const root = path.join(options.cwd, "dist", "win-unpacked")
   await (input.verifyPackage ?? verifyEnterprisePackage)(root)
   await (input.verifyArchive ?? verifyEnterpriseArchive)(archive, root)
-  const gitCommit = await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))()
-  await (input.release ?? writeEnterpriseRelease)({ archive, version, gitCommit, builtAt: new Date(), profile })
+  const packagedCommit = await input.verifySource?.(options.cwd, env)
+  if (reviewedCommit && packagedCommit !== reviewedCommit) {
+    throw new Error("Enterprise package source changed during the build")
+  }
+  const gitCommit = packagedCommit ?? reviewedCommit ?? (await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))())
+  const authenticode = await (input.authenticode?.(path.join(root, "Company OpenCode Pilot.exe"), env) ??
+    Promise.resolve("NotSigned" as const))
+  const builtAt = new Date()
+  const supplyChain = await (input.supplyChain ?? writeEnterpriseSupplyChain)({ archive, appVersion: version, builtAt })
+  await (input.release ?? writeEnterpriseRelease)({
+    archive,
+    version,
+    gitCommit,
+    builtAt,
+    profile,
+    authenticode,
+    ...supplyChain,
+  })
   return 0
 }
 
@@ -65,16 +86,47 @@ async function resolveGitCommit(cwd: string, env: Env) {
   return commit
 }
 
+export async function verifyEnterpriseSource(cwd: string, env: Env) {
+  const status = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=all"], {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "inherit",
+  })
+  if ((await status.exited) !== 0 || (await new Response(status.stdout).text()).trim()) {
+    throw new Error("Enterprise packaging requires a clean reviewed source tree")
+  }
+  return resolveGitCommit(cwd, env)
+}
+
+export async function verifyEnterpriseAuthenticode(executable: string, env: Env) {
+  const result = Bun.spawn(
+    [
+      "powershell",
+      "-NoProfile",
+      "-Command",
+      "$status = (Get-AuthenticodeSignature -LiteralPath $env:OPENCODE_ENTERPRISE_SIGNATURE_PATH).Status.ToString(); [Console]::Out.Write($status)",
+    ],
+    {
+      env: { ...env, OPENCODE_ENTERPRISE_SIGNATURE_PATH: executable },
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  )
+  if ((await result.exited) !== 0 || (await new Response(result.stdout).text()).trim() !== "NotSigned") {
+    throw new Error("Enterprise portable executable must be unsigned")
+  }
+  return "NotSigned" as const
+}
+
 if (import.meta.main) {
-  const isLocalTest = process.env["LOCAL_TEST"] === "1"
   const code = await runEnterpriseWindowsPackage({
     platform: process.platform,
     arch: process.arch,
     env: process.env,
     spawn: (command, options) => Bun.spawn(command, options),
-    // Skip ZIP integrity checks locally: 7-Zip adds extra fields that the strict verifier rejects.
-    verifyPackage: isLocalTest ? async () => {} : undefined,
-    verifyArchive: isLocalTest ? async () => {} : undefined,
+    verifySource: verifyEnterpriseSource,
+    authenticode: verifyEnterpriseAuthenticode,
   })
   if (code !== 0) process.exit(code)
 }

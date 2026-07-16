@@ -41,16 +41,41 @@ export type FatalRendererError = {
   os?: string
 }
 
+export type EnterpriseProviderDiagnostic = {
+  ok: boolean
+  checks: {
+    basic: "pass" | "fail" | "skipped"
+    streaming: "pass" | "fail" | "skipped"
+    toolCall: "pass" | "fail" | "skipped"
+  }
+  failure?: { kind: string; message: string }
+}
+export type EnterpriseReadinessReport = {
+  schemaVersion: 1
+  generatedAt: string
+  overall: "pass" | "warn" | "fail"
+  checks: {
+    id: string
+    status: "pass" | "warn" | "fail"
+    code: string
+    message: string
+    detail?: string
+  }[]
+}
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
   awaitInitialization: () => Promise<ServerReadyData>
   enterprise: {
     enabled: boolean
-    credentialStatus: () => Promise<{ configured: boolean }>
+    credentialStatus: () => Promise<{ configured: boolean; errorCode?: string }>
     setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
     clearCredentials: () => Promise<{ restartRequired: true }>
     readGuide: () => Promise<{ version: string; markdown: string }>
+    readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
+    stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
+    restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
   }
   wslServers: WslServersAPI
   updater: UpdaterAPI
@@ -127,6 +152,11 @@ export function createEnterpriseAPI(
     clearCredentials: () =>
       invoke("enterprise-clear-credentials") as ReturnType<ElectronAPI["enterprise"]["clearCredentials"]>,
     readGuide: () => invoke("enterprise-guide-read") as ReturnType<ElectronAPI["enterprise"]["readGuide"]>,
+    readiness: (provider) =>
+      invoke("enterprise-readiness", provider) as ReturnType<ElectronAPI["enterprise"]["readiness"]>,
+    stateBackups: () => invoke("enterprise-state-backups") as ReturnType<ElectronAPI["enterprise"]["stateBackups"]>,
+    restoreStateBackup: (backupID) =>
+      invoke("enterprise-state-restore", backupID) as ReturnType<ElectronAPI["enterprise"]["restoreStateBackup"]>,
   }
 }
 
@@ -136,5 +166,8 @@ export function mapEnterpriseAPI(enterprise: ElectronAPI["enterprise"]) {
     setCredentials: enterprise.setCredentials,
     clearCredentials: enterprise.clearCredentials,
     readGuide: enterprise.readGuide,
+    readiness: enterprise.readiness,
+    stateBackups: enterprise.stateBackups,
+    restoreStateBackup: enterprise.restoreStateBackup,
   }
 }

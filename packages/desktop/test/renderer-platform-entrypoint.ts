@@ -8,6 +8,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODEL_NAME: mode === "enterprise" ? "Company Code" : "",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: mode === "enterprise" ? "pilot-1" : "",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: mode === "enterprise" ? "pilot-1" : "",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: mode === "enterprise" ? "catalog-1" : "",
 })
 
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })

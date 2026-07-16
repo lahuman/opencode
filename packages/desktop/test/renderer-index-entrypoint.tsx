@@ -11,6 +11,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 })
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })
 document.title = "OpenCode"

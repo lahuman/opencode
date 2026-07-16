@@ -18,6 +18,10 @@ export function enterpriseSidecarEnvironment(): Record<string, string> {
 export function createEnterpriseCredentialHandlers(enabled: boolean, store: Store) {
   const status = async () => {
     if (!enabled) return { configured: false }
+    const health = await store.health()
+    if (health.state === "corrupt") return { configured: false, errorCode: "credential_decryption_failed" as const }
+    if (health.state === "encryption-unavailable")
+      return { configured: false, errorCode: "credential_encryption_unavailable" as const }
     const credentials = await store.get()
     return { configured: Boolean(credentials.apiKey || Object.keys(credentials.headers).length) }
   }
@@ -86,6 +90,23 @@ export function createEnterpriseCredentialStore(input: Input) {
     return { ...(typeof record.apiKey === "string" ? { apiKey: record.apiKey } : {}), headers }
   }
 
+  const health = async () => {
+    const encrypted = await readFile(input.file).catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
+      throw error
+    })
+    if (!encrypted) return { state: "missing" as const }
+    if (!input.encryptionAvailable()) return { state: "encryption-unavailable" as const }
+    const valid = await Promise.resolve(encrypted)
+      .then(input.decrypt)
+      .then((text) => JSON.parse(text))
+      .then(
+        (value) => Boolean(value && typeof value === "object" && !Array.isArray(value)),
+        () => false,
+      )
+    return { state: valid ? ("available" as const) : ("corrupt" as const) }
+  }
+
   const persist = async (credentials: EnterpriseCredentials) => {
     if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
     await write(temp, input.encrypt(JSON.stringify(credentials)))
@@ -111,5 +132,5 @@ export function createEnterpriseCredentialStore(input: Input) {
       if (errors.length) throw errors[0]
     })
 
-  return { get, set, update, clear }
+  return { get, health, set, update, clear }
 }

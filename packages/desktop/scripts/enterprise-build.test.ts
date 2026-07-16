@@ -9,6 +9,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
@@ -29,6 +30,7 @@ test("returns only normalized non-secret enterprise build metadata", () => {
       OPENCODE_ENTERPRISE_MODEL_NAME: "  Company Code  ",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "  pilot-1  ",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "  guide-1  ",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "  catalog-1  ",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
         "  https://LLM.corp.example:443/, http://localhost:3000/, https://llm.corp.example  ",
       OPENAI_API_KEY: "set",
@@ -40,6 +42,7 @@ test("returns only normalized non-secret enterprise build metadata", () => {
     modelName: "Company Code",
     defaultsVersion: "pilot-1",
     guideVersion: "guide-1",
+    catalogVersion: "catalog-1",
     allowedOrigins: ["https://llm.corp.example", "http://localhost:3000"],
   })
 })
@@ -53,6 +56,7 @@ test("requires enterprise mode and every enterprise package input", () => {
     "OPENCODE_ENTERPRISE_MODEL_NAME",
     "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
     "OPENCODE_ENTERPRISE_GUIDE_VERSION",
+    "OPENCODE_ENTERPRISE_CATALOG_VERSION",
     "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
   ]) {
     expect(() => validateEnterpriseBuild({ ...valid, [key]: " \t " })).toThrow(key)

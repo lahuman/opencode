@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 
-async function run(mode: "packaged" | "public-protocol" | "dev-origin" | "dev-slash" | "dev-index") {
+async function run(
+  mode: "packaged" | "packaged-renderer-env" | "public-protocol" | "dev-origin" | "dev-slash" | "dev-index",
+) {
   const child = Bun.spawn(
     [process.execPath, "run", `${import.meta.dir}/../../test/windows-policy-entrypoint.ts`, mode],
     {
@@ -41,6 +43,9 @@ test("production windows enforce one session policy and exact packaged document 
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
   })
   expect(result.requests).toEqual({
+    loopbackHealth: { value: { cancel: false } },
+    hmrWebSocket: { value: { cancel: true } },
+    terminalWebSocket: { value: { cancel: false } },
     markdownImage: { value: { cancel: true } },
     providerStylesheet: { value: { cancel: false } },
     dataFont: { value: { cancel: false } },
@@ -206,6 +211,16 @@ test("production windows enforce one session policy and exact packaged document 
   expect(serializedLogs).not.toContain("file://")
 })
 
+test("packaged windows ignore a development renderer environment URL for websocket policy", async () => {
+  const result = await run("packaged-renderer-env")
+
+  expect(result.productionWindow.loadedURL).toBe("oc://renderer/index.html")
+  expect(result.requests.loopbackHealth).toEqual({ value: { cancel: false } })
+  expect(result.requests.providerStylesheet).toEqual({ value: { cancel: false } })
+  expect(result.requests.hmrWebSocket).toEqual({ value: { cancel: true } })
+  expect(result.requests.terminalWebSocket).toEqual({ value: { cancel: false } })
+})
+
 test("public packaged protocol preserves document and asset headers without enterprise CSP", async () => {
   const result = await run("public-protocol")
 
@@ -251,6 +266,7 @@ test.each([
     sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
   })
+  expect(result.requests.hmrWebSocket).toEqual({ value: { cancel: false } })
   expect(result.navigation).toEqual({
     trusted: false,
     trustedHash: false,

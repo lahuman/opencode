@@ -7,6 +7,7 @@ export type EnterpriseProfile =
       modelName: string
       defaultsVersion: string
       guideVersion: string
+      catalogVersion: string
       allowedOrigins: string[]
     }
 
@@ -25,6 +26,7 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
   if (!modelName) throw new Error("OPENCODE_ENTERPRISE_MODEL_NAME is required")
   if (!defaultsVersion) throw new Error("OPENCODE_ENTERPRISE_DEFAULTS_VERSION is required")
   if (!guideVersion) throw new Error("OPENCODE_ENTERPRISE_GUIDE_VERSION is required")
+  const catalogVersion = env.OPENCODE_ENTERPRISE_CATALOG_VERSION?.trim() || defaultsVersion
 
   const url = (() => {
     try {
@@ -65,24 +67,35 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
     modelName,
     defaultsVersion,
     guideVersion,
+    catalogVersion,
     allowedOrigins,
   }
 }
 
 export function enterpriseEnvironment(
   profile: EnterpriseProfile,
-  paths: { defaults: string; guide: string },
+  paths: { defaults: string; guide: string; userData?: string },
 ): Record<string, string> {
   if (!profile.enabled) return {}
+  const userData = paths.userData?.replace(/[\\/]+$/, "")
   return {
     OPENCODE_ENTERPRISE_OFFLINE: "1",
     OPENCODE_ENTERPRISE_DEFAULTS_PATH: paths.defaults,
     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: profile.defaultsVersion,
     OPENCODE_ENTERPRISE_GUIDE_VERSION: profile.guideVersion,
+    OPENCODE_ENTERPRISE_CATALOG_VERSION: profile.catalogVersion,
     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: profile.allowedOrigins.join(","),
     OPENCODE_ENTERPRISE_BASE_URL: profile.baseURL,
     OPENCODE_ENTERPRISE_MODEL_ID: profile.modelID,
     OPENCODE_ENTERPRISE_MODEL_NAME: profile.modelName,
+    ...(userData
+      ? {
+          XDG_DATA_HOME: `${userData}/data`,
+          XDG_CONFIG_HOME: `${userData}/config`,
+          XDG_CACHE_HOME: `${userData}/cache`,
+          XDG_STATE_HOME: `${userData}/state`,
+        }
+      : {}),
     ...(paths.guide ? { OPENCODE_ENTERPRISE_GUIDE_PATH: paths.guide } : {}),
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_DISABLE_AUTOUPDATE: "1",
