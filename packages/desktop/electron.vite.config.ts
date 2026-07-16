@@ -17,6 +17,8 @@ const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
 
 const enterpriseProfile = parseEnterpriseProfile({
   OPENCODE_ENTERPRISE: process.env.OPENCODE_ENTERPRISE,
+  OPENCODE_ENTERPRISE_MODELS: process.env.OPENCODE_ENTERPRISE_MODELS,
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: process.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID,
   OPENCODE_ENTERPRISE_BASE_URL: process.env.OPENCODE_ENTERPRISE_BASE_URL,
   OPENCODE_ENTERPRISE_MODEL_ID: process.env.OPENCODE_ENTERPRISE_MODEL_ID,
   OPENCODE_ENTERPRISE_MODEL_NAME: process.env.OPENCODE_ENTERPRISE_MODEL_NAME,
@@ -29,9 +31,8 @@ const enterpriseProfile = parseEnterpriseProfile({
 const enterprise = enterpriseProfile.enabled
   ? {
       "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify("1"),
-      "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(enterpriseProfile.baseURL),
-      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(enterpriseProfile.modelID),
-      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(enterpriseProfile.modelName),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify(JSON.stringify(enterpriseProfile.models)),
+      "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(enterpriseProfile.defaultModelID),
       "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify(enterpriseProfile.defaultsVersion),
       "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify(enterpriseProfile.guideVersion),
       "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify(enterpriseProfile.catalogVersion),
@@ -39,9 +40,8 @@ const enterprise = enterpriseProfile.enabled
     }
   : {
       "import.meta.env.OPENCODE_ENTERPRISE": JSON.stringify("0"),
-      "import.meta.env.OPENCODE_ENTERPRISE_BASE_URL": JSON.stringify(""),
-      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_ID": JSON.stringify(""),
-      "import.meta.env.OPENCODE_ENTERPRISE_MODEL_NAME": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify(""),
+      "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify(""),
       "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify(""),

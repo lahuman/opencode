@@ -141,10 +141,19 @@ function createHarness() {
     if (url.pathname === "/global/health") return json({ healthy: true, version: "test" })
     if (url.pathname === "/global/config") {
       return json({
+        model: "company-llm/company-code",
         provider: {
           "company-llm": {
-            options: { baseURL: "https://llm.company.test/v1" },
-            models: { "company-code": { name: "Company Code" } },
+            models: {
+              "company-code": {
+                name: "Company Code",
+                provider: { api: "https://llm.company.test/v1" },
+              },
+              "company-reasoning": {
+                name: "Company Reasoning",
+                provider: { api: "https://reasoning.company.test/v1" },
+              },
+            },
           },
         },
       })
@@ -234,6 +243,15 @@ function createHarness() {
       },
       async readGuide() {
         return { version: "2026.07", markdown: GUIDE_MARKDOWN }
+      },
+      async readiness() {
+        return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }
+      },
+      async stateBackups() {
+        return []
+      },
+      async restoreStateBackup() {
+        return { restartRequired: true as const }
       },
     },
   }

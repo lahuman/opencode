@@ -49,13 +49,18 @@ describe("company provider config", () => {
   test("reads configured company models", () => {
     expect(
       companyProviderModels({
-        provider: { "company-llm": { models: { code: { name: "Company Code" } } } },
+        provider: {
+          "company-llm": {
+            models: { code: { name: "Company Code", provider: { api: "https://code.company.test/v1" } } },
+          },
+        },
       }),
-    ).toEqual([{ id: "code", name: "Company Code" }])
+    ).toEqual([{ id: "code", name: "Company Code", baseURL: "https://code.company.test/v1" }])
   })
 
-  test("projects only public setup data from provider options", () => {
+  test("projects model URLs and the configured default without secrets", () => {
     const config = companyProviderConfig({
+      model: "company-llm/fallback",
       provider: {
         "company-llm": {
           options: {
@@ -63,17 +68,20 @@ describe("company provider config", () => {
             apiKey: "must-not-escape",
             headers: { Authorization: "must-not-escape" },
           },
-          models: { code: { name: "Company Code" }, fallback: {} },
+          models: {
+            code: { name: "Company Code", provider: { api: "https://code.company.test/v1" } },
+            fallback: { provider: { api: "https://fallback.company.test/v1" } },
+          },
         },
       },
     })
 
     expect(config).toEqual({
-      baseURL: "https://llm.company.test/v1",
       models: [
-        { id: "code", name: "Company Code" },
-        { id: "fallback", name: "fallback" },
+        { id: "code", name: "Company Code", baseURL: "https://code.company.test/v1" },
+        { id: "fallback", name: "fallback", baseURL: "https://fallback.company.test/v1" },
       ],
+      defaultModelID: "fallback",
     })
     expect(JSON.stringify(config)).not.toContain("must-not-escape")
   })

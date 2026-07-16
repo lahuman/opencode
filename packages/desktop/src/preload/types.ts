@@ -69,9 +69,9 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   enterprise: {
     enabled: boolean
-    credentialStatus: () => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
-    clearCredentials: () => Promise<{ restartRequired: true }>
+    credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
+    setCredentials: (input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
     readGuide: () => Promise<{ version: string; markdown: string }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
@@ -145,12 +145,12 @@ export function createEnterpriseAPI(
 ): ElectronAPI["enterprise"] {
   return {
     enabled,
-    credentialStatus: () =>
-      invoke("enterprise-credential-status") as ReturnType<ElectronAPI["enterprise"]["credentialStatus"]>,
+    credentialStatus: (modelID) =>
+      invoke("enterprise-credential-status", modelID) as ReturnType<ElectronAPI["enterprise"]["credentialStatus"]>,
     setCredentials: (input) =>
       invoke("enterprise-set-credentials", input) as ReturnType<ElectronAPI["enterprise"]["setCredentials"]>,
-    clearCredentials: () =>
-      invoke("enterprise-clear-credentials") as ReturnType<ElectronAPI["enterprise"]["clearCredentials"]>,
+    clearCredentials: (modelID) =>
+      invoke("enterprise-clear-credentials", modelID) as ReturnType<ElectronAPI["enterprise"]["clearCredentials"]>,
     readGuide: () => invoke("enterprise-guide-read") as ReturnType<ElectronAPI["enterprise"]["readGuide"]>,
     readiness: (provider) =>
       invoke("enterprise-readiness", provider) as ReturnType<ElectronAPI["enterprise"]["readiness"]>,

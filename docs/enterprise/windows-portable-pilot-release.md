@@ -64,10 +64,9 @@ From the clean checkout root, set only the approved non-secret enterprise inputs
 
 ```powershell
 $env:OPENCODE_ENTERPRISE = "1"
-$env:OPENCODE_ENTERPRISE_BASE_URL = "https://llm.corp.example/v1"
-$env:OPENCODE_ENTERPRISE_MODEL_ID = "company-code"
-$env:OPENCODE_ENTERPRISE_MODEL_NAME = "Company Code"
-$env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = "https://llm.corp.example,https://llm-dr.corp.example"
+$env:OPENCODE_ENTERPRISE_MODELS = '[{"id":"company-code","name":"Company Code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","name":"Company Reasoning","baseURL":"https://llm-dr.corp.example/v1"}]'
+$env:OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID = "company-code"
+$env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = ""
 $env:OPENCODE_ENTERPRISE_DEFAULTS_VERSION = "pilot-1"
 $env:OPENCODE_ENTERPRISE_GUIDE_VERSION = "pilot-1"
 $env:OPENCODE_ENTERPRISE_CATALOG_VERSION = "pilot-1"
@@ -83,11 +82,10 @@ bun run package:enterprise:win
 Use this exact non-secret profile for the candidate build and both Windows acceptance VMs:
 
 - Primary origin: `https://llm.corp.example`
-- Second approved internal origin: `https://llm-dr.corp.example`
-- Default base URL: `https://llm.corp.example/v1`
+- Reasoning-model origin: `https://llm-dr.corp.example`
 - Default model: `company-llm/company-code`
 
-The base URL and default model remain primary. The second origin exists only to accept a project-level override to another approved internal OpenAI-compatible origin. `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS` is a comma-separated list of absolute HTTP(S) origins; it must include the primary base-URL origin and may include the second origin, but must not include a path, credential, query, fragment, public provider, or acceptance-only substitute. Preserve these exact values with the external evidence for the candidate. They are part of the immutable packaged acceptance profile: do not alter them on an acceptance VM or rebuild/repackage only one component to change an endpoint. A profile change requires a fresh clean build, ZIP/checksum/release JSON set, and full Windows acceptance.
+Each entry in `OPENCODE_ENTERPRISE_MODELS` has its own non-secret ID, display name, and OpenAI-compatible base URL. Model origins are allowed automatically; `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS` is reserved for additional approved project-level overrides and may be empty. It must contain only comma-separated absolute HTTP(S) origins without paths, credentials, queries, or fragments. Never place API keys, authorization headers, or tokens in `.env`; enter credentials for each model in the Company LLM settings screen so Windows DPAPI encrypts them. The legacy `BASE_URL`, `MODEL_ID`, and `MODEL_NAME` variables remain accepted for one compatibility release only.
 
 Both approved endpoints must validate through the normal Windows trust store. The second origin does not authorize a certificate exception, relaxed TLS validation, or any change to the release gates.
 
@@ -177,17 +175,23 @@ function Read-VerifiedPortableReleaseMetadata {
 
   $metadata = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
   $expectedFields = @(
-    "appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID",
-    "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
+    "appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion",
+    "modelCatalogSHA256", "modelIDs", "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
   ) | Sort-Object
   if ($metadata -isnot [PSCustomObject] -or (@($metadata.PSObject.Properties.Name | Sort-Object) -join ",") -ne ($expectedFields -join ",")) {
     throw "Release metadata shape is invalid"
   }
-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID", "sha256")) {
+  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
     if ($metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($metadata.$field)) {
       throw "Release metadata shape is invalid"
     }
   }
+  if ($metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
+  if ($metadata.modelIDs -isnot [System.Array] -or $metadata.modelIDs.Count -eq 0) { throw "Release metadata model catalog is invalid" }
+  $modelIDs = @($metadata.modelIDs)
+  if (@($modelIDs | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) { throw "Release metadata model catalog is invalid" }
+  if (($modelIDs -join ",") -ne (@($modelIDs | Sort-Object -Unique) -join ",")) { throw "Release metadata model catalog is invalid" }
+  if ($modelIDs -notcontains $metadata.defaultModelID) { throw "Release metadata model catalog is invalid" }
   if ($metadata.schemaVersion -is [string] -or $metadata.schemaVersion -is [bool] -or $metadata.schemaVersion -isnot [System.IConvertible]) {
     throw "Release metadata schema version is invalid"
   }
@@ -196,7 +200,7 @@ function Read-VerifiedPortableReleaseMetadata {
   } catch {
     throw "Release metadata schema version is invalid"
   }
-  if ([decimal]::Truncate($schemaVersion) -ne $schemaVersion -or $schemaVersion -ne 2) {
+  if ([decimal]::Truncate($schemaVersion) -ne $schemaVersion -or $schemaVersion -ne 3) {
     throw "Release metadata schema version is invalid"
   }
   if (
@@ -237,10 +241,13 @@ function Assert-ReleaseMetadataMatchesPristine {
 
   if ($Pristine.windowsAcceptance.Count -ne 0) { throw "Pristine release metadata is not pristine" }
   foreach ($field in @(
-    "schemaVersion", "appVersion", "gitCommit", "artifact", "sha256", "defaultsVersion", "guideVersion", "modelID",
+    "schemaVersion", "appVersion", "gitCommit", "artifact", "sha256", "defaultsVersion", "guideVersion", "defaultModelID", "modelCatalogSHA256",
     "builtAt", "authenticode"
   )) {
     if ($Metadata.$field -ne $Pristine.$field) { throw "Release metadata immutable field mismatch: $field" }
+  }
+  if (($Metadata.modelIDs | ConvertTo-Json -Compress) -cne ($Pristine.modelIDs | ConvertTo-Json -Compress)) {
+    throw "Release metadata immutable field mismatch: modelIDs"
   }
   foreach ($field in @("sbom", "thirdPartyLicenses")) {
     if (($Metadata.$field | ConvertTo-Json -Compress) -cne ($Pristine.$field | ConvertTo-Json -Compress)) {
@@ -320,7 +327,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath $pristineReleaseMetadata |
   Out-File -LiteralPath (Join-Path $evidenceDirectory "release.pristine.json.sha256.txt")
 ```
 
-`EnterpriseReleaseMetadataV2` has these actual immutable values: `schemaVersion`, `appVersion`, `gitCommit`, `artifact`, `sha256`, `defaultsVersion`, `guideVersion`, `modelID`, `target`, `builtAt`, `authenticode`, `sbom`, and `thirdPartyLicenses`. It does not contain `size` or `modelName`; do not invent fields or add them to `.release.json`. All five release artifacts remain immutable throughout acceptance. The only allowed release-JSON mutation is the smoke script appending valid fixed-schema Windows acceptance records.
+`EnterpriseReleaseMetadataV3` has these actual immutable values: `schemaVersion`, `appVersion`, `gitCommit`, `artifact`, `sha256`, `defaultsVersion`, `guideVersion`, `defaultModelID`, `modelIDs`, `modelCatalogSHA256`, `target`, `builtAt`, `authenticode`, `sbom`, and `thirdPartyLicenses`. It contains neither model names nor endpoint URLs or credentials. Do not invent fields or add them to `.release.json`. All five release artifacts remain immutable throughout acceptance. The only allowed release-JSON mutation is the smoke script appending valid fixed-schema Windows acceptance records.
 
 ## Acceptance-transfer validation
 
@@ -476,7 +483,7 @@ $evidenceFile = Join-Path $evidenceDirectory "windows-acceptance.md"
 $evidenceFile
 ```
 
-The external file must identify the artifact, ZIP SHA-256, git commit, release-metadata filename, `release.pristine.json` control-copy hash, and the controlled acceptance profile's primary origin, second approved origin, default base URL, and default model. It must then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, retained egress trace, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
+The external file must identify the artifact, ZIP SHA-256, git commit, release-metadata filename, `release.pristine.json` control-copy hash, model IDs, model-catalog hash, approved model origins, and default model. It must then retain separate Windows 10 and Windows 11 sections. Each section must copy the corresponding fixed-schema record values (`windowsVersion`, `windowsBuild`, `testedAt`, `tester`, and `result`) and cite the checksum output, smoke transcript, retained egress trace, and completed manual checklist. Do not put credentials, authorization headers, user settings, or full secret-bearing URLs in the evidence file.
 
 ### Retained egress evidence
 

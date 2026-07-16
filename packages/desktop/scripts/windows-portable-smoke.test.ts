@@ -197,12 +197,14 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
     "$schemaVersion -isnot [System.IConvertible]",
     "[decimal]$schemaVersion",
     "[decimal]::Truncate($numericSchemaVersion)",
-    "$numericSchemaVersion -ne 2",
+    "$numericSchemaVersion -ne 3",
     '"appVersion"',
     '"gitCommit"',
     '"defaultsVersion"',
     '"guideVersion"',
-    '"modelID"',
+    '"defaultModelID"',
+    '"modelIDs"',
+    '"modelCatalogSHA256"',
     '"windowsAcceptance"',
     '"sbom"',
     '"thirdPartyLicenses"',
@@ -218,6 +220,83 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
     script.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata"),
   )
 })
+
+test("portable smoke compares release catalog identity with the extracted manifest", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const validation = script.slice(
+    script.indexOf("function Assert-EnterpriseCatalogIdentity"),
+    script.indexOf("function Read-EnterpriseReleaseMetadata"),
+  )
+
+  for (const token of [
+    "enterprise-manifest.json",
+    "$manifest.defaultModelID -cne $Metadata.defaultModelID",
+    "$manifest.modelCatalogSHA256 -cne $Metadata.modelCatalogSHA256",
+    '$manifest.modelIDs -join "`0"',
+    '$Metadata.modelIDs -join "`0"',
+  ]) {
+    expect(validation).toContain(token)
+  }
+  expect(script).toContain("[System.StringComparer]::Ordinal")
+  expect(script).toContain("Assert-EnterpriseCatalogIdentity -Metadata $metadata -ApplicationDirectory $application.Directory")
+  expect(script.indexOf("Assert-EnterpriseCatalogIdentity -Metadata $metadata")).toBeLessThan(
+    script.indexOf("Test-PortableLaunch -Application $application"),
+  )
+})
+
+test.if(process.platform === "win32")(
+  "PowerShell rejects release catalog identities that differ from the extracted manifest",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const validation = script.slice(
+      script.indexOf("function Assert-EnterpriseCatalogIdentity"),
+      script.indexOf("function Read-EnterpriseReleaseMetadata"),
+    )
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-catalog-"))
+    const application = join(temp, "application")
+    const manifest = {
+      schemaVersion: 2,
+      defaultModelID: "code",
+      modelIDs: ["code", "reasoning"],
+      modelCatalogSHA256: "a".repeat(64),
+    }
+    const metadata = {
+      defaultModelID: manifest.defaultModelID,
+      modelIDs: manifest.modelIDs,
+      modelCatalogSHA256: manifest.modelCatalogSHA256,
+    }
+    const harness = join(temp, "catalog.ps1")
+    const metadataPath = join(temp, "release.json")
+
+    try {
+      await mkdir(join(application, "resources", "enterprise"), { recursive: true })
+      await Bun.write(
+        join(application, "resources", "enterprise", "enterprise-manifest.json"),
+        JSON.stringify(manifest),
+      )
+      await Bun.write(
+        harness,
+        `${validation}\n$metadata = Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json\nAssert-EnterpriseCatalogIdentity -Metadata $metadata -ApplicationDirectory $args[1]`,
+      )
+      const verify = async (value: typeof metadata) => {
+        await Bun.write(metadataPath, JSON.stringify(value))
+        const process = Bun.spawn(
+          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, metadataPath, application],
+          { stdout: "pipe", stderr: "pipe" },
+        )
+        return { code: await process.exited, stderr: await new Response(process.stderr).text() }
+      }
+
+      expect(await verify(metadata)).toEqual({ code: 0, stderr: "" })
+      expect((await verify({ ...metadata, defaultModelID: "reasoning" })).code).not.toBe(0)
+      expect((await verify({ ...metadata, modelIDs: ["code", "other"] })).code).not.toBe(0)
+      expect((await verify({ ...metadata, modelCatalogSHA256: "b".repeat(64) })).code).not.toBe(0)
+    } finally {
+      await rm(temp, { recursive: true, force: true })
+    }
+  },
+  30_000,
+)
 
 test("portable smoke gates raw release JSON to a single top-level object", async () => {
   const script = await Bun.file(scriptPath).text()
@@ -392,14 +471,16 @@ test.if(process.platform === "win32")(
     const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
     const harness = join(temp, "read-release.ps1")
     const metadata = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       appVersion: "1.0.0",
       gitCommit: "commit",
       artifact: "company-opencode-pilot-win-x64.zip",
       sha256: "hash",
       defaultsVersion: "defaults",
       guideVersion: "guide",
-      modelID: "model",
+      defaultModelID: "model",
+      modelIDs: ["model"],
+      modelCatalogSHA256: "c".repeat(64),
       target: { os: "win32", arch: "x64" },
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",

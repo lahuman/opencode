@@ -11,8 +11,8 @@ test("sidecar environment blocks shared plaintext credential sources", () => {
 
 test("enterprise credentials travel by startup message and never by environment", () => {
   const credentials = {
-    apiKey: "secret-key",
-    headers: { "X-Company-Token": "secret-header" },
+    schemaVersion: 2 as const,
+    models: { code: { apiKey: "secret-key", headers: { "X-Company-Token": "secret-header" } } },
   }
   const env = createSidecarEnv(enterpriseSidecarEnvironment(), {
     inherited: {
@@ -64,8 +64,8 @@ test("ordinary sidecar environment preserves standard auth and config overrides"
 
 test("successful sidecar post releases credentials from the long-lived owner", () => {
   const credentials = {
-    apiKey: "secret-key",
-    headers: { Authorization: "secret-header" },
+    schemaVersion: 2 as const,
+    models: { code: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
   }
   const owner = { credentials }
   let posted: ReturnType<typeof createSidecarStartCommand> | undefined
@@ -88,7 +88,7 @@ test("successful sidecar post releases credentials from the long-lived owner", (
 })
 
 test("failed sidecar post does not report credentials as released", () => {
-  const credentials = { apiKey: "secret-key", headers: {} }
+  const credentials = { schemaVersion: 2 as const, models: { code: { apiKey: "secret-key", headers: {} } } }
   const owner = { credentials }
 
   expect(() =>

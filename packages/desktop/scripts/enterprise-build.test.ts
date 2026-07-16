@@ -13,10 +13,67 @@ const valid = {
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
+const multiModel = {
+  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+    { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+  ]),
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+  OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+}
+
+test("validates normalized multi-model build metadata", () => {
+  expect(validateEnterpriseBuild(multiModel)).toEqual({
+    models: [
+      { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+      { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+    ],
+    defaultModelID: "code",
+    defaultsVersion: "pilot-1",
+    guideVersion: "pilot-1",
+    catalogVersion: "catalog-1",
+    allowedOrigins: [
+      "https://code.corp.example",
+      "https://reasoning.corp.example",
+      "https://llm-dr.corp.example",
+    ],
+  })
+})
+
+test("rejects duplicate, secret-bearing, and incomplete model catalogs", () => {
+  expect(() => validateEnterpriseBuild({ ...multiModel, OPENCODE_ENTERPRISE_MODELS: "not-json" })).toThrow(
+    "OPENCODE_ENTERPRISE_MODELS",
+  )
+  expect(() =>
+    validateEnterpriseBuild({
+      ...multiModel,
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+        { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+      ]),
+    }),
+  ).toThrow("OPENCODE_ENTERPRISE_MODELS")
+  expect(() =>
+    validateEnterpriseBuild({
+      ...multiModel,
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", apiKey: "secret" },
+      ]),
+    }),
+  ).toThrow("OPENCODE_ENTERPRISE_MODELS")
+  expect(() =>
+    validateEnterpriseBuild({ ...multiModel, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "missing" }),
+  ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+})
+
 test("accepts a portable unsigned profile without signing inputs", () => {
   expect(validateEnterpriseBuild(valid)).toMatchObject({
-    baseURL: "https://llm.corp.example/v1",
-    modelID: "company-code",
+    models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+    defaultModelID: "company-code",
     allowedOrigins: ["https://llm.corp.example"],
   })
 })
@@ -37,9 +94,8 @@ test("returns only normalized non-secret enterprise build metadata", () => {
       OPENCODE_ENTERPRISE_SECRET_HEADERS: "set",
     }),
   ).toEqual({
-    baseURL: "https://llm.corp.example/v2",
-    modelID: "company-code",
-    modelName: "Company Code",
+    models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v2" }],
+    defaultModelID: "company-code",
     defaultsVersion: "pilot-1",
     guideVersion: "guide-1",
     catalogVersion: "catalog-1",
@@ -57,7 +113,6 @@ test("requires enterprise mode and every enterprise package input", () => {
     "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
     "OPENCODE_ENTERPRISE_GUIDE_VERSION",
     "OPENCODE_ENTERPRISE_CATALOG_VERSION",
-    "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
   ]) {
     expect(() => validateEnterpriseBuild({ ...valid, [key]: " \t " })).toThrow(key)
   }
@@ -102,13 +157,13 @@ test("strips inherited signing variables from package children", () => {
   ).toEqual([])
 })
 
-test("requires the declared origins to include the base URL origin", () => {
-  expect(() =>
+test("automatically includes model origins before additional origins", () => {
+  expect(
     validateEnterpriseBuild({
       ...valid,
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://other.corp.example",
-    }),
-  ).toThrow("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
+    }).allowedOrigins,
+  ).toEqual(["https://llm.corp.example", "https://other.corp.example"])
 })
 
 test("rejects non-HTTP and credentialed base URLs with generic safe errors", () => {
@@ -308,7 +363,7 @@ test("accepts strict DNS, numeric-port, and bracketed-IPv6 enterprise URLs", () 
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: origin,
     })
 
-    expect(metadata.baseURL).toBe(normalizedBase)
+    expect(metadata.models[0].baseURL).toBe(normalizedBase)
     expect(metadata.allowedOrigins).toEqual([normalizedOrigin])
   }
 })

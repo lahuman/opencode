@@ -7,22 +7,26 @@ import { ConfigPlugin } from "./plugin"
 const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
 
 export type Policy = ReturnType<typeof settings>
-export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins">
+export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins"> & {
+  models?: { id: string }[]
+}
 export type DefaultsPolicy = Pick<
   Policy,
-  "enabled" | "defaultsPath" | "allowedOrigins" | "baseURL" | "modelID" | "modelName"
+  "enabled" | "defaultsPath" | "allowedOrigins" | "models" | "defaultModelID"
 > & { guidePath?: string }
 type Info = ConfigV1.Info & { plugin_origins?: ConfigPlugin.Origin[] }
 
 export function settings() {
   const enabled = process.env.OPENCODE_ENTERPRISE_OFFLINE === "1"
+  const models = enabled ? enterpriseModels() : []
   return {
     enabled,
     defaultsPath: enabled ? process.env.OPENCODE_ENTERPRISE_DEFAULTS_PATH : undefined,
     guidePath: enabled ? process.env.OPENCODE_ENTERPRISE_GUIDE_PATH : undefined,
-    baseURL: enabled ? process.env.OPENCODE_ENTERPRISE_BASE_URL : undefined,
-    modelID: enabled ? process.env.OPENCODE_ENTERPRISE_MODEL_ID : undefined,
-    modelName: enabled ? process.env.OPENCODE_ENTERPRISE_MODEL_NAME : undefined,
+    models,
+    defaultModelID: enabled
+      ? process.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID ?? models[0]?.id
+      : undefined,
     allowedOrigins: new Set(
       (enabled ? process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS : undefined)
         ?.split(",")
@@ -63,14 +67,14 @@ export function sanitizeWrite(info: Info, policy: EnforcementPolicy = settings()
 
 export function materializeDefaults(info: Info, policy: DefaultsPolicy = settings()): Info {
   if (!policy.enabled) return info
-  if (!policy.baseURL || !policy.modelID || !policy.modelName) {
+  if (!policy.models.length || !policy.defaultModelID || !policy.models.some((model) => model.id === policy.defaultModelID)) {
     throw new Error("Enterprise provider metadata is incomplete")
   }
   const guidePath = policy.guidePath
   const current = info.provider?.["company-llm"]
   return {
     ...info,
-    model: info.model ?? `company-llm/${policy.modelID}`,
+    model: info.model ?? `company-llm/${policy.defaultModelID}`,
     ...(guidePath
       ? { instructions: [guidePath, ...(info.instructions ?? []).filter((item) => item !== guidePath)] }
       : {}),
@@ -80,13 +84,25 @@ export function materializeDefaults(info: Info, policy: DefaultsPolicy = setting
         ...current,
         npm: OPENAI_COMPATIBLE,
         name: current?.name ?? "Company LLM",
-        options: { ...current?.options, baseURL: policy.baseURL },
+        ...(current?.options ? { options: current.options } : {}),
         models: {
-          ...current?.models,
-          [policy.modelID]: {
-            name: policy.modelName,
-            ...current?.models?.[policy.modelID],
-          },
+          ...Object.fromEntries(
+            policy.models.map((model) => {
+              const configured = current?.models?.[model.id]
+              return [
+                model.id,
+                {
+                  name: model.name,
+                  ...configured,
+                  provider: {
+                    npm: OPENAI_COMPATIBLE,
+                    api: model.baseURL,
+                    ...configured?.provider,
+                  },
+                },
+              ]
+            }),
+          ),
         },
       },
     },
@@ -99,29 +115,40 @@ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Inf
   const provider = Object.fromEntries(
     Object.entries(info.provider ?? {}).flatMap((entry) => {
       if (entry[1].npm !== OPENAI_COMPATIBLE) return []
-      if (typeof entry[1].options?.baseURL !== "string") return []
-      try {
-        const url = new URL(entry[1].options.baseURL)
-        if (url.protocol !== "http:" && url.protocol !== "https:") return []
-        if (url.username || url.password || !policy.allowedOrigins.has(url.origin)) return []
-        return [
-          [
-            entry[0],
-            {
-              ...entry[1],
-              env: Array<string>(),
-              options: omit(entry[1].options, ["key", "apiKey", "headers"]),
-              models: mapValues(entry[1].models ?? {}, (model) => ({
-                ...omit(model, ["headers"]),
-                provider: { ...model.provider, npm: OPENAI_COMPATIBLE },
-                options: omit(model.options ?? {}, ["key", "apiKey", "headers"]),
-              })),
-            },
-          ],
-        ] as const
-      } catch {
+      const providerURL = typeof entry[1].options?.baseURL === "string" ? entry[1].options.baseURL : undefined
+      if (providerURL && !allowedURL(providerURL, policy.allowedOrigins)) return []
+      const models = entry[1].models ?? {}
+      if (
+        !Object.keys(models).length ||
+        Object.values(models).some((model) => {
+          const url = typeof model.provider?.api === "string" ? model.provider.api : providerURL
+          return !url || !allowedURL(url, policy.allowedOrigins)
+        })
+      ) {
         return []
       }
+      const retainedModels =
+        entry[0] === "company-llm" && policy.models
+          ? Object.fromEntries(
+              Object.entries(models).filter(([modelID]) => policy.models?.some((model) => model.id === modelID)),
+            )
+          : models
+      if (!Object.keys(retainedModels).length) return []
+      return [
+        [
+          entry[0],
+          {
+            ...entry[1],
+            env: Array<string>(),
+            options: omit(entry[1].options ?? {}, ["key", "apiKey", "headers"]),
+            models: mapValues(retainedModels, (model) => ({
+              ...omit(model, ["headers"]),
+              provider: { ...model.provider, npm: OPENAI_COMPATIBLE },
+              options: omit(model.options ?? {}, ["key", "apiKey", "headers"]),
+            })),
+          },
+        ],
+      ] as const
     }),
   )
   const plugin_origins = (info.plugin_origins ?? []).filter((item) =>
@@ -135,5 +162,44 @@ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Inf
     plugin_origins,
     share: "disabled",
     autoupdate: false,
+  }
+}
+
+function enterpriseModels() {
+  if (!process.env.OPENCODE_ENTERPRISE_MODELS) {
+    const id = process.env.OPENCODE_ENTERPRISE_MODEL_ID
+    const name = process.env.OPENCODE_ENTERPRISE_MODEL_NAME
+    const baseURL = process.env.OPENCODE_ENTERPRISE_BASE_URL
+    return id && name && baseURL ? [{ id, name, baseURL }] : []
+  }
+  const value: unknown = (() => {
+    try {
+      return JSON.parse(process.env.OPENCODE_ENTERPRISE_MODELS)
+    } catch {
+      return []
+    }
+  })()
+  if (!Array.isArray(value)) return []
+  return value.flatMap((model) => {
+    if (typeof model !== "object" || model === null || Array.isArray(model)) return []
+    if (!("id" in model) || !("name" in model) || !("baseURL" in model)) return []
+    if (typeof model.id !== "string" || typeof model.name !== "string" || typeof model.baseURL !== "string") return []
+    return [{ id: model.id, name: model.name, baseURL: model.baseURL }]
+  })
+}
+
+function allowedURL(value: string, allowedOrigins: Set<string>) {
+  try {
+    const url = new URL(value)
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      allowedOrigins.has(url.origin)
+    )
+  } catch {
+    return false
   }
 }

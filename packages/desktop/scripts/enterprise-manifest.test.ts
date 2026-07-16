@@ -13,9 +13,11 @@ test("generates the packaged manifest from validated enterprise build inputs", a
     resources: fixture.resources,
     env: {
       OPENCODE_ENTERPRISE: "1",
-      OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+      ]),
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "defaults-2",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "guide-3",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-4",
@@ -25,7 +27,7 @@ test("generates the packaged manifest from validated enterprise build inputs", a
   })
 
   expect(manifest.catalogVersion).toBe("catalog-4")
-  expect(manifest.allowedOrigins).toEqual(["https://llm.corp.example"])
+  expect(manifest.allowedOrigins).toEqual(["https://fast.corp.example", "https://llm.corp.example"])
   expect(await Bun.file(fixture.output).json()).toEqual(manifest)
   expect(await Bun.file(fixture.output).text()).not.toContain("secret-marker")
   expect(await Bun.file(fixture.output).text()).not.toContain("/v1")
@@ -50,16 +52,17 @@ test("prepares a manifest only for enterprise builds", async () => {
       resources: fixture.resources,
       env: {
         OPENCODE_ENTERPRISE: "1",
-        OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-        OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-        OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+        OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+          { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        ]),
+        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "defaults-2",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "guide-3",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-4",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
       },
     }),
-  ).toMatchObject({ schemaVersion: 1, appVersion: "1.2.3" })
+  ).toMatchObject({ schemaVersion: 2, appVersion: "1.2.3" })
 })
 
 async function manifestFixture() {

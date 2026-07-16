@@ -14,7 +14,8 @@ export async function generateEnterpriseManifest(input: {
   const manifest = await createEnterpriseManifest({
     appVersion: input.appVersion,
     profile: {
-      modelID: profile.modelID,
+      models: profile.models,
+      defaultModelID: profile.defaultModelID,
       defaultsVersion: profile.defaultsVersion,
       guideVersion: profile.guideVersion,
       catalogVersion: profile.catalogVersion,

@@ -73,17 +73,33 @@ function Assert-EnterpriseReleaseMetadata {
   if ($Metadata -isnot [PSCustomObject]) { throw "Release metadata shape is invalid" }
 
   $requiredFields = @(
-    "appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID",
-    "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
+    "appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion",
+    "modelCatalogSHA256", "modelIDs", "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
   )
   $metadataFields = @($Metadata.PSObject.Properties.Name | Sort-Object)
   if (($metadataFields -join ",") -ne ($requiredFields -join ",")) { throw "Release metadata shape is invalid" }
 
-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelID", "sha256")) {
+  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
     if ($Metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($Metadata.$field)) {
       throw "Release metadata shape is invalid"
     }
   }
+  if ($Metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
+  if ($Metadata.modelIDs -isnot [System.Array] -or $Metadata.modelIDs.Count -eq 0) {
+    throw "Release metadata model catalog is invalid"
+  }
+  $modelIDs = @($Metadata.modelIDs)
+  if (@($modelIDs | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) {
+    throw "Release metadata model catalog is invalid"
+  }
+  $modelIDSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  if (@($modelIDs | Where-Object { -not $modelIDSet.Add($_) }).Count -ne 0) {
+    throw "Release metadata model catalog is invalid"
+  }
+  $sortedModelIDs = [string[]]$modelIDs.Clone()
+  [Array]::Sort($sortedModelIDs, [System.StringComparer]::Ordinal)
+  if (($modelIDs -join "`0") -cne ($sortedModelIDs -join "`0")) { throw "Release metadata model catalog is invalid" }
+  if (-not $modelIDSet.Contains($Metadata.defaultModelID)) { throw "Release metadata model catalog is invalid" }
 
   $schemaVersion = $Metadata.schemaVersion
   if ($null -eq $schemaVersion -or $schemaVersion -is [string] -or $schemaVersion -is [bool] -or $schemaVersion -isnot [System.IConvertible]) {
@@ -94,7 +110,7 @@ function Assert-EnterpriseReleaseMetadata {
   } catch {
     throw "Release metadata schema version is invalid"
   }
-  if ([decimal]::Truncate($numericSchemaVersion) -ne $numericSchemaVersion -or $numericSchemaVersion -ne 2) {
+  if ([decimal]::Truncate($numericSchemaVersion) -ne $numericSchemaVersion -or $numericSchemaVersion -ne 3) {
     throw "Release metadata schema version is invalid"
   }
 
@@ -121,6 +137,33 @@ function Assert-EnterpriseReleaseMetadata {
     if ($artifact.sha256 -isnot [string] -or $artifact.sha256 -notmatch "\A[0-9a-f]{64}\z") {
       throw "Release supplemental artifact is invalid"
     }
+  }
+}
+
+function Assert-EnterpriseCatalogIdentity {
+  param(
+    [Parameter(Mandatory = $true)] [object] $Metadata,
+    [Parameter(Mandatory = $true)] [string] $ApplicationDirectory
+  )
+
+  $manifestPath = Join-Path $ApplicationDirectory "resources/enterprise/enterprise-manifest.json"
+  if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "Enterprise manifest is missing"
+  }
+  try {
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+  } catch {
+    throw "Enterprise manifest is invalid"
+  }
+  if ($manifest -isnot [PSCustomObject] -or $manifest.schemaVersion -ne 2 -or $manifest.modelIDs -isnot [System.Array]) {
+    throw "Enterprise manifest is invalid"
+  }
+  if (
+    $manifest.defaultModelID -cne $Metadata.defaultModelID -or
+    $manifest.modelCatalogSHA256 -cne $Metadata.modelCatalogSHA256 -or
+    ($manifest.modelIDs -join "`0") -cne ($Metadata.modelIDs -join "`0")
+  ) {
+    throw "Release metadata model catalog mismatch"
   }
 }
 
@@ -487,6 +530,7 @@ try {
   Set-Content -LiteralPath $projectSentinel -Value "portable smoke sentinel" -NoNewline
 
   $application = Expand-PortableArchive -Destination $extractRoot
+  Assert-EnterpriseCatalogIdentity -Metadata $metadata -ApplicationDirectory $application.Directory
   Test-PortableLaunch -Application $application -AllowedAddresses $allowedAddresses
 
   if (-not (Test-Path -LiteralPath $appData -PathType Container)) {

@@ -9,9 +9,11 @@ import { type EnterpriseWindowsAcceptance, writeEnterpriseRelease } from "./ente
 const roots: string[] = []
 const valid = {
   OPENCODE_ENTERPRISE: "1",
-  OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-  OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-  OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+    { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+  ]),
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
@@ -52,12 +54,15 @@ test("writes checksum and non-secret release metadata", async () => {
   })
 
   expect(result).toMatchObject({
-    schemaVersion: 2,
+    schemaVersion: 3,
     artifact: "company-opencode-pilot-1.17.18-win-x64.zip",
     appVersion: "1.17.18",
     gitCommit: "0123456789abcdef",
     target: { os: "win32", arch: "x64" },
     authenticode: "NotSigned",
+    defaultModelID: "company-code",
+    modelIDs: ["company-code", "company-fast"],
+    modelCatalogSHA256: expect.stringMatching(/^[a-f0-9]{64}$/),
     windowsAcceptance: [],
     sbom: { file: "company-opencode-pilot-1.17.18-win-x64.sbom.cdx.json", sha256: expect.any(String) },
     thirdPartyLicenses: {

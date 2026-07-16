@@ -12,7 +12,11 @@ import {
 } from "./enterprise-preflight"
 
 const profile = {
-  modelID: "company-code",
+  models: [
+    { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+    { id: "company-fast", name: "Company Fast", baseURL: "https://llm-dr.corp.example/v1" },
+  ],
+  defaultModelID: "company-code",
   defaultsVersion: "defaults-2",
   guideVersion: "guide-3",
   catalogVersion: "catalog-4",
@@ -28,12 +32,14 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
   })
 
   expect(manifest).toEqual({
-    schemaVersion: 1,
+    schemaVersion: 2,
     appVersion: "1.2.3",
     defaultsVersion: "defaults-2",
     guideVersion: "guide-3",
     catalogVersion: "catalog-4",
-    modelID: "company-code",
+    defaultModelID: "company-code",
+    modelIDs: ["company-code", "company-fast"],
+    modelCatalogSHA256: expect.stringMatching(/^[a-f0-9]{64}$/),
     allowedOrigins: ["https://llm-dr.corp.example", "https://llm.corp.example"],
     resources: {
       "company-guide.md": expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -137,9 +143,8 @@ test("skips ordinary builds and verifies enabled packaged profiles", async () =>
     await runEnterprisePreflight({
       profile: {
         enabled: true,
-        baseURL: "https://llm.corp.example/v1",
-        modelID: profile.modelID,
-        modelName: "Company Code",
+        models: profile.models,
+        defaultModelID: profile.defaultModelID,
         defaultsVersion: profile.defaultsVersion,
         guideVersion: profile.guideVersion,
         catalogVersion: profile.catalogVersion,
@@ -148,7 +153,7 @@ test("skips ordinary builds and verifies enabled packaged profiles", async () =>
       appVersion: "1.2.3",
       enterpriseDir: fixture.root,
     }),
-  ).toMatchObject({ schemaVersion: 1, catalogVersion: profile.catalogVersion })
+  ).toMatchObject({ schemaVersion: 2, catalogVersion: profile.catalogVersion })
 })
 
 async function enterpriseFixture() {

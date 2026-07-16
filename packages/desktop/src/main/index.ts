@@ -335,6 +335,8 @@ const main = Effect.gen(function* () {
 
   const enterpriseCredentials = createEnterpriseCredentialStore({
     file: join(app.getPath("userData"), "enterprise-credentials.bin"),
+    modelIDs: ENTERPRISE_PROFILE.enabled ? ENTERPRISE_PROFILE.models.map((model) => model.id) : [],
+    defaultModelID: ENTERPRISE_PROFILE.enabled ? ENTERPRISE_PROFILE.defaultModelID : undefined,
     encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (value) => safeStorage.encryptString(value),
     decrypt: (value) => safeStorage.decryptString(value),
@@ -359,10 +361,13 @@ const main = Effect.gen(function* () {
     })
   }
   configureEnterpriseSupport(async () => {
-    const credentials = await enterpriseCredentials.get()
+    const credentials = await enterpriseCredentials.all()
     return {
       readiness: await enterpriseReadiness(),
-      secrets: [...(credentials.apiKey ? [credentials.apiKey] : []), ...Object.values(credentials.headers)],
+      secrets: Object.values(credentials.models).flatMap((credential) => [
+        ...(credential.apiKey ? [credential.apiKey] : []),
+        ...Object.values(credential.headers),
+      ]),
     }
   })
   if (!enterpriseStartupFailure && !TEST_ONBOARDING) migrate()
@@ -509,7 +514,7 @@ const main = Effect.gen(function* () {
       spawnLocalServer(hostname, port, password, {
         userDataPath: app.getPath("userData"),
         env: ENTERPRISE_ENABLED ? enterpriseSidecarEnvironment() : undefined,
-        credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.get() : undefined,
+        credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.all() : undefined,
         onStdout: (message) => writeLog("server", "stdout", { message }),
         onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
         onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),

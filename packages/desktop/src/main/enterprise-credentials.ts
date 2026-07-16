@@ -1,9 +1,14 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 
-export type EnterpriseCredentials = {
+export type EnterpriseCredential = {
   apiKey?: string
   headers: Record<string, string>
+}
+
+export type EnterpriseCredentials = {
+  schemaVersion: 2
+  models: Record<string, EnterpriseCredential>
 }
 
 type Store = ReturnType<typeof createEnterpriseCredentialStore>
@@ -16,27 +21,48 @@ export function enterpriseSidecarEnvironment(): Record<string, string> {
 }
 
 export function createEnterpriseCredentialHandlers(enabled: boolean, store: Store) {
-  const status = async () => {
+  const status = async (modelID = store.defaultModelID) => {
     if (!enabled) return { configured: false }
+    store.requireModel(modelID)
     const health = await store.health()
     if (health.state === "corrupt") return { configured: false, errorCode: "credential_decryption_failed" as const }
     if (health.state === "encryption-unavailable")
       return { configured: false, errorCode: "credential_encryption_unavailable" as const }
-    const credentials = await store.get()
-    return { configured: Boolean(credentials.apiKey || Object.keys(credentials.headers).length) }
+    const credentials = (await store.all()).models[modelID]
+    return { configured: Boolean(credentials?.apiKey || Object.keys(credentials?.headers ?? {}).length) }
   }
 
-  const set = async (input: { apiKey?: string; headers?: Record<string, string> }) => {
+  const set = async (input: { modelID?: string; apiKey?: string; headers?: Record<string, string> }) => {
     if (!enabled) return { restartRequired: true as const }
-    await store.update((current) => ({
-      apiKey: input.apiKey === undefined ? current.apiKey : input.apiKey,
-      headers: input.headers && Object.keys(input.headers).length ? input.headers : current.headers,
-    }))
+    const modelID = input.modelID ?? store.defaultModelID
+    store.requireModel(modelID)
+    await store.updateAll((current) => {
+      const credentials = current.models[modelID] ?? { headers: {} }
+      return {
+        schemaVersion: 2,
+        models: {
+          ...current.models,
+          [modelID]: {
+            apiKey: input.apiKey === undefined ? credentials.apiKey : input.apiKey,
+            headers: input.headers && Object.keys(input.headers).length ? input.headers : credentials.headers,
+          },
+        },
+      }
+    })
     return { restartRequired: true as const }
   }
 
-  const clear = async () => {
-    if (enabled) await store.clear()
+  const clear = async (modelID?: string) => {
+    if (!enabled) return { restartRequired: true as const }
+    if (modelID === undefined) {
+      await store.clear()
+      return { restartRequired: true as const }
+    }
+    store.requireModel(modelID)
+    await store.updateAll((current) => ({
+      schemaVersion: 2,
+      models: Object.fromEntries(Object.entries(current.models).filter(([id]) => id !== modelID)),
+    }))
     return { restartRequired: true as const }
   }
 
@@ -45,6 +71,8 @@ export function createEnterpriseCredentialHandlers(enabled: boolean, store: Stor
 
 type Input = {
   file: string
+  modelIDs?: string[]
+  defaultModelID?: string
   encryptionAvailable: () => boolean
   encrypt: (value: string) => Buffer
   decrypt: (value: Buffer) => string
@@ -53,6 +81,8 @@ type Input = {
 
 export function createEnterpriseCredentialStore(input: Input) {
   const temp = `${input.file}.tmp`
+  const defaultModelID = input.defaultModelID ?? input.modelIDs?.[0] ?? "default"
+  const modelIDs = new Set(input.modelIDs ?? [defaultModelID])
   const write =
     input.write ??
     (async (file: string, value: Buffer) => {
@@ -67,28 +97,21 @@ export function createEnterpriseCredentialStore(input: Input) {
     return result
   }
 
-  const get = async (): Promise<EnterpriseCredentials> => {
+  const all = async (): Promise<EnterpriseCredentials> => {
     const encrypted = await readFile(input.file).catch((error: unknown) => {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
       throw error
     })
-    if (!encrypted) return { headers: {} }
+    if (!encrypted) return { schemaVersion: 2, models: {} }
 
     const value: unknown = await Promise.resolve(encrypted)
       .then(input.decrypt)
       .then((text) => JSON.parse(text))
       .catch(() => undefined)
-    if (!value || typeof value !== "object" || Array.isArray(value)) return { headers: {} }
-
-    const record = value as Record<string, unknown>
-    const headers =
-      record.headers && typeof record.headers === "object" && !Array.isArray(record.headers)
-        ? Object.fromEntries(
-            Object.entries(record.headers).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-          )
-        : {}
-    return { ...(typeof record.apiKey === "string" ? { apiKey: record.apiKey } : {}), headers }
+    return decodeCredentials(value, modelIDs, defaultModelID) ?? { schemaVersion: 2, models: {} }
   }
+
+  const get = async () => (await all()).models[defaultModelID] ?? { headers: {} }
 
   const health = async () => {
     const encrypted = await readFile(input.file).catch((error: unknown) => {
@@ -101,7 +124,7 @@ export function createEnterpriseCredentialStore(input: Input) {
       .then(input.decrypt)
       .then((text) => JSON.parse(text))
       .then(
-        (value) => Boolean(value && typeof value === "object" && !Array.isArray(value)),
+        (value) => Boolean(decodeCredentials(value, modelIDs, defaultModelID)),
         () => false,
       )
     return { state: valid ? ("available" as const) : ("corrupt" as const) }
@@ -109,16 +132,26 @@ export function createEnterpriseCredentialStore(input: Input) {
 
   const persist = async (credentials: EnterpriseCredentials) => {
     if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
-    await write(temp, input.encrypt(JSON.stringify(credentials)))
+    const normalized = decodeCredentials(credentials, modelIDs, defaultModelID)
+    if (!normalized) throw new Error("Enterprise credentials are invalid")
+    await write(temp, input.encrypt(JSON.stringify(normalized)))
       .then(() => rename(temp, input.file))
       .finally(() => rm(temp, { force: true }))
   }
 
-  const set = (credentials: EnterpriseCredentials) => mutate(() => persist(credentials))
-
-  const update = (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) =>
-    mutate(async () => persist(transform(await get())))
-
+  const setAll = (credentials: EnterpriseCredentials) => mutate(() => persist(credentials))
+  const updateAll = (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) =>
+    mutate(async () => persist(transform(await all())))
+  const set = (credentials: EnterpriseCredential) =>
+    updateAll((current) => ({ schemaVersion: 2, models: { ...current.models, [defaultModelID]: credentials } }))
+  const update = (transform: (current: EnterpriseCredential) => EnterpriseCredential) =>
+    updateAll((current) => ({
+      schemaVersion: 2,
+      models: {
+        ...current.models,
+        [defaultModelID]: transform(current.models[defaultModelID] ?? { headers: {} }),
+      },
+    }))
   const clear = () =>
     mutate(async () => {
       const errors: unknown[] = []
@@ -131,6 +164,67 @@ export function createEnterpriseCredentialStore(input: Input) {
       )
       if (errors.length) throw errors[0]
     })
+  const requireModel = (modelID: string) => {
+    if (!modelIDs.has(modelID)) throw new Error("Enterprise credential model is not configured")
+  }
 
-  return { get, health, set, update, clear }
+  return { all, get, health, setAll, updateAll, set, update, clear, requireModel, defaultModelID }
+}
+
+function decodeCredentials(
+  value: unknown,
+  modelIDs: Set<string>,
+  defaultModelID: string,
+): EnterpriseCredentials | undefined {
+  if (!isRecord(value)) return
+  if (value.schemaVersion === 2 && isRecord(value.models)) {
+    const models = Object.entries(value.models).flatMap(([modelID, credentials]) => {
+      if (!modelIDs.has(modelID)) return []
+      const decoded = decodeV2Credential(credentials)
+      if (!decoded) return [undefined]
+      return [[modelID, decoded] as const]
+    })
+    if (models.some((model) => model === undefined)) return
+    return {
+      schemaVersion: 2,
+      models: Object.fromEntries(
+        models.filter((model): model is readonly [string, EnterpriseCredential] => model !== undefined),
+      ),
+    }
+  }
+  if ("schemaVersion" in value || "models" in value) return
+  const legacy = decodeCredential(value)
+  if (!legacy) return
+  return { schemaVersion: 2, models: { [defaultModelID]: legacy } }
+}
+
+function decodeV2Credential(value: unknown): EnterpriseCredential | undefined {
+  if (!isRecord(value) || !isRecord(value.headers)) return
+  if (value.apiKey !== undefined && typeof value.apiKey !== "string") return
+  if (Object.values(value.headers).some((header) => typeof header !== "string")) return
+  return {
+    ...(typeof value.apiKey === "string" ? { apiKey: value.apiKey } : {}),
+    headers: value.headers as Record<string, string>,
+  }
+}
+
+function decodeCredential(value: unknown): EnterpriseCredential | undefined {
+  if (!isRecord(value)) return
+  if (value.headers !== undefined && !isRecord(value.headers)) return
+  const entries = Object.entries(value.headers ?? {})
+  const headers = Object.fromEntries(
+    entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  )
+  if (
+    typeof value.apiKey !== "string" &&
+    ((value.apiKey !== undefined && !Object.keys(headers).length) ||
+      (entries.some((entry) => typeof entry[1] !== "string") && !Object.keys(headers).length))
+  ) {
+    return
+  }
+  return { ...(typeof value.apiKey === "string" ? { apiKey: value.apiKey } : {}), headers }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

@@ -1,9 +1,10 @@
 export type CompanyConfig = {
+  model?: string
   provider?: Record<
     string,
     {
       options?: { baseURL?: unknown; [key: string]: unknown }
-      models?: Record<string, { name?: string }>
+      models?: Record<string, { name?: string; provider?: { api?: unknown } }>
     }
   >
 }
@@ -43,14 +44,16 @@ export function companyProviderModels(config: CompanyConfig) {
   return Object.entries(config.provider?.["company-llm"]?.models ?? {}).map(([id, model]) => ({
     id,
     name: model.name ?? id,
+    baseURL: typeof model.provider?.api === "string" ? model.provider.api : "",
   }))
 }
 
 export function companyProviderConfig(config: CompanyConfig) {
-  const baseURL = config.provider?.["company-llm"]?.options?.baseURL
+  const models = companyProviderModels(config)
+  const configured = config.model?.startsWith("company-llm/") ? config.model.slice("company-llm/".length) : undefined
   return {
-    baseURL: typeof baseURL === "string" ? baseURL : "",
-    models: companyProviderModels(config),
+    models,
+    defaultModelID: configured && models.some((model) => model.id === configured) ? configured : (models[0]?.id ?? ""),
   }
 }
 

@@ -3,9 +3,8 @@ import "../../app/happydom"
 const mode = process.argv[2]
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: mode === "enterprise" ? "1" : "0",
-  OPENCODE_ENTERPRISE_BASE_URL: mode === "enterprise" ? "https://llm.corp.example/v1" : "",
-  OPENCODE_ENTERPRISE_MODEL_ID: mode === "enterprise" ? "company-code" : "",
-  OPENCODE_ENTERPRISE_MODEL_NAME: mode === "enterprise" ? "Company Code" : "",
+  OPENCODE_ENTERPRISE_MODELS: mode === "enterprise" ? JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]) : "",
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: mode === "enterprise" ? "company-code" : "",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: mode === "enterprise" ? "pilot-1" : "",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: mode === "enterprise" ? "pilot-1" : "",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: mode === "enterprise" ? "catalog-1" : "",

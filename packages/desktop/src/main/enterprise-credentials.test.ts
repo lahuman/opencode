@@ -12,6 +12,107 @@ afterEach(async () => {
 })
 
 describe("enterprise credential store", () => {
+  test("stores and retrieves isolated credentials for each configured model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const store = createEnterpriseCredentialStore({
+      file,
+      modelIDs: ["code", "reasoning"],
+      defaultModelID: "code",
+      encryptionAvailable: () => true,
+      encrypt: (value) => Buffer.from(value.split("").reverse().join(""), "utf8"),
+      decrypt: (value) => value.toString("utf8").split("").reverse().join(""),
+    })
+
+    await store.setAll({
+      schemaVersion: 2,
+      models: {
+        code: { apiKey: "code-secret", headers: { Authorization: "code-header" } },
+        reasoning: { apiKey: "reasoning-secret", headers: { Authorization: "reasoning-header" } },
+        removed: { apiKey: "stale-secret", headers: {} },
+      },
+    })
+
+    expect(await store.all()).toEqual({
+      schemaVersion: 2,
+      models: {
+        code: { apiKey: "code-secret", headers: { Authorization: "code-header" } },
+        reasoning: { apiKey: "reasoning-secret", headers: { Authorization: "reasoning-header" } },
+      },
+    })
+    const raw = await readFile(file, "utf8")
+    expect(raw).not.toContain("code-secret")
+    expect(raw).not.toContain("reasoning-secret")
+    expect(raw).not.toContain("stale-secret")
+  })
+
+  test("maps a legacy credential file to the configured default model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    await writeFile(file, JSON.stringify({ apiKey: "legacy-secret", headers: { Authorization: "legacy-header" } }))
+    const store = createEnterpriseCredentialStore({
+      file,
+      modelIDs: ["code", "reasoning"],
+      defaultModelID: "code",
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+
+    expect(await store.all()).toEqual({
+      schemaVersion: 2,
+      models: { code: { apiKey: "legacy-secret", headers: { Authorization: "legacy-header" } } },
+    })
+  })
+
+  test("keeps an empty legacy credential record as valid but unconfigured", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    await writeFile(file, JSON.stringify({ headers: {} }))
+    const store = createEnterpriseCredentialStore({
+      file,
+      modelIDs: ["code"],
+      defaultModelID: "code",
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+
+    expect(await store.health()).toEqual({ state: "available" })
+    expect(await store.all()).toEqual({ schemaVersion: 2, models: { code: { headers: {} } } })
+  })
+
+  test("credential handlers update and clear only the selected model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const store = createEnterpriseCredentialStore({
+      file: join(dir, "credentials.bin"),
+      modelIDs: ["code", "reasoning"],
+      defaultModelID: "code",
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    const handlers = createEnterpriseCredentialHandlers(true, store)
+
+    await handlers.set({ modelID: "code", apiKey: "code-secret" })
+    await handlers.set({ modelID: "reasoning", apiKey: "reasoning-secret" })
+    expect(await handlers.status("code")).toEqual({ configured: true })
+    expect(await handlers.status("reasoning")).toEqual({ configured: true })
+
+    await handlers.clear("reasoning")
+    expect(await handlers.status("code")).toEqual({ configured: true })
+    expect(await handlers.status("reasoning")).toEqual({ configured: false })
+    expect(await store.all()).toEqual({
+      schemaVersion: 2,
+      models: { code: { apiKey: "code-secret", headers: {} } },
+    })
+    await expect(handlers.set({ modelID: "missing", apiKey: "secret" })).rejects.toThrow("model")
+  })
+
   test("persists only encrypted bytes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
     dirs.push(dir)
@@ -114,6 +215,35 @@ describe("enterprise credential store", () => {
     expect(await store.get()).toEqual({ headers: { valid: "secret" } })
   })
 
+  test("reports unsupported and malformed V2 credential records as corrupt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const values = [
+      { schemaVersion: 3, models: {} },
+      { schemaVersion: 2, models: [] },
+      { schemaVersion: 2, models: { code: { apiKey: 123, headers: {} } } },
+      { schemaVersion: 2, models: { code: { headers: { Authorization: false } } } },
+    ]
+    const store = createEnterpriseCredentialStore({
+      file,
+      modelIDs: ["code"],
+      defaultModelID: "code",
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+
+    for (const value of values) {
+      await writeFile(file, JSON.stringify(value))
+      expect(await store.health()).toEqual({ state: "corrupt" })
+      expect(await store.all()).toEqual({ schemaVersion: 2, models: {} })
+    }
+
+    await writeFile(file, JSON.stringify({ schemaVersion: 2, models: { removed: { apiKey: 123 } } }))
+    expect(await store.health()).toEqual({ state: "available" })
+  })
+
   test("serializes overlapping sets into a complete final record", async () => {
     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
     dirs.push(dir)
@@ -150,7 +280,7 @@ describe("enterprise credential store", () => {
     await Promise.all([first, second])
 
     expect(writes.map((value) => value.toString("utf8").split("").reverse().join(""))).toEqual(
-      credentials.map((value) => JSON.stringify(value)),
+      credentials.map((value) => JSON.stringify({ schemaVersion: 2, models: { default: value } })),
     )
     expect(await store.get()).toEqual(credentials[1])
     expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
@@ -281,14 +411,14 @@ describe("enterprise credential store", () => {
     })
     const trackedStore = {
       ...store,
-      update: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => {
+      updateAll: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => {
         updates++
         if (updates === 2) secondAtomicUpdate.resolve()
         return (
           store as typeof store & {
-            update: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => Promise<void>
+            updateAll: (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) => Promise<void>
           }
-        ).update(transform)
+        ).updateAll(transform)
       },
     }
     const handlers = createEnterpriseCredentialHandlers(true, trackedStore)

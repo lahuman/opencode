@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 const enabledProfile = {
   OPENCODE_ENTERPRISE: "1",
-  OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-  OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-  OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+    { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+  ]),
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
@@ -33,9 +35,8 @@ function evaluateConfig(env: Record<string, string> = {}) {
       env: {
         ...process.env,
         OPENCODE_ENTERPRISE: "0",
-        OPENCODE_ENTERPRISE_BASE_URL: "",
-        OPENCODE_ENTERPRISE_MODEL_ID: "",
-        OPENCODE_ENTERPRISE_MODEL_NAME: "",
+        OPENCODE_ENTERPRISE_MODELS: "",
+        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "",
@@ -77,14 +78,16 @@ describe("enterprise Vite configuration", () => {
     })
   })
 
-  test("rejects a credentialed base URL before producing defines", () => {
+  test("rejects a credentialed model URL before producing defines", () => {
     const result = evaluateConfig({
       ...enabledProfile,
-      OPENCODE_ENTERPRISE_BASE_URL: "https://user:secret@llm.corp.example/v1",
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "company-code", name: "Company Code", baseURL: "https://user:secret@llm.corp.example/v1" },
+      ]),
     })
 
     expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain("OPENCODE_ENTERPRISE_BASE_URL must not contain credentials")
+    expect(result.stderr).toContain("OPENCODE_ENTERPRISE_MODELS model URLs must not contain credentials")
   })
 
   test("rejects a credentialed allowed origin before producing defines", () => {

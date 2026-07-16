@@ -1729,7 +1729,7 @@ const layer = Layer.effect(
             ...options["headers"],
             ...model.headers,
           }
-        Object.assign(options, ProviderEnterprise.options(model.providerID, options))
+        Object.assign(options, ProviderEnterprise.options(model.providerID, model.id, options))
 
         const key = Hash.fast(
           JSON.stringify({

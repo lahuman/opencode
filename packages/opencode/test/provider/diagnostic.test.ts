@@ -41,7 +41,7 @@ const endpointRequests: Headers[] = []
 
 afterEach(async () => {
   endpointRequests.length = 0
-  ProviderEnterprise.setCredentials({ headers: {} })
+  ProviderEnterprise.setCredentials({ schemaVersion: 2, models: {} })
   await disposeAllInstances()
 })
 
@@ -669,8 +669,13 @@ endpointIt.instance(
   Effect.gen(function* () {
     endpointRequests.length = 0
     ProviderEnterprise.setCredentials({
-      apiKey: "enterprise-api-key",
-      headers: { "x-company-token": "enterprise-header-value" },
+      schemaVersion: 2,
+      models: {
+        "company-code": {
+          apiKey: "enterprise-api-key",
+          headers: { "x-company-token": "enterprise-header-value" },
+        },
+      },
     })
     const directory = (yield* TestInstance).directory
     const response = yield* request("/provider/company-llm/diagnostics", {

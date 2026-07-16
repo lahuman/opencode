@@ -72,7 +72,7 @@ test("does not start desktop development when the enterprise profile is incomple
         return { exited: Promise.resolve(0) }
       },
     }),
-  ).rejects.toThrow("OPENCODE_ENTERPRISE_BASE_URL")
+  ).rejects.toThrow("OPENCODE_ENTERPRISE_MODEL_ID")
   expect(prepared).toBe(false)
   expect(spawned).toBe(false)
 })

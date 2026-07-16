@@ -50,6 +50,24 @@ test("maps provider diagnostics to the enterprise readiness IPC channel", async 
   expect(invocations).toEqual([{ channel: "enterprise-readiness", args: [diagnostic] }])
 })
 
+test("maps credential operations with an explicit model ID", async () => {
+  const invocations: { channel: string; args: unknown[] }[] = []
+  const enterprise = createEnterpriseAPI(true, (channel, ...args) => {
+    invocations.push({ channel, args })
+    return Promise.resolve({ configured: true, restartRequired: true })
+  })
+
+  await enterprise.credentialStatus("reasoning")
+  await enterprise.setCredentials({ modelID: "reasoning", apiKey: "secret" })
+  await enterprise.clearCredentials("reasoning")
+
+  expect(invocations).toEqual([
+    { channel: "enterprise-credential-status", args: ["reasoning"] },
+    { channel: "enterprise-set-credentials", args: [{ modelID: "reasoning", apiKey: "secret" }] },
+    { channel: "enterprise-clear-credentials", args: ["reasoning"] },
+  ])
+})
+
 test("maps the preload enterprise API to the app platform contract", () => {
   const enterprise = {
     enabled: true,

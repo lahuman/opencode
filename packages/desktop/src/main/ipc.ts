@@ -45,9 +45,9 @@ type Deps = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   openExternalURL: (url: string) => Promise<void> | void
   enterprise: {
-    credentialStatus: () => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: { apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
-    clearCredentials: () => Promise<{ restartRequired: true }>
+    credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
+    setCredentials: (input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
@@ -120,13 +120,17 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
-  registry.handle("enterprise-credential-status", () => deps.enterprise.credentialStatus())
+  registry.handle("enterprise-credential-status", (_event: IpcMainInvokeEvent, modelID: string) =>
+    deps.enterprise.credentialStatus(modelID),
+  )
   registry.handle(
     "enterprise-set-credentials",
-    (_event: IpcMainInvokeEvent, input: { apiKey?: string; headers?: Record<string, string> }) =>
+    (_event: IpcMainInvokeEvent, input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) =>
       deps.enterprise.setCredentials(input),
   )
-  registry.handle("enterprise-clear-credentials", () => deps.enterprise.clearCredentials())
+  registry.handle("enterprise-clear-credentials", (_event: IpcMainInvokeEvent, modelID: string) =>
+    deps.enterprise.clearCredentials(modelID),
+  )
   registry.handle("enterprise-readiness", (_event: IpcMainInvokeEvent, provider?: unknown) =>
     deps.enterprise.readiness(parseEnterpriseProviderDiagnostic(provider)),
   )

@@ -75,9 +75,9 @@ type PlatformBase = {
 
   /** Enterprise credential management through desktop secure storage */
   enterprise?: {
-    credentialStatus(): Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials(input: { apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
-    clearCredentials(): Promise<{ restartRequired: boolean }>
+    credentialStatus(modelID: string): Promise<{ configured: boolean; errorCode?: string }>
+    setCredentials(input: { modelID: string; apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
+    clearCredentials(modelID: string): Promise<{ restartRequired: boolean }>
     readGuide(): Promise<{ version: string; markdown: string }>
     readiness(provider?: {
       ok: boolean

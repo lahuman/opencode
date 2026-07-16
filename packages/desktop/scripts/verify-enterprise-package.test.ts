@@ -6,6 +6,7 @@ import path from "node:path"
 import { BlobWriter, TextReader, ZipWriter, type ZipWriterAddDataOptions } from "@zip.js/zip.js"
 
 import { verifyEnterpriseArchive, verifyEnterprisePackage } from "./verify-enterprise-package"
+import { enterpriseModelCatalogIdentity } from "../src/main/enterprise-preflight"
 
 const roots: string[] = []
 const required = [
@@ -20,6 +21,9 @@ const required = [
 const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
 const enterpriseDefaults = JSON.stringify({ enabled_providers: ["company-llm"] })
 const enterpriseModels = JSON.stringify({ providers: [] })
+const enterpriseModelCatalog = [
+  { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+]
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -869,14 +873,17 @@ const portableContents: Record<string, string> = {
 
 function enterpriseManifest() {
   const digest = (value: string) => createHash("sha256").update(value).digest("hex")
+  const identity = enterpriseModelCatalogIdentity(enterpriseModelCatalog)
   return `${JSON.stringify(
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       appVersion: "1.17.18",
       defaultsVersion: "pilot-1",
       guideVersion: "pilot-1",
       catalogVersion: "pilot-1",
-      modelID: "company-code",
+      defaultModelID: "company-code",
+      modelIDs: identity.modelIDs,
+      modelCatalogSHA256: identity.sha256,
       allowedOrigins: ["https://llm.corp.example"],
       resources: {
         "company-guide.md": digest(enterpriseGuide),

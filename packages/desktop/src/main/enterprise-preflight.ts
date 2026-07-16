@@ -8,20 +8,23 @@ const resourceNames = ["company-guide.md", "models.json", "opencode.jsonc"] as c
 type ResourceName = (typeof resourceNames)[number]
 export type EnterpriseManifestResources = Record<ResourceName, string>
 type EnterpriseManifestProfile = {
-  modelID: string
+  models: { id: string; name: string; baseURL: string }[]
+  defaultModelID: string
   defaultsVersion: string
   guideVersion: string
   catalogVersion: string
   allowedOrigins: string[]
 }
 
-export type EnterpriseManifestV1 = {
-  schemaVersion: 1
+export type EnterpriseManifestV2 = {
+  schemaVersion: 2
   appVersion: string
   defaultsVersion: string
   guideVersion: string
   catalogVersion: string
-  modelID: string
+  defaultModelID: string
+  modelIDs: string[]
+  modelCatalogSHA256: string
   allowedOrigins: string[]
   resources: Record<ResourceName, string>
 }
@@ -49,14 +52,20 @@ export class EnterprisePreflightError extends Error {
   }
 }
 
-export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV1> {
+export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV2> {
+  const catalog = enterpriseModelCatalogIdentity(input.profile.models)
+  if (!catalog.modelIDs.includes(input.profile.defaultModelID)) {
+    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+  }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     appVersion: requireText(input.appVersion),
     defaultsVersion: requireText(input.profile.defaultsVersion),
     guideVersion: requireText(input.profile.guideVersion),
     catalogVersion: requireText(input.profile.catalogVersion),
-    modelID: requireText(input.profile.modelID),
+    defaultModelID: requireText(input.profile.defaultModelID),
+    modelIDs: catalog.modelIDs,
+    modelCatalogSHA256: catalog.sha256,
     allowedOrigins: normalizeOrigins(input.profile.allowedOrigins),
     resources: Object.fromEntries(
       await Promise.all(
@@ -66,7 +75,7 @@ export async function createEnterpriseManifest(input: ManifestInput): Promise<En
   }
 }
 
-export async function writeEnterpriseManifest(path: string, manifest: EnterpriseManifestV1) {
+export async function writeEnterpriseManifest(path: string, manifest: EnterpriseManifestV2) {
   await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`)
 }
 
@@ -101,7 +110,8 @@ export async function verifyEnterpriseManifest(input: ManifestInput & { manifest
     defaultsVersion: input.profile.defaultsVersion,
     guideVersion: input.profile.guideVersion,
     catalogVersion: input.profile.catalogVersion,
-    modelID: input.profile.modelID,
+    defaultModelID: input.profile.defaultModelID,
+    ...enterpriseModelCatalogIdentity(input.profile.models),
     allowedOrigins: normalizeOrigins(input.profile.allowedOrigins),
   }
   if (
@@ -109,7 +119,10 @@ export async function verifyEnterpriseManifest(input: ManifestInput & { manifest
     manifest.defaultsVersion !== expected.defaultsVersion ||
     manifest.guideVersion !== expected.guideVersion ||
     manifest.catalogVersion !== expected.catalogVersion ||
-    manifest.modelID !== expected.modelID ||
+    manifest.defaultModelID !== expected.defaultModelID ||
+    manifest.modelCatalogSHA256 !== expected.sha256 ||
+    manifest.modelIDs.length !== expected.modelIDs.length ||
+    manifest.modelIDs.some((modelID, index) => modelID !== expected.modelIDs[index]) ||
     manifest.allowedOrigins.length !== expected.allowedOrigins.length ||
     manifest.allowedOrigins.some((origin, index) => origin !== expected.allowedOrigins[index])
   ) {
@@ -129,7 +142,8 @@ export function runEnterprisePreflight(input: {
     manifest: join(input.enterpriseDir, "enterprise-manifest.json"),
     appVersion: input.appVersion,
     profile: {
-      modelID: input.profile.modelID,
+      models: input.profile.models,
+      defaultModelID: input.profile.defaultModelID,
       defaultsVersion: input.profile.defaultsVersion,
       guideVersion: input.profile.guideVersion,
       catalogVersion: input.profile.catalogVersion,
@@ -154,7 +168,7 @@ export function verifyEnterpriseManifestContents(input: {
   return manifest
 }
 
-function decodeManifest(raw: string): EnterpriseManifestV1 {
+function decodeManifest(raw: string): EnterpriseManifestV2 {
   const value: unknown = (() => {
     try {
       return JSON.parse(raw)
@@ -163,7 +177,7 @@ function decodeManifest(raw: string): EnterpriseManifestV1 {
     }
   })()
   if (!isRecord(value) || !hasExactKeys(value, [...manifestKeys])) invalidManifest()
-  if (value.schemaVersion !== 1) invalidManifest()
+  if (value.schemaVersion !== 2) invalidManifest()
   if (!Array.isArray(value.allowedOrigins) || value.allowedOrigins.some((origin) => typeof origin !== "string"))
     invalidManifest()
   const allowedOrigins = value.allowedOrigins as string[]
@@ -174,7 +188,11 @@ function decodeManifest(raw: string): EnterpriseManifestV1 {
     !isText(value.defaultsVersion) ||
     !isText(value.guideVersion) ||
     !isText(value.catalogVersion) ||
-    !isText(value.modelID) ||
+    !isText(value.defaultModelID) ||
+    !Array.isArray(value.modelIDs) ||
+    value.modelIDs.some((modelID) => !isText(modelID)) ||
+    new Set(value.modelIDs).size !== value.modelIDs.length ||
+    !isHash(value.modelCatalogSHA256) ||
     resourceNames.some((name) => typeof resources[name] !== "string" || !/^[a-f0-9]{64}$/.test(resources[name]))
   ) {
     invalidManifest()
@@ -183,15 +201,24 @@ function decodeManifest(raw: string): EnterpriseManifestV1 {
   if (origins.length !== allowedOrigins.length || origins.some((origin, index) => origin !== allowedOrigins[index])) {
     invalidManifest()
   }
+  const modelIDs = value.modelIDs as string[]
+  if (
+    !modelIDs.includes(value.defaultModelID) ||
+    modelIDs.some((modelID, index) => modelID !== [...modelIDs].sort()[index])
+  ) {
+    invalidManifest()
+  }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     appVersion: value.appVersion,
     defaultsVersion: value.defaultsVersion,
     guideVersion: value.guideVersion,
     catalogVersion: value.catalogVersion,
-    modelID: value.modelID,
+    defaultModelID: value.defaultModelID,
+    modelIDs,
+    modelCatalogSHA256: value.modelCatalogSHA256,
     allowedOrigins,
-    resources: resources as EnterpriseManifestV1["resources"],
+    resources: resources as EnterpriseManifestV2["resources"],
   }
 }
 
@@ -201,7 +228,9 @@ const manifestKeys = [
   "catalogVersion",
   "defaultsVersion",
   "guideVersion",
-  "modelID",
+  "defaultModelID",
+  "modelCatalogSHA256",
+  "modelIDs",
   "resources",
   "schemaVersion",
 ] as const
@@ -233,6 +262,45 @@ function isText(value: unknown): value is string {
 
 function hash(value: Uint8Array) {
   return createHash("sha256").update(value).digest("hex")
+}
+
+export function enterpriseModelCatalogIdentity(models: { id: string; name: string; baseURL: string }[]) {
+  const normalized = models
+    .map((model) => ({
+      id: requireText(model.id),
+      name: requireText(model.name),
+      baseURL: requireModelURL(model.baseURL),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const modelIDs = normalized.map((model) => model.id)
+  if (!modelIDs.length || new Set(modelIDs).size !== modelIDs.length) {
+    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+  }
+  return { modelIDs, sha256: hash(Buffer.from(JSON.stringify(normalized))) }
+}
+
+function requireModelURL(value: string) {
+  const text = requireText(value)
+  const url = (() => {
+    try {
+      return new URL(text)
+    } catch {
+      throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+    }
+  })()
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    /[?#]/.test(text)
+  ) {
+    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+  }
+  return url.toString()
+}
+
+function isHash(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

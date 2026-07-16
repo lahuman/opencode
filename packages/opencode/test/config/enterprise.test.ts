@@ -81,21 +81,128 @@ test("enterprise enforcement clears provider credential env", () => {
   expect(result.provider?.company?.models?.default?.options).toEqual({})
 })
 
-test("materializes company provider metadata as structured defaults", () => {
+test("materializes only catalog company provider metadata as structured defaults", () => {
   const result = ConfigEnterprise.materializeDefaults(
-    { provider: { "company-llm": { models: {} } } },
+    {
+      provider: {
+        "company-llm": {
+          models: {
+            rogue: { name: "Project Rogue", provider: { api: "https://llm.corp.example/rogue" } },
+          },
+        },
+      },
+    },
     {
       enabled: true,
       defaultsPath: "C:/app/enterprise/opencode.jsonc",
       allowedOrigins: new Set(["https://llm.corp.example"]),
-      baseURL: "https://llm.corp.example/v1",
-      modelID: "company-code",
-      modelName: "Company Code",
+      models: [
+        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+      ],
+      defaultModelID: "company-code",
     },
   )
   expect(result.model).toBe("company-llm/company-code")
-  expect(result.provider?.["company-llm"]?.options?.baseURL).toBe("https://llm.corp.example/v1")
   expect(result.provider?.["company-llm"]?.models?.["company-code"]?.name).toBe("Company Code")
+  expect(result.provider?.["company-llm"]?.models?.["company-code"]?.provider?.api).toBe(
+    "https://llm.corp.example/v1",
+  )
+  expect(result.provider?.["company-llm"]?.models?.["company-fast"]?.provider?.api).toBe(
+    "https://fast.corp.example/v1",
+  )
+  expect(result.provider?.["company-llm"]?.options?.baseURL).toBeUndefined()
+  expect(result.provider?.["company-llm"]?.models?.rogue).toBeUndefined()
+})
+
+test("enterprise enforcement rejects a provider when any model URL is outside policy", () => {
+  const policy = {
+    enabled: true,
+    defaultsPath: undefined,
+    allowedOrigins: new Set(["https://code.corp.example", "https://reasoning.corp.example"]),
+  }
+  const provider = {
+    "company-llm": {
+      npm: "@ai-sdk/openai-compatible",
+      models: {
+        code: { provider: { api: "https://code.corp.example/v1" } },
+        reasoning: { provider: { api: "https://reasoning.corp.example/v1" } },
+      },
+    },
+  }
+
+  expect(Object.keys(ConfigEnterprise.enforce({ provider }, policy).provider ?? {})).toEqual(["company-llm"])
+  expect(
+    ConfigEnterprise.enforce(
+      {
+        provider: {
+          ...provider,
+          "company-llm": {
+            ...provider["company-llm"],
+            models: {
+              ...provider["company-llm"].models,
+              reasoning: { provider: { api: "https://unapproved.example/v1" } },
+            },
+          },
+        },
+      },
+      policy,
+    ).provider,
+  ).toEqual({})
+})
+
+test("enterprise enforcement rejects provider and model URLs with queries or fragments", () => {
+  const policy = {
+    enabled: true,
+    defaultsPath: undefined,
+    allowedOrigins: new Set(["https://code.corp.example"]),
+  }
+  const provider = (api: string) => ({
+    "company-llm": {
+      npm: "@ai-sdk/openai-compatible",
+      models: { code: { provider: { api } } },
+    },
+  })
+
+  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1?api_key=secret") }, policy).provider).toEqual({})
+  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1#secret") }, policy).provider).toEqual({})
+  expect(
+    ConfigEnterprise.enforce(
+      {
+        provider: {
+          "company-llm": {
+            ...provider("https://code.corp.example/v1")["company-llm"],
+            options: { baseURL: "https://code.corp.example/v1?api_key=secret" },
+          },
+        },
+      },
+      policy,
+    ).provider,
+  ).toEqual({})
+})
+
+test("enterprise enforcement removes company models outside the configured catalog", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        "company-llm": {
+          npm: "@ai-sdk/openai-compatible",
+          models: {
+            code: { provider: { api: "https://code.corp.example/v1" } },
+            rogue: { provider: { api: "https://code.corp.example/rogue" } },
+          },
+        },
+      },
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set(["https://code.corp.example"]),
+      models: [{ id: "code" }],
+    },
+  )
+
+  expect(Object.keys(result.provider?.["company-llm"]?.models ?? {})).toEqual(["code"])
 })
 
 test("enterprise public config removes secret provider options without mutation", () => {

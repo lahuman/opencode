@@ -9,9 +9,8 @@ const publicProtocol = mode === "public-protocol"
 Object.defineProperty(process, "resourcesPath", { value: tmpdir() })
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: publicProtocol ? "0" : "1",
-  OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-  OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-  OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",

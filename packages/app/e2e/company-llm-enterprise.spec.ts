@@ -120,7 +120,7 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   await dialog.getByRole("button", { name: "Save" }).click()
   await expect.poll(() => output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
   expect(await output<unknown[]>(page, "credential-inputs")).toEqual([
-    { apiKey: "secret", headers: { "X-Token": "value" } },
+    { modelID: "company-code", apiKey: "secret", headers: { "X-Token": "value" } },
   ])
   expect(await output<unknown[]>(page, "restart-snapshots")).toEqual([["", "", ""]])
 
@@ -173,6 +173,35 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   const requests = await output<Array<{ path: string }>>(page, "requests")
   expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(
     false,
+  )
+})
+
+test("DialogCompanyProvider clears model-scoped secrets and diagnostics when switching models", async ({ page }) => {
+  await page.goto(fixture("company"))
+  const dialog = page.getByRole("dialog")
+  const apiKey = page.getByLabel("API key")
+  const headerName = page.getByPlaceholder("Header name")
+  const headerValue = page.getByPlaceholder("Secret value")
+
+  await expect(page.getByLabel("Base URL")).toHaveValue("https://llm.company.test/v1")
+  await apiKey.fill("code-secret")
+  await headerName.fill("X-Code-Token")
+  await headerValue.fill("code-header")
+  await dialog.getByRole("button", { name: "Test connection" }).click()
+  await expect(page.getByRole("button", { name: /Company LLM model/ })).toBeDisabled()
+  await invokeFixtureControl(page, "Resolve diagnostic")
+  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toBeVisible()
+
+  await page.getByRole("button", { name: /Company LLM model/ }).click()
+  await page.getByText("Company Reasoning", { exact: true }).click()
+
+  await expect(apiKey).toHaveValue("")
+  await expect(headerName).toHaveValue("")
+  await expect(headerValue).toHaveValue("")
+  await expect(page.getByLabel("Base URL")).toHaveValue("https://reasoning.company.test/v1")
+  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveText(
+    "Ready to test Company LLM connection",
   )
 })
 

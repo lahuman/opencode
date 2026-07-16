@@ -3,9 +3,8 @@ import { isIP } from "node:net"
 type Env = Record<string, string | undefined>
 
 export type EnterpriseBuildMetadata = {
-  baseURL: string
-  modelID: string
-  modelName: string
+  models: { id: string; name: string; baseURL: string }[]
+  defaultModelID: string
   defaultsVersion: string
   guideVersion: string
   catalogVersion: string
@@ -24,37 +23,29 @@ export function enterprisePackageEnvironment(env: Env) {
 export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
   if (env.OPENCODE_ENTERPRISE !== "1") throw new Error("OPENCODE_ENTERPRISE must be 1")
 
-  const baseURL = requireValue(env, "OPENCODE_ENTERPRISE_BASE_URL")
-  if (/[?#]/.test(baseURL)) {
-    throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain a query or fragment")
+  const models = parseModels(env)
+  const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
+    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+    : models[0].id
+  if (!models.some((model) => model.id === defaultModelID)) {
+    throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
   }
-  const rawBase = parseRawHTTPURL(
-    baseURL,
-    "OPENCODE_ENTERPRISE_BASE_URL",
-    "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL",
-  )
-  if (hasDotPathSegment(rawBase.remainder)) {
-    throw new Error("OPENCODE_ENTERPRISE_BASE_URL must not contain dot path segments")
-  }
-  const base = createHTTPURL(baseURL, rawBase.host, "OPENCODE_ENTERPRISE_BASE_URL must be an absolute HTTP(S) URL")
   const allowedOrigins = Array.from(
     new Set(
-      requireValue(env, "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS")
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .map((value) => parseAllowedOrigin(value).origin),
+      [
+        ...models.map((model) => new URL(model.baseURL).origin),
+        ...(env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((value) => parseAllowedOrigin(value).origin),
+      ],
     ),
   )
 
-  if (!allowedOrigins.includes(base.origin)) {
-    throw new Error("OPENCODE_ENTERPRISE_ALLOWED_ORIGINS must include the OPENCODE_ENTERPRISE_BASE_URL origin")
-  }
-
   return {
-    baseURL: base.href,
-    modelID: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID"),
-    modelName: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_NAME"),
+    models,
+    defaultModelID,
     defaultsVersion: requireValue(env, "OPENCODE_ENTERPRISE_DEFAULTS_VERSION"),
     guideVersion: requireValue(env, "OPENCODE_ENTERPRISE_GUIDE_VERSION"),
     catalogVersion: requireValue(env, "OPENCODE_ENTERPRISE_CATALOG_VERSION"),
@@ -62,10 +53,70 @@ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
   }
 }
 
+function parseModels(env: Env) {
+  if (!env.OPENCODE_ENTERPRISE_MODELS) {
+    return [
+      {
+        id: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID"),
+        name: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_NAME"),
+        baseURL: parseModelURL(requireValue(env, "OPENCODE_ENTERPRISE_BASE_URL"), "OPENCODE_ENTERPRISE_BASE_URL"),
+      },
+    ]
+  }
+
+  const value: unknown = (() => {
+    try {
+      return JSON.parse(env.OPENCODE_ENTERPRISE_MODELS)
+    } catch {
+      throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+    }
+  })()
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
+  }
+  const models = value.map((item) => {
+    if (!isRecord(item) || !hasExactKeys(item, ["baseURL", "id", "name"])) {
+      throw new Error("OPENCODE_ENTERPRISE_MODELS must contain only id, name, and baseURL")
+    }
+    const id = typeof item.id === "string" ? item.id.trim() : ""
+    const name = typeof item.name === "string" ? item.name.trim() : ""
+    const baseURL = typeof item.baseURL === "string" ? item.baseURL.trim() : ""
+    if (!id || !name || !baseURL) throw new Error("OPENCODE_ENTERPRISE_MODELS contains incomplete model metadata")
+    return { id, name, baseURL: parseModelURL(baseURL, "OPENCODE_ENTERPRISE_MODELS") }
+  })
+  if (new Set(models.map((model) => model.id)).size !== models.length) {
+    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain unique model IDs")
+  }
+  return models
+}
+
+function parseModelURL(value: string, key: string) {
+  const legacy = key === "OPENCODE_ENTERPRISE_BASE_URL"
+  if (/[?#]/.test(value)) {
+    throw new Error(legacy ? `${key} must not contain a query or fragment` : `${key} model URLs must not contain a query or fragment`)
+  }
+  const invalid = legacy ? `${key} must be an absolute HTTP(S) URL` : `${key} model URLs must be absolute HTTP(S) URLs`
+  const raw = parseRawHTTPURL(value, key, invalid)
+  if (hasDotPathSegment(raw.remainder)) {
+    throw new Error(legacy ? `${key} must not contain dot path segments` : `${key} model URLs must not contain dot path segments`)
+  }
+  return createHTTPURL(value, raw.host, invalid).href
+}
+
 function requireValue(env: Env, key: string) {
   const value = env[key]?.trim()
   if (!value) throw new Error(`${key} is required for enterprise mode`)
   return value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: string[]) {
+  const actual = Object.keys(value).sort()
+  const expected = keys.sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
 function parseAllowedOrigin(value: string) {

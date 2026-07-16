@@ -34,12 +34,13 @@ export function useCompanyProviderSettingsState() {
   const config = createMemo(() => companyProviderConfig(serverSync().data.config))
   const [checking, setChecking] = createSignal(false)
   const [status, statusActions] = createResource(
-    () => platform.enterprise,
-    (enterprise) => enterprise.credentialStatus(),
+    () => ({ enterprise: platform.enterprise, modelID: config().defaultModelID }),
+    (input) => input.enterprise?.credentialStatus(input.modelID),
   )
   const testConnection = async () => {
-    const model = config().models[0]
+    const model = config().models.find((item) => item.id === config().defaultModelID)
     if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model))) return
+    if (!model) return
     setChecking(true)
     const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), model.id)
       .then((value) => value.data)
@@ -92,29 +93,45 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const [state, setState] = createStore({
     apiKey: "",
     headers: [{ key: "", value: "" }],
-    modelID: config().models[0]?.id ?? "",
+    modelID: config().defaultModelID,
     action: undefined as CompanyProviderAction,
     result: undefined as CompanyProviderDiagnosticResult | undefined,
     error: undefined as string | undefined,
   })
   const [status, statusActions] = createResource(
-    () => platform.enterprise,
-    (enterprise) => enterprise.credentialStatus(),
+    () => ({ enterprise: platform.enterprise, modelID: state.modelID }),
+    (input) => input.enterprise?.credentialStatus(input.modelID),
   )
-  const [readinessProvider, setReadinessProvider] = createSignal<CompanyProviderDiagnosticResult>()
+  const [readinessProvider, setReadinessProvider] = createSignal<{
+    modelID: string
+    result: CompanyProviderDiagnosticResult
+  }>()
   const [readiness] = createResource(
-    () => ({ enterprise: platform.enterprise, provider: readinessProvider() }),
+    () => {
+      const provider = readinessProvider()
+      if (!provider || provider.modelID !== state.modelID) return
+      return { enterprise: platform.enterprise, provider: provider.result }
+    },
     (input) => input.enterprise?.readiness(input.provider),
   )
 
   createEffect(() => {
     if (config().models.some((model) => model.id === state.modelID)) return
-    setState("modelID", config().models[0]?.id ?? "")
+    setState("modelID", config().defaultModelID)
   })
 
   const resetSecrets = () => {
     setState("apiKey", "")
     setState("headers", [{ key: "", value: "" }])
+  }
+
+  const selectModel = (modelID: string) => {
+    if (modelID === state.modelID) return
+    resetSecrets()
+    setState("result", undefined)
+    setState("error", undefined)
+    setReadinessProvider(undefined)
+    setState("modelID", modelID)
   }
 
   const mutateCredentials = async (
@@ -149,17 +166,18 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     if (!enterprise) return
     const input = companyProviderCredentialInput(state.apiKey, state.headers)
     if (!companyProviderCanStart(state.action, Object.keys(input).length > 0)) return
-    await mutateCredentials("save", () => enterprise.setCredentials(input), true)
+    await mutateCredentials("save", () => enterprise.setCredentials({ modelID: state.modelID, ...input }), true)
   }
 
   const clear = async () => {
     const enterprise = platform.enterprise
     if (!enterprise || !status.latest?.configured) return
-    await mutateCredentials("clear", () => enterprise.clearCredentials(), false)
+    await mutateCredentials("clear", () => enterprise.clearCredentials(state.modelID), false)
   }
 
   const diagnose = async () => {
     if (!companyProviderCanStart(state.action, Boolean(state.modelID))) return
+    const modelID = state.modelID
     setState("result", undefined)
     setState("action", "diagnose")
     setState("error", undefined)
@@ -169,9 +187,13 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     )
       .then((value) => value.data)
       .catch(() => undefined)
+    if (state.modelID !== modelID) {
+      setState("action", undefined)
+      return
+    }
     const result = companyProviderDiagnosticResult(response, language.t("common.requestFailed"))
     setState("result", result)
-    setReadinessProvider(result)
+    setReadinessProvider({ modelID, result })
     setState("action", undefined)
   }
 
@@ -199,7 +221,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     <Dialog title="Company LLM">
       <form class="flex min-w-0 flex-col gap-4 px-4 pb-4" onSubmit={save}>
         <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <TextField label="Base URL" value={config().baseURL} disabled />
+          <TextField label="Base URL" value={selectedModel()?.baseURL ?? ""} disabled />
           <div class="flex min-w-0 flex-col gap-1.5">
             <label class="text-12-medium text-text-weak">Model</label>
             <Select
@@ -209,8 +231,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
               value={(model) => model.id}
               label={(model) => model.name}
               placeholder="No configured models"
+              disabled={state.action !== undefined}
               triggerProps={{ "aria-label": "Company LLM model" }}
-              onSelect={(model) => setState("modelID", model?.id ?? "")}
+              onSelect={(model) => selectModel(model?.id ?? "")}
             />
           </div>
         </div>
@@ -369,7 +392,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           )}
         </Show>
 
-        <Show when={readiness.latest}>
+        <Show when={readinessProvider()?.modelID === state.modelID ? readiness.latest : undefined}>
           {(report) => (
             <details class="border-t border-border-weak-base pt-3 text-12-regular">
               <summary class="cursor-pointer text-text-strong capitalize">Offline readiness: {report().overall}</summary>

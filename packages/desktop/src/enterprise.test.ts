@@ -22,6 +22,91 @@ function enabledProfile() {
 }
 
 describe("enterprise profile", () => {
+  test("parses multiple models and derives the allowed origins", () => {
+    const profile = parseEnterpriseProfile({
+      OPENCODE_ENTERPRISE: "1",
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+        { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+      ]),
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+    })
+
+    expect(profile).toEqual({
+      enabled: true,
+      models: [
+        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+        { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+      ],
+      defaultModelID: "code",
+      defaultsVersion: "pilot-1",
+      guideVersion: "pilot-1",
+      catalogVersion: "catalog-1",
+      allowedOrigins: [
+        "https://code.corp.example",
+        "https://reasoning.corp.example",
+        "https://llm-dr.corp.example",
+      ],
+    })
+  })
+
+  test("rejects invalid multi-model catalogs", () => {
+    const env = {
+      OPENCODE_ENTERPRISE: "1",
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+    }
+
+    for (const models of [
+      [],
+      [{ id: "code", name: "Company Code", baseURL: "file:///private" }],
+      [{ id: "code", name: "Company Code", baseURL: "https://user:secret@code.corp.example/v1" }],
+      [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1?secret=value" }],
+      [
+        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+        { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+      ],
+      [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", token: "secret" }],
+    ]) {
+      expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_MODELS: JSON.stringify(models) })).toThrow(
+        "OPENCODE_ENTERPRISE_MODELS",
+      )
+    }
+
+    expect(() =>
+      parseEnterpriseProfile({
+        ...env,
+        OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+          { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+        ]),
+      }),
+    ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+  })
+
+  test("converts legacy single-model settings for one release", () => {
+    const profile = parseEnterpriseProfile({
+      OPENCODE_ENTERPRISE: "1",
+      OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+    })
+
+    expect(profile).toMatchObject({
+      models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+      defaultModelID: "company-code",
+      allowedOrigins: ["https://llm.corp.example"],
+    })
+  })
+
   test("keeps ordinary builds disabled", () => {
     expect(parseEnterpriseProfile({ OPENCODE_ENTERPRISE: "0" })).toEqual({ enabled: false })
     expect(enterpriseEnvironment({ enabled: false }, { defaults: "", guide: "" })).toEqual({})
@@ -89,13 +174,15 @@ describe("enterprise profile", () => {
   test("injects non-overridable offline flags and packaged paths", () => {
     const profile = parseEnterpriseProfile({
       OPENCODE_ENTERPRISE: "1",
-      OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+      ]),
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
-      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
     })
 
     expect(
@@ -111,10 +198,13 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_GUIDE_PATH: "C:/app/enterprise/company-guide.md",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
-      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
-      OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
-      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
-      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
+        "https://llm.corp.example,https://fast.corp.example,https://llm-dr.corp.example",
+      OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+      ]),
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       XDG_DATA_HOME: "C:/Users/person/AppData/Local/company-opencode/data",
       XDG_CONFIG_HOME: "C:/Users/person/AppData/Local/company-opencode/config",
       XDG_CACHE_HOME: "C:/Users/person/AppData/Local/company-opencode/cache",
