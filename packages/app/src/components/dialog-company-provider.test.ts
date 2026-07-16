@@ -8,6 +8,8 @@ import {
   diagnoseCompanyProvider,
   companyProviderDiagnosticResult,
   companyProviderModels,
+  companyProviderCredentialModels,
+  companyProviderModelCredentialStatus,
   companyProviderShouldRestart,
 } from "./dialog-company-provider-state"
 
@@ -84,6 +86,82 @@ describe("company provider config", () => {
       defaultModelID: "fallback",
     })
     expect(JSON.stringify(config)).not.toContain("must-not-escape")
+  })
+
+  test("merges authoritative credentials with sidecar models and marks restart mismatches", () => {
+    const config = {
+      model: "company-llm/code",
+      provider: {
+        "company-llm": {
+          models: {
+            code: { name: "Server Code", provider: { api: "https://code.company.test/v1" } },
+            pending: { name: "Pending Model", provider: { api: "https://pending.company.test/v1" } },
+            changed: { name: "Changed Model", provider: { api: "https://changed-new.company.test/v1" } },
+          },
+        },
+      },
+    }
+    const rows = companyProviderCredentialModels(config, {
+      defaultModelID: "code",
+      models: [
+        {
+          id: "code",
+          name: "Company Code",
+          baseURL: "https://code.company.test/v1",
+          credentialStatus: { configured: true },
+        },
+        {
+          id: "main-only",
+          name: "Main Only",
+          baseURL: "https://main-only.company.test/v1",
+          credentialStatus: { configured: false },
+        },
+        {
+          id: "changed",
+          name: "Changed Model",
+          baseURL: "https://changed-old.company.test/v1",
+          credentialStatus: { configured: false },
+        },
+      ],
+    })
+
+    expect(rows).toEqual([
+      {
+        id: "code",
+        name: "Company Code",
+        baseURL: "https://code.company.test/v1",
+        isDefault: true,
+        synchronized: true,
+        credentialStatus: { configured: true },
+      },
+      {
+        id: "main-only",
+        name: "Main Only",
+        baseURL: "https://main-only.company.test/v1",
+        isDefault: false,
+        synchronized: false,
+        credentialStatus: { configured: false },
+      },
+      {
+        id: "changed",
+        name: "Changed Model",
+        baseURL: "https://changed-old.company.test/v1",
+        isDefault: false,
+        synchronized: false,
+        credentialStatus: { configured: false },
+      },
+      {
+        id: "pending",
+        name: "Pending Model",
+        baseURL: "https://pending.company.test/v1",
+        isDefault: false,
+        synchronized: false,
+        credentialStatus: undefined,
+      },
+    ])
+    expect(companyProviderModelCredentialStatus(rows[0], "Request failed")).toBe("Credentials configured")
+    expect(companyProviderModelCredentialStatus(rows[1], "Request failed")).toBe("Restart required")
+    expect(companyProviderModelCredentialStatus(rows[3], "Request failed")).toBe("Restart required")
   })
 })
 
@@ -177,17 +255,12 @@ describe("company provider operation state", () => {
       ok: true,
       checks: { basic: "pass", streaming: "pass", toolCall: "pass" } as const,
     }
-    const result = await diagnoseCompanyProvider(
-      async (input) => {
-        requests.push(input)
-        return { data: diagnostic }
-      },
-      "company-code",
-    )
+    const result = await diagnoseCompanyProvider(async (input) => {
+      requests.push(input)
+      return { data: diagnostic }
+    }, "company-code")
 
-    expect(requests).toEqual([
-      { providerID: "company-llm", modelID: "company-code", checkToolCall: true },
-    ])
+    expect(requests).toEqual([{ providerID: "company-llm", modelID: "company-code", checkToolCall: true }])
     expect(result.data).toEqual(diagnostic)
   })
 })

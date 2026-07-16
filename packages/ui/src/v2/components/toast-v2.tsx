@@ -89,7 +89,7 @@ export interface ToastV2Action {
 export interface ToastV2Options {
   title?: string
   description?: string
-  icon?: JSX.Element
+  icon?: JSX.Element | (() => JSX.Element)
   duration?: number
   persistent?: boolean
   actions?: ToastV2Action[]
@@ -98,7 +98,7 @@ export interface ToastV2Options {
 export function showToastV2(options: ToastV2Options | string) {
   const opts = typeof options === "string" ? { description: options } : options
   return toaster.show((props) => {
-    const resolvedIcon = children(() => opts.icon)
+    const resolvedIcon = children(() => (typeof opts.icon === "function" ? opts.icon() : opts.icon))
     return (
       <ToastV2 toastId={props.toastId} duration={opts.duration} persistent={opts.persistent}>
         <div data-slot="toast-v2-header">

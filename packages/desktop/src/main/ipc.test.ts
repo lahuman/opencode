@@ -46,6 +46,17 @@ describe("enterprise guide IPC", () => {
     expect(stdout.trim()).toBe(
       JSON.stringify({
         registered: true,
+        credentialCatalog: {
+          defaultModelID: "company-code",
+          models: [
+            {
+              id: "company-code",
+              name: "Company Code",
+              baseURL: "https://llm.corp.example/v1",
+              credentialStatus: { configured: false },
+            },
+          ],
+        },
         guide: { version: "2026.08", markdown: "# Registered guide\n" },
         shellOpenExternalURLs: ["https://llm.corp.example/docs"],
       }),

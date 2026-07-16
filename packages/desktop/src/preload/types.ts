@@ -50,6 +50,18 @@ export type EnterpriseProviderDiagnostic = {
   }
   failure?: { kind: string; message: string }
 }
+export type EnterpriseCredentialCatalog = {
+  defaultModelID: string
+  models: {
+    id: string
+    name: string
+    baseURL: string
+    credentialStatus: {
+      configured: boolean
+      errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
+    }
+  }[]
+}
 export type EnterpriseReadinessReport = {
   schemaVersion: 1
   generatedAt: string
@@ -69,8 +81,13 @@ export type ElectronAPI = {
   awaitInitialization: () => Promise<ServerReadyData>
   enterprise: {
     enabled: boolean
+    credentialCatalog: () => Promise<EnterpriseCredentialCatalog>
     credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    setCredentials: (input: {
+      modelID: string
+      apiKey?: string
+      headers?: Record<string, string>
+    }) => Promise<{ restartRequired: true }>
     clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
     readGuide: () => Promise<{ version: string; markdown: string }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
@@ -145,6 +162,8 @@ export function createEnterpriseAPI(
 ): ElectronAPI["enterprise"] {
   return {
     enabled,
+    credentialCatalog: () =>
+      invoke("enterprise-credential-catalog") as ReturnType<ElectronAPI["enterprise"]["credentialCatalog"]>,
     credentialStatus: (modelID) =>
       invoke("enterprise-credential-status", modelID) as ReturnType<ElectronAPI["enterprise"]["credentialStatus"]>,
     setCredentials: (input) =>
@@ -162,6 +181,7 @@ export function createEnterpriseAPI(
 
 export function mapEnterpriseAPI(enterprise: ElectronAPI["enterprise"]) {
   return {
+    credentialCatalog: enterprise.credentialCatalog,
     credentialStatus: enterprise.credentialStatus,
     setCredentials: enterprise.setCredentials,
     clearCredentials: enterprise.clearCredentials,

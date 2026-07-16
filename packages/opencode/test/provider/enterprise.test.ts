@@ -93,6 +93,7 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
   expect(headers.get("x-company-token")).toBe("credential-custom-secret")
   expect(headers.get("authorization")).not.toContain("project-secret")
   expect(headers.get("x-company-token")).not.toContain("project-custom-secret")
+  server.stop(true)
 })
 
 test("routes two models to distinct URLs and credentials without cross-model fallback", async () => {
@@ -145,6 +146,8 @@ test("routes two models to distinct URLs and credentials without cross-model fal
   expect(reasoningRequests).toHaveLength(1)
   expect(reasoningRequests[0].get("authorization")).toBe("Bearer reasoning-key")
   expect(reasoningRequests[0].get("x-company-token")).toBe("reasoning-header")
+  codeServer.stop(true)
+  reasoningServer.stop(true)
 })
 
 test("rejects Company LLM redirects without contacting the redirect target", async () => {
@@ -167,6 +170,7 @@ test("rejects Company LLM redirects without contacting the redirect target", asy
   )
   expect(redirected).toBe(0)
   expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "company-code", {})).toEqual({})
+  server.stop(true)
 })
 
 test("invalid enterprise credentials are discarded without exposing prior values", () => {

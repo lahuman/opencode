@@ -3,7 +3,10 @@ import "../../app/happydom"
 const mode = process.argv[2]
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: mode === "enterprise" ? "1" : "0",
-  OPENCODE_ENTERPRISE_MODELS: mode === "enterprise" ? JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]) : "",
+  OPENCODE_ENTERPRISE_MODELS:
+    mode === "enterprise"
+      ? JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }])
+      : "",
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: mode === "enterprise" ? "company-code" : "",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: mode === "enterprise" ? "pilot-1" : "",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: mode === "enterprise" ? "pilot-1" : "",
@@ -17,6 +20,7 @@ const fetchCalls: Array<{ url: string; method: string }> = []
 const api = {
   enterprise: {
     enabled: mode === "enterprise",
+    credentialCatalog: async () => ({ defaultModelID: "company-code", models: [] }),
     credentialStatus: async () => ({ configured: false }),
     setCredentials: async () => ({ restartRequired: true as const }),
     clearCredentials: async () => ({ restartRequired: true as const }),

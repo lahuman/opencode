@@ -264,7 +264,7 @@ function SettingsCompanyProviderV2() {
   const dialog = useDialog()
   const language = useLanguage()
   const company = useCompanyProviderSettingsState()
-  const model = () => company.config().models[0]?.name ?? "No configured model"
+  const model = () => company.defaultModel()?.name ?? "No configured model"
 
   return (
     <>
@@ -280,12 +280,7 @@ function SettingsCompanyProviderV2() {
                   <div class="settings-v2-provider-main">
                     <span class="settings-v2-provider-name">Company LLM</span>
                   </div>
-                  <p
-                    class="settings-v2-provider-description"
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true"
-                  >
+                  <p class="settings-v2-provider-description" role="status" aria-live="polite" aria-atomic="true">
                     {model()} - {company.status()}
                   </p>
                 </div>
@@ -301,7 +296,7 @@ function SettingsCompanyProviderV2() {
                 <ButtonV2
                   size="normal"
                   variant="neutral"
-                  disabled={company.checking() || !company.config().models[0]}
+                  disabled={company.checking() || !company.defaultModel()?.synchronized}
                   onClick={company.testConnection}
                 >
                   {company.checking() ? "Testing..." : "Test connection"}

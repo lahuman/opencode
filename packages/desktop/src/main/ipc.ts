@@ -5,7 +5,13 @@ import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } f
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
-import type { EnterpriseProviderDiagnostic, FatalRendererError, ServerReadyData, TitlebarTheme } from "../preload/types"
+import type {
+  EnterpriseCredentialCatalog,
+  EnterpriseProviderDiagnostic,
+  FatalRendererError,
+  ServerReadyData,
+  TitlebarTheme,
+} from "../preload/types"
 import { createEnterpriseURLHandler, type EnterpriseProfile } from "../enterprise"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { readEnterpriseGuide } from "./enterprise-guide"
@@ -45,8 +51,13 @@ type Deps = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   openExternalURL: (url: string) => Promise<void> | void
   enterprise: {
+    credentialCatalog: () => Promise<EnterpriseCredentialCatalog>
     credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) => Promise<{ restartRequired: true }>
+    setCredentials: (input: {
+      modelID: string
+      apiKey?: string
+      headers?: Record<string, string>
+    }) => Promise<{ restartRequired: true }>
     clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
@@ -120,6 +131,7 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
+  registry.handle("enterprise-credential-catalog", () => deps.enterprise.credentialCatalog())
   registry.handle("enterprise-credential-status", (_event: IpcMainInvokeEvent, modelID: string) =>
     deps.enterprise.credentialStatus(modelID),
   )

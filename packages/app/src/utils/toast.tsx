@@ -19,7 +19,7 @@ export function showToast(options: ToastOptions | string) {
 
   return showToastV2({
     ...options,
-    icon: resolveIcon(options.icon, options.variant),
+    icon: resolveToastIcon(options.icon, options.variant),
     actions: options.actions?.map((action) => ({
       ...action,
       variant: action.onClick === "dismiss" ? "secondary" : "primary",
@@ -27,8 +27,8 @@ export function showToast(options: ToastOptions | string) {
   })
 }
 
-function resolveIcon(icon: IconProps["name"] | undefined, variant: ToastVariant | undefined) {
+export function resolveToastIcon(icon: IconProps["name"] | undefined, variant: ToastVariant | undefined) {
   const name = icon ?? (variant === "success" ? "check" : undefined)
   if (!name) return
-  return <Icon name={name} />
+  return () => <Icon name={name} />
 }

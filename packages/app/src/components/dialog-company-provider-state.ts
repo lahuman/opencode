@@ -21,6 +21,23 @@ export type CompanyProviderDiagnosticResult = {
 
 export type CompanyProviderAction = "save" | "clear" | "diagnose" | undefined
 export type CredentialMutationResult = { restartRequired: boolean }
+export type CompanyCredentialCatalog = {
+  defaultModelID: string
+  models: {
+    id: string
+    name: string
+    baseURL: string
+    credentialStatus: { configured: boolean; errorCode?: string }
+  }[]
+}
+export type CompanyProviderCredentialModel = {
+  id: string
+  name: string
+  baseURL: string
+  isDefault: boolean
+  synchronized: boolean
+  credentialStatus: { configured: boolean; errorCode?: string } | undefined
+}
 
 export const COMPANY_PROVIDER_FAILURE_MESSAGE = "Company LLM connection test failed. Check the server and try again."
 
@@ -55,6 +72,46 @@ export function companyProviderConfig(config: CompanyConfig) {
     models,
     defaultModelID: configured && models.some((model) => model.id === configured) ? configured : (models[0]?.id ?? ""),
   }
+}
+
+export function companyProviderCredentialModels(
+  config: CompanyConfig,
+  catalog: CompanyCredentialCatalog,
+): CompanyProviderCredentialModel[] {
+  const serverModels = companyProviderModels(config)
+  const server = new Map(serverModels.map((model) => [model.id, model]))
+  const main = new Set(catalog.models.map((model) => model.id))
+  return [
+    ...catalog.models.map((model) => ({
+      ...model,
+      isDefault: model.id === catalog.defaultModelID,
+      synchronized: server.get(model.id)?.baseURL === model.baseURL,
+    })),
+    ...serverModels.flatMap((model) =>
+      main.has(model.id)
+        ? []
+        : [
+            {
+              ...model,
+              isDefault: false,
+              synchronized: false,
+              credentialStatus: undefined,
+            },
+          ],
+    ),
+  ]
+}
+
+export function companyProviderModelCredentialStatus(model: CompanyProviderCredentialModel, failureMessage: string) {
+  if (!model.synchronized) return "Restart required"
+  return companyProviderCredentialStatus(
+    {
+      loading: false,
+      configured: model.credentialStatus?.configured,
+      error: model.credentialStatus?.errorCode,
+    },
+    failureMessage,
+  )
 }
 
 export function companyProviderCanStart(action: CompanyProviderAction, ready: boolean) {

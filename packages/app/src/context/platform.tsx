@@ -75,8 +75,24 @@ type PlatformBase = {
 
   /** Enterprise credential management through desktop secure storage */
   enterprise?: {
+    credentialCatalog(): Promise<{
+      defaultModelID: string
+      models: {
+        id: string
+        name: string
+        baseURL: string
+        credentialStatus: {
+          configured: boolean
+          errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
+        }
+      }[]
+    }>
     credentialStatus(modelID: string): Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials(input: { modelID: string; apiKey?: string; headers?: Record<string, string> }): Promise<{ restartRequired: boolean }>
+    setCredentials(input: {
+      modelID: string
+      apiKey?: string
+      headers?: Record<string, string>
+    }): Promise<{ restartRequired: boolean }>
     clearCredentials(modelID: string): Promise<{ restartRequired: boolean }>
     readGuide(): Promise<{ version: string; markdown: string }>
     readiness(provider?: {

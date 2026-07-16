@@ -21,7 +21,7 @@ import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider } from "@/context/server-sync"
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs } from "@/context/tabs"
-import { ToastRegion } from "@/utils/toast"
+import { setV2Toast, ToastRegion } from "@/utils/toast"
 import { useServerHealth } from "@/utils/server-health"
 
 const DIAGNOSTIC_SUCCESS = {
@@ -53,11 +53,11 @@ type RequestRecord = {
   query: string
   body?: unknown
 }
-type CredentialInput = { apiKey?: string; headers?: Record<string, string> }
+type CredentialInput = { modelID: string; apiKey?: string; headers?: Record<string, string> }
 type CredentialMode = "restart" | "no-restart" | "error"
 type DiagnosticOutcome = "success" | "failure" | "network-error"
 
-function createHarness() {
+function createHarness(scenario?: string | null) {
   const sidecar: ServerConnection.Sidecar = {
     type: "sidecar",
     variant: "base",
@@ -72,12 +72,7 @@ function createHarness() {
   const stores = new Map<string, Map<string, string>>([
     [
       "opencode.global.dat",
-      new Map([
-        [
-          "server",
-          JSON.stringify({ list: [remote], projects: {}, lastProject: {}, recentlyClosed: {} }),
-        ],
-      ]),
+      new Map([["server", JSON.stringify({ list: [remote], projects: {}, lastProject: {}, recentlyClosed: {} })]]),
     ],
   ])
   const [observations, setObservations] = createStore({
@@ -85,13 +80,15 @@ function createHarness() {
     storageWrites: [] as Array<{ name: string; key: string; value: string | null }>,
     credentialInputs: [] as CredentialInput[],
     credentialStatusInputs: [] as string[],
+    credentialClearInputs: [] as string[],
+    credentialCatalogCalls: 0,
     defaultWrites: [] as Array<ServerConnection.Key | null>,
     restartSnapshots: [] as string[][],
     externalLinks: [] as string[],
   })
   const [diagnosticPending, setDiagnosticPending] = createSignal(false)
   const behavior = {
-    configured: false,
+    configured: { "company-code": false, "company-reasoning": false } as Record<string, boolean>,
     credentialMode: "restart" as CredentialMode,
     diagnosticOutcome: "success" as DiagnosticOutcome,
   }
@@ -154,6 +151,14 @@ function createHarness() {
                 name: "Company Reasoning",
                 provider: { api: "https://reasoning.company.test/v1" },
               },
+              ...(scenario === "company-mismatch"
+                ? {
+                    "pending-model": {
+                      name: "Pending Model",
+                      provider: { api: "https://pending.company.test/v1" },
+                    },
+                  }
+                : {}),
             },
           },
         },
@@ -229,18 +234,39 @@ function createHarness() {
       setObservations("defaultWrites", observations.defaultWrites.length, key)
     },
     enterprise: {
+      async credentialCatalog() {
+        setObservations("credentialCatalogCalls", (value) => value + 1)
+        return {
+          defaultModelID: "company-code",
+          models: [
+            {
+              id: "company-code",
+              name: "Company Code",
+              baseURL: "https://llm.company.test/v1",
+              credentialStatus: { configured: behavior.configured["company-code"] },
+            },
+            {
+              id: "company-reasoning",
+              name: "Company Reasoning",
+              baseURL: "https://reasoning.company.test/v1",
+              credentialStatus: { configured: behavior.configured["company-reasoning"] },
+            },
+          ],
+        }
+      },
       async credentialStatus(modelID) {
         setObservations("credentialStatusInputs", observations.credentialStatusInputs.length, modelID)
-        return { configured: behavior.configured }
+        return { configured: behavior.configured[modelID] ?? false }
       },
       async setCredentials(input) {
         setObservations("credentialInputs", observations.credentialInputs.length, input)
         if (behavior.credentialMode === "error") throw new Error("secure storage failed")
-        behavior.configured = true
+        behavior.configured[input.modelID] = true
         return { restartRequired: behavior.credentialMode === "restart" }
       },
-      async clearCredentials() {
-        behavior.configured = false
+      async clearCredentials(modelID) {
+        setObservations("credentialClearInputs", observations.credentialClearInputs.length, modelID)
+        behavior.configured[modelID] = false
         return { restartRequired: behavior.credentialMode === "restart" }
       },
       async readGuide() {
@@ -336,7 +362,13 @@ function Observations(props: { harness: Harness }) {
       <output data-testid="requests">{JSON.stringify(props.harness.observations.requests)}</output>
       <output data-testid="storage-writes">{JSON.stringify(props.harness.observations.storageWrites)}</output>
       <output data-testid="credential-inputs">{JSON.stringify(props.harness.observations.credentialInputs)}</output>
-      <output data-testid="credential-status-inputs">{JSON.stringify(props.harness.observations.credentialStatusInputs)}</output>
+      <output data-testid="credential-status-inputs">
+        {JSON.stringify(props.harness.observations.credentialStatusInputs)}
+      </output>
+      <output data-testid="credential-clear-inputs">
+        {JSON.stringify(props.harness.observations.credentialClearInputs)}
+      </output>
+      <output data-testid="credential-catalog-calls">{props.harness.observations.credentialCatalogCalls}</output>
       <output data-testid="default-writes">{JSON.stringify(props.harness.observations.defaultWrites)}</output>
       <output data-testid="restart-snapshots">{JSON.stringify(props.harness.observations.restartSnapshots)}</output>
       <output data-testid="external-links">{JSON.stringify(props.harness.observations.externalLinks)}</output>
@@ -394,7 +426,11 @@ function ControllerConsumer(props: { harness: Harness }) {
   return (
     <>
       <div data-testid="controller-controls">
-        <button type="button" disabled={!settings.ready() || !tabs.ready()} onClick={() => invoke("add", controller.startAdd)}>
+        <button
+          type="button"
+          disabled={!settings.ready() || !tabs.ready()}
+          onClick={() => invoke("add", controller.startAdd)}
+        >
           Invoke add
         </button>
         <button
@@ -562,6 +598,7 @@ function TopLevelFailure(): JSX.Element {
 }
 
 function SettingsDiagnosticConsumer() {
+  setV2Toast(true)
   const company = useCompanyProviderSettingsState()
   return (
     <>
@@ -569,7 +606,7 @@ function SettingsDiagnosticConsumer() {
         {company.checking() ? "Testing settings connection" : "Settings test connection"}
       </button>
       <output data-testid="settings-credential-status">{company.status()}</output>
-      <ToastRegion v2={false} />
+      <ToastRegion v2 />
     </>
   )
 }
@@ -586,8 +623,8 @@ function SettingsScenario(props: { harness: Harness }) {
 }
 
 function Fixture() {
-  const harness = createHarness()
   const scenario = new URLSearchParams(window.location.search).get("scenario")
+  const harness = createHarness(scenario)
   return (
     <Switch fallback={<p>Unknown scenario</p>}>
       <Match when={scenario === "server"}>
@@ -600,6 +637,9 @@ function Fixture() {
         <ConnectScenario harness={harness} />
       </Match>
       <Match when={scenario === "company"}>
+        <CompanyScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "company-mismatch"}>
         <CompanyScenario harness={harness} />
       </Match>
       <Match when={scenario === "settings"}>

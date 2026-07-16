@@ -43,7 +43,7 @@ function SettingsCompanyProvider() {
   const dialog = useDialog()
   const language = useLanguage()
   const company = useCompanyProviderSettingsState()
-  const model = () => company.config().models[0]?.name ?? "No configured model"
+  const model = () => company.defaultModel()?.name ?? "No configured model"
 
   return (
     <div class="flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10">
@@ -75,7 +75,7 @@ function SettingsCompanyProvider() {
               <Button
                 size="small"
                 variant="secondary"
-                disabled={company.checking() || !company.config().models[0]}
+                disabled={company.checking() || !company.defaultModel()?.synchronized}
                 onClick={company.testConnection}
               >
                 {company.checking() ? "Testing..." : "Test connection"}

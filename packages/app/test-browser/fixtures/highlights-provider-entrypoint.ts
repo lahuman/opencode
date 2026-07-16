@@ -28,6 +28,7 @@ async function mountHighlights(enterprise: boolean) {
     ...(enterprise
       ? {
           enterprise: {
+            credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
             credentialStatus: async () => ({ configured: false }),
             setCredentials: async () => ({ restartRequired: true }),
             clearCredentials: async () => ({ restartRequired: true }),

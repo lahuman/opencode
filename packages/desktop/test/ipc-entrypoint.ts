@@ -75,6 +75,17 @@ try {
       exportDebugLogs: async () => "logs.zip",
       recordFatalRendererError() {},
       enterprise: {
+        credentialCatalog: async () => ({
+          defaultModelID: "company-code",
+          models: [
+            {
+              id: "company-code",
+              name: "Company Code",
+              baseURL: "https://llm.corp.example/v1",
+              credentialStatus: { configured: false },
+            },
+          ],
+        }),
         credentialStatus: async () => ({ configured: false }),
         setCredentials: async () => ({ restartRequired: true }),
         clearCredentials: async () => ({ restartRequired: true }),
@@ -87,7 +98,9 @@ try {
     {
       profile: parseEnterpriseProfile({
         OPENCODE_ENTERPRISE: "1",
-        OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
+        OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+          { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+        ]),
         OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
         OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
@@ -108,6 +121,7 @@ try {
   console.log(
     JSON.stringify({
       registered: handlers.has("enterprise-guide-read"),
+      credentialCatalog: await handlers.get("enterprise-credential-catalog")?.(),
       guide: await handlers.get("enterprise-guide-read")?.(),
       shellOpenExternalURLs,
     }),

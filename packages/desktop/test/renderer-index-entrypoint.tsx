@@ -6,7 +6,9 @@ const mode = process.argv[2] ?? "enterprise"
 const enterprise = mode === "enterprise"
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: enterprise ? "1" : "0",
-  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+  ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
@@ -96,6 +98,7 @@ const api = {
   consumeInitialDeepLinks: async () => [],
   enterprise: {
     clearCredentials: async () => ({ restartRequired: true as const }),
+    credentialCatalog: async () => ({ defaultModelID: "company-code", models: [] }),
     credentialStatus: async () => ({ configured: false }),
     readGuide: async () => ({ version: "pilot-1", markdown: "" }),
     setCredentials: async () => ({ restartRequired: true as const }),

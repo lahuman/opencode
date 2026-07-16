@@ -2,7 +2,6 @@ import { Button } from "@opencode-ai/ui/button"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Select } from "@opencode-ai/ui/select"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
@@ -18,8 +17,9 @@ import {
   companyProviderCanStart,
   companyProviderConfig,
   companyProviderCredentialInput,
-  companyProviderCredentialStatus,
+  companyProviderCredentialModels,
   companyProviderDiagnosticResult,
+  companyProviderModelCredentialStatus,
   diagnoseCompanyProvider,
   type CompanyProviderAction,
   type CompanyProviderDiagnosticResult,
@@ -31,19 +31,20 @@ export function useCompanyProviderSettingsState() {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
-  const config = createMemo(() => companyProviderConfig(serverSync().data.config))
-  const [checking, setChecking] = createSignal(false)
-  const [status, statusActions] = createResource(
-    () => {
-      const modelID = config().defaultModelID
-      if (!modelID || !config().models.some((model) => model.id === modelID)) return
-      return { enterprise: platform.enterprise, modelID }
-    },
-    (input) => input.enterprise?.credentialStatus(input.modelID),
+  const [catalog, catalogActions] = createResource(
+    () => platform.enterprise,
+    (enterprise) => enterprise?.credentialCatalog(),
   )
+  const models = createMemo(() =>
+    catalog.latest ? companyProviderCredentialModels(serverSync().data.config, catalog.latest) : [],
+  )
+  const defaultModel = createMemo(
+    () => models().find((model) => model.isDefault) ?? models().find((model) => model.synchronized),
+  )
+  const [checking, setChecking] = createSignal(false)
   const testConnection = async () => {
-    const model = config().models.find((item) => item.id === config().defaultModelID)
-    if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model))) return
+    const model = defaultModel()
+    if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model?.synchronized))) return
     if (!model) return
     setChecking(true)
     const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), model.id)
@@ -68,21 +69,19 @@ export function useCompanyProviderSettingsState() {
   }
 
   const statusLabel = () => {
-    return companyProviderCredentialStatus(
-      {
-        loading: status.loading,
-        error: status.error ?? status.latest?.errorCode,
-        configured: status.latest?.configured,
-      },
-      language.t("common.requestFailed"),
-    )
+    if (catalog.loading) return "Checking credentials..."
+    if (catalog.error) return language.t("common.requestFailed")
+    const model = defaultModel()
+    if (!model) return "Credentials not configured"
+    return companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))
   }
 
   return {
-    config,
+    models,
+    defaultModel,
     checking,
     status: statusLabel,
-    refreshStatus: statusActions.refetch,
+    refreshStatus: catalogActions.refetch,
     testConnection,
   }
 }
@@ -94,6 +93,13 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
   const config = createMemo(() => companyProviderConfig(serverSync().data.config))
+  const [catalog, catalogActions] = createResource(
+    () => platform.enterprise,
+    (enterprise) => enterprise?.credentialCatalog(),
+  )
+  const models = createMemo(() =>
+    catalog.latest ? companyProviderCredentialModels(serverSync().data.config, catalog.latest) : [],
+  )
   const [state, setState] = createStore({
     apiKey: "",
     headers: [{ key: "", value: "" }],
@@ -102,14 +108,6 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     result: undefined as CompanyProviderDiagnosticResult | undefined,
     error: undefined as string | undefined,
   })
-  const [status, statusActions] = createResource(
-    () => {
-      const modelID = state.modelID
-      if (!modelID || !config().models.some((model) => model.id === modelID)) return
-      return { enterprise: platform.enterprise, modelID }
-    },
-    (input) => input.enterprise?.credentialStatus(input.modelID),
-  )
   const [readinessProvider, setReadinessProvider] = createSignal<{
     modelID: string
     result: CompanyProviderDiagnosticResult
@@ -124,8 +122,11 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   )
 
   createEffect(() => {
-    if (config().models.some((model) => model.id === state.modelID)) return
-    setState("modelID", config().defaultModelID)
+    if (models().some((model) => model.id === state.modelID)) return
+    setState(
+      "modelID",
+      models().find((model) => model.isDefault)?.id ?? models().find((model) => model.synchronized)?.id ?? "",
+    )
   })
 
   const resetSecrets = () => {
@@ -145,7 +146,6 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const mutateCredentials = async (
     nextAction: Exclude<CompanyProviderAction, "diagnose" | undefined>,
     mutation: () => Promise<CredentialMutationResult>,
-    configured: boolean,
   ) => {
     if (!companyProviderCanStart(state.action, true)) return
     setState("action", nextAction)
@@ -156,15 +156,25 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
       restart: () => platform.restart(),
     }).then(
       (value) => ({ value }),
-      () => ({ error: true as const }),
+      (error: unknown) => ({
+        error:
+          error instanceof Error && error.message.includes("Enterprise credential model is not configured")
+            ? ("catalog" as const)
+            : ("request" as const),
+      }),
     )
     if ("error" in response) {
-      setState("error", language.t("common.requestFailed"))
+      setState(
+        "error",
+        response.error === "catalog"
+          ? "The model catalog changed. Restart the desktop app before configuring credentials."
+          : language.t("common.requestFailed"),
+      )
       setState("action", undefined)
       return
     }
 
-    statusActions.mutate({ configured })
+    await catalogActions.refetch()
     setState("action", undefined)
   }
 
@@ -172,19 +182,20 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     event.preventDefault()
     const enterprise = platform.enterprise
     if (!enterprise) return
+    if (!selectedModel()?.synchronized) return
     const input = companyProviderCredentialInput(state.apiKey, state.headers)
     if (!companyProviderCanStart(state.action, Object.keys(input).length > 0)) return
-    await mutateCredentials("save", () => enterprise.setCredentials({ modelID: state.modelID, ...input }), true)
+    await mutateCredentials("save", () => enterprise.setCredentials({ modelID: state.modelID, ...input }))
   }
 
   const clear = async () => {
     const enterprise = platform.enterprise
-    if (!enterprise || !status.latest?.configured) return
-    await mutateCredentials("clear", () => enterprise.clearCredentials(state.modelID), false)
+    if (!enterprise || !selectedModel()?.synchronized || !selectedModel()?.credentialStatus?.configured) return
+    await mutateCredentials("clear", () => enterprise.clearCredentials(state.modelID))
   }
 
   const diagnose = async () => {
-    if (!companyProviderCanStart(state.action, Boolean(state.modelID))) return
+    if (!companyProviderCanStart(state.action, Boolean(selectedModel()?.synchronized))) return
     const modelID = state.modelID
     setState("result", undefined)
     setState("action", "diagnose")
@@ -206,17 +217,15 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   }
 
   const statusLabel = () => {
-    return companyProviderCredentialStatus(
-      {
-        loading: status.loading,
-        error: status.error ?? status.latest?.errorCode,
-        configured: status.latest?.configured,
-      },
-      language.t("common.requestFailed"),
-    )
+    if (catalog.loading) return "Checking credentials..."
+    if (catalog.error) return language.t("common.requestFailed")
+    const model = selectedModel()
+    if (!model) return "Credentials not configured"
+    return companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))
   }
 
-  const selectedModel = createMemo(() => config().models.find((model) => model.id === state.modelID))
+  const selectedModel = createMemo(() => models().find((model) => model.id === state.modelID))
+  const editorDisabled = () => state.action !== undefined || !selectedModel()?.synchronized
   const input = createMemo(() => companyProviderCredentialInput(state.apiKey, state.headers))
   const diagnosticStatus = () => {
     if (state.action === "diagnose") return "Testing Company LLM connection"
@@ -226,135 +235,169 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   }
 
   return (
-    <Dialog title="Company LLM">
+    <Dialog title="Company LLM" size="large" class="w-full max-w-[900px]">
       <form class="flex min-w-0 flex-col gap-4 px-4 pb-4" onSubmit={save}>
-        <div class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <TextField label="Base URL" value={selectedModel()?.baseURL ?? ""} disabled />
-          <div class="flex min-w-0 flex-col gap-1.5">
-            <label class="text-12-medium text-text-weak">Model</label>
-            <Select
-              class="min-w-0"
-              options={config().models}
-              current={selectedModel()}
-              value={(model) => model.id}
-              label={(model) => model.name}
-              placeholder="No configured models"
-              disabled={state.action !== undefined}
-              triggerProps={{ "aria-label": "Company LLM model" }}
-              onSelect={(model) => selectModel(model?.id ?? "")}
+        <Show when={catalog.error}>
+          <p
+            class="rounded-md border border-border-danger-base px-3 py-2 text-12-regular text-text-danger-base"
+            role="alert"
+          >
+            Credential settings could not be loaded. Restart the desktop app and try again.
+          </p>
+        </Show>
+        <Show when={models().some((model) => !model.synchronized)}>
+          <p
+            class="rounded-md border border-border-warning-base bg-surface-warning-strong/10 px-3 py-2 text-12-regular text-text-strong"
+            role="alert"
+          >
+            The desktop and server model catalogs differ. Restart the desktop app before configuring affected models.
+          </p>
+        </Show>
+
+        <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)]">
+          <div class="flex min-w-0 flex-col gap-2" aria-label="Enterprise models">
+            <span class="text-12-medium text-text-weak">Models</span>
+            <Show
+              when={!catalog.loading}
+              fallback={<span class="text-12-regular text-text-weak">Loading models...</span>}
+            >
+              <For each={models()} fallback={<span class="text-12-regular text-text-weak">No configured models</span>}>
+                {(model) => (
+                  <button
+                    type="button"
+                    data-testid={`company-model-${model.id}`}
+                    aria-pressed={model.id === state.modelID}
+                    class="flex min-w-0 flex-col gap-1 rounded-md border px-3 py-2 text-left"
+                    classList={{
+                      "border-border-focus bg-surface-raised-base": model.id === state.modelID,
+                      "border-border-weak-base bg-surface-base": model.id !== state.modelID,
+                    }}
+                    disabled={state.action !== undefined}
+                    onClick={() => selectModel(model.id)}
+                  >
+                    <span class="flex min-w-0 items-center justify-between gap-2">
+                      <span class="truncate text-13-medium text-text-strong">{model.name}</span>
+                      <Show when={model.isDefault}>
+                        <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
+                          Default
+                        </span>
+                      </Show>
+                    </span>
+                    <span class="truncate text-11-regular text-text-weak">{model.id}</span>
+                    <span class="break-all text-11-regular text-text-weak">{model.baseURL}</span>
+                    <span class="text-11-medium text-text-strong">
+                      {companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))}
+                    </span>
+                  </button>
+                )}
+              </For>
+            </Show>
+          </div>
+
+          <div class="flex min-w-0 flex-col gap-4">
+            <TextField label="Base URL" value={selectedModel()?.baseURL ?? ""} disabled />
+
+            <div class="flex items-center justify-between gap-3 text-12-regular">
+              <span class="text-text-weak">Credential status</span>
+              <span class="text-text-strong" role="status" aria-live="polite" aria-atomic="true">
+                {statusLabel()}
+              </span>
+            </div>
+
+            <TextField
+              label="API key"
+              type="password"
+              autocomplete="off"
+              value={state.apiKey}
+              disabled={editorDisabled()}
+              onChange={(value) => setState("apiKey", value)}
             />
-          </div>
-        </div>
 
-        <div class="flex items-center justify-between gap-3 text-12-regular">
-          <span class="text-text-weak">Credential status</span>
-          <span class="text-text-strong" role="status" aria-live="polite" aria-atomic="true">
-            {statusLabel()}
-          </span>
-        </div>
-
-        <TextField
-          label="API key"
-          type="password"
-          autocomplete="off"
-          value={state.apiKey}
-          disabled={state.action !== undefined}
-          onChange={(value) => setState("apiKey", value)}
-        />
-
-        <div class="flex min-w-0 flex-col gap-2">
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-12-medium text-text-weak">Secret headers</span>
-            <Tooltip value="Add secret header" placement="top">
-              <IconButton
-                type="button"
-                icon="plus-small"
-                variant="ghost"
-                aria-label="Add secret header"
-                disabled={state.action !== undefined}
-                onClick={() => setState("headers", state.headers.length, { key: "", value: "" })}
-              />
-            </Tooltip>
-          </div>
-          <For each={state.headers}>
-            {(header, index) => (
-              <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
-                <TextField
-                  label="Secret header"
-                  hideLabel
-                  placeholder="Header name"
-                  autocomplete="off"
-                  value={header.key}
-                  disabled={state.action !== undefined}
-                  onChange={(value) => setState("headers", index(), "key", value)}
-                />
-                <TextField
-                  label="Secret value"
-                  hideLabel
-                  type="password"
-                  placeholder="Secret value"
-                  autocomplete="off"
-                  value={header.value}
-                  disabled={state.action !== undefined}
-                  onChange={(value) => setState("headers", index(), "value", value)}
-                />
-                <Tooltip value="Remove secret header" placement="top">
+            <div class="flex min-w-0 flex-col gap-2">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-12-medium text-text-weak">Secret headers</span>
+                <Tooltip value="Add secret header" placement="top">
                   <IconButton
                     type="button"
-                    icon="trash"
+                    icon="plus-small"
                     variant="ghost"
-                    class="mt-1.5"
-                    aria-label="Remove secret header"
-                    disabled={state.action !== undefined || state.headers.length === 1}
-                    onClick={() => setState("headers", (rows) => rows.filter((_, row) => row !== index()))}
+                    aria-label="Add secret header"
+                    disabled={editorDisabled()}
+                    onClick={() => setState("headers", state.headers.length, { key: "", value: "" })}
                   />
                 </Tooltip>
               </div>
-            )}
-          </For>
+              <For each={state.headers}>
+                {(header, index) => (
+                  <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
+                    <TextField
+                      label="Secret header"
+                      hideLabel
+                      placeholder="Header name"
+                      autocomplete="off"
+                      value={header.key}
+                      disabled={editorDisabled()}
+                      onChange={(value) => setState("headers", index(), "key", value)}
+                    />
+                    <TextField
+                      label="Secret value"
+                      hideLabel
+                      type="password"
+                      placeholder="Secret value"
+                      autocomplete="off"
+                      value={header.value}
+                      disabled={editorDisabled()}
+                      onChange={(value) => setState("headers", index(), "value", value)}
+                    />
+                    <Tooltip value="Remove secret header" placement="top">
+                      <IconButton
+                        type="button"
+                        icon="trash"
+                        variant="ghost"
+                        class="mt-1.5"
+                        aria-label="Remove secret header"
+                        disabled={editorDisabled() || state.headers.length === 1}
+                        onClick={() => setState("headers", (rows) => rows.filter((_, row) => row !== index()))}
+                      />
+                    </Tooltip>
+                  </div>
+                )}
+              </For>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <Button type="submit" variant="primary" disabled={!Object.keys(input()).length || editorDisabled()}>
+                {state.action === "save" ? language.t("common.saving") : language.t("common.save")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={editorDisabled() || !state.modelID}
+                onClick={diagnose}
+              >
+                {state.action === "diagnose" ? "Testing..." : "Test connection"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={editorDisabled() || !selectedModel()?.credentialStatus?.configured}
+                onClick={clear}
+              >
+                {state.action === "clear" ? "Clearing..." : "Clear credentials"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={state.action !== undefined}
+                onClick={props.onBack ?? dialog.close}
+              >
+                {language.t("common.cancel")}
+              </Button>
+            </div>
+          </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!Object.keys(input()).length || state.action !== undefined}
-          >
-            {state.action === "save" ? language.t("common.saving") : language.t("common.save")}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={state.action !== undefined || !state.modelID}
-            onClick={diagnose}
-          >
-            {state.action === "diagnose" ? "Testing..." : "Test connection"}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={state.action !== undefined || !status.latest?.configured}
-            onClick={clear}
-          >
-            {state.action === "clear" ? "Clearing..." : "Clear credentials"}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={state.action !== undefined}
-            onClick={props.onBack ?? dialog.close}
-          >
-            {language.t("common.cancel")}
-          </Button>
-        </div>
-
-        <span
-          class="sr-only"
-          data-slot="company-diagnostic-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
+        <span class="sr-only" data-slot="company-diagnostic-status" role="status" aria-live="polite" aria-atomic="true">
           {diagnosticStatus()}
         </span>
 
@@ -390,9 +433,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                 {(failure) => (
                   <>
                     <span class="min-w-0 break-words text-text-weak">Failure ({failure().kind})</span>
-                    <span class="min-w-0 max-w-72 break-words text-right text-text-strong">
-                      {failure().message}
-                    </span>
+                    <span class="min-w-0 max-w-72 break-words text-right text-text-strong">{failure().message}</span>
                   </>
                 )}
               </Show>
@@ -403,7 +444,9 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
         <Show when={readinessProvider()?.modelID === state.modelID ? readiness.latest : undefined}>
           {(report) => (
             <details class="border-t border-border-weak-base pt-3 text-12-regular">
-              <summary class="cursor-pointer text-text-strong capitalize">Offline readiness: {report().overall}</summary>
+              <summary class="cursor-pointer text-text-strong capitalize">
+                Offline readiness: {report().overall}
+              </summary>
               <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
                 <For each={report().checks}>
                   {(check) => (

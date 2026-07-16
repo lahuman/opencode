@@ -54,10 +54,10 @@ test("mounted management controller rejects before storage, navigation, probes, 
   await page.goto(fixture("controller"))
   await expect(page.getByTestId("controller-ready")).toHaveText("true")
   await expect
-    .poll(async () =>
-      (await output<Array<{ path: string }>>(page, "requests")).filter(
-        (request) => request.path === "/global/health",
-      ).length,
+    .poll(
+      async () =>
+        (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health")
+          .length,
     )
     .toBe(1)
 
@@ -76,9 +76,7 @@ test("mounted management controller rejects before storage, navigation, probes, 
     .toEqual({ add: REMOTE_DISABLED, select: REMOTE_DISABLED, remove: REMOTE_DISABLED, default: "resolved" })
   await expect(page.getByText(REMOTE_DISABLED, { exact: true })).toBeVisible()
   expect(
-    (await output<Array<{ path: string }>>(page, "requests")).filter(
-      (request) => request.path === "/global/health",
-    ),
+    (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health"),
   ).toHaveLength(probes)
   expect(await output<unknown[]>(page, "storage-writes")).toHaveLength(writes)
   expect(await output<unknown[]>(page, "default-writes")).toEqual([])
@@ -96,9 +94,7 @@ test("DialogConnectProvider diverts enterprise mode directly to Company LLM", as
   await expect(page.getByText("Custom provider", { exact: true })).toHaveCount(0)
 
   const requests = await output<Array<{ path: string }>>(page, "requests")
-  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(
-    false,
-  )
+  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
 })
 
 test("DialogCompanyProvider keeps credentials local and drives generated diagnostics accessibly", async ({ page }) => {
@@ -108,9 +104,20 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   const headerName = page.getByPlaceholder("Header name")
   const headerValue = page.getByPlaceholder("Secret value")
   const status = dialog.locator('[data-slot="company-diagnostic-status"]')
+  const codeModel = page.getByTestId("company-model-company-code")
+  const reasoningModel = page.getByTestId("company-model-company-reasoning")
 
   await expect(dialog).toContainText("Credentials not configured")
-  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual(["company-code"])
+  await expect(codeModel).toContainText("Company Code")
+  await expect(codeModel).toContainText("company-code")
+  await expect(codeModel).toContainText("https://llm.company.test/v1")
+  await expect(codeModel).toContainText("Default")
+  await expect(codeModel).toContainText("Credentials not configured")
+  await expect(reasoningModel).toContainText("Company Reasoning")
+  await expect(reasoningModel).toContainText("https://reasoning.company.test/v1")
+  await expect(reasoningModel).toContainText("Credentials not configured")
+  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
+  await expect.poll(() => output<number>(page, "credential-catalog-calls")).toBeGreaterThan(0)
   await expect(status).toHaveAttribute("role", "status")
   await expect(status).toHaveAttribute("aria-live", "polite")
   await expect(status).toHaveText("Ready to test Company LLM connection")
@@ -172,9 +179,7 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   )
   expect(diagnostics).toEqual(Array.from({ length: 4 }, () => diagnosticRequest))
   const requests = await output<Array<{ path: string }>>(page, "requests")
-  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(
-    false,
-  )
+  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
 })
 
 test("DialogCompanyProvider clears model-scoped secrets and diagnostics when switching models", async ({ page }) => {
@@ -189,12 +194,12 @@ test("DialogCompanyProvider clears model-scoped secrets and diagnostics when swi
   await headerName.fill("X-Code-Token")
   await headerValue.fill("code-header")
   await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(page.getByRole("button", { name: /Company LLM model/ })).toBeDisabled()
+  await expect(page.getByTestId("company-model-company-code")).toBeDisabled()
+  await expect(page.getByTestId("company-model-company-reasoning")).toBeDisabled()
   await invokeFixtureControl(page, "Resolve diagnostic")
   await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toBeVisible()
 
-  await page.getByRole("button", { name: /Company LLM model/ }).click()
-  await page.getByText("Company Reasoning", { exact: true }).click()
+  await page.getByTestId("company-model-company-reasoning").click()
 
   await expect(apiKey).toHaveValue("")
   await expect(headerName).toHaveValue("")
@@ -204,12 +209,44 @@ test("DialogCompanyProvider clears model-scoped secrets and diagnostics when swi
   await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveText(
     "Ready to test Company LLM connection",
   )
+
+  await invokeFixtureControl(page, "Credentials no restart")
+  await apiKey.fill("reasoning-secret")
+  await dialog.getByRole("button", { name: "Save" }).click()
+  await expect
+    .poll(() => output<unknown[]>(page, "credential-inputs"))
+    .toContainEqual({
+      modelID: "company-reasoning",
+      apiKey: "reasoning-secret",
+    })
+  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials configured")
+  await dialog.getByRole("button", { name: "Clear credentials" }).click()
+  await expect.poll(() => output<string[]>(page, "credential-clear-inputs")).toEqual(["company-reasoning"])
+  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials not configured")
+})
+
+test("DialogCompanyProvider blocks models until desktop and sidecar catalogs are synchronized", async ({ page }) => {
+  await page.goto(fixture("company-mismatch"))
+  const dialog = page.getByRole("dialog")
+  const pending = page.getByTestId("company-model-pending-model")
+
+  await expect(dialog.getByRole("alert")).toContainText("Restart the desktop app")
+  await expect(pending).toContainText("Pending Model")
+  await expect(pending).toContainText("https://pending.company.test/v1")
+  await expect(pending).toContainText("Restart required")
+  await pending.click()
+  await expect(page.getByLabel("API key")).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "Test connection" })).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "Clear credentials" })).toBeDisabled()
+  expect(await output<unknown[]>(page, "credential-inputs")).toEqual([])
+  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
 })
 
 test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
   await page.goto(fixture("settings"))
   await expect(page.getByTestId("settings-credential-status")).toHaveText("Credentials not configured")
-  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual(["company-code"])
+  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
   await invokeFixtureControl(page, "Diagnostic failure")
 
   await page.getByRole("button", { name: "Settings test connection" }).click()
@@ -221,6 +258,20 @@ test("settings diagnostics display the authenticated server remediation", async 
     (request) => request.path === "/provider/company-llm/diagnostics",
   )
   expect(diagnostics).toEqual([diagnosticRequest])
+})
+
+test("settings success toast creates its icon inside the Solid render owner", async ({ page }) => {
+  const warnings: string[] = []
+  page.on("console", (message) => {
+    if (message.type() === "warning") warnings.push(message.text())
+  })
+  await page.goto(fixture("settings"))
+
+  await page.getByRole("button", { name: "Settings test connection" }).click()
+  await invokeFixtureControl(page, "Resolve diagnostic")
+
+  await expect(page.getByText("Company LLM connection succeeded", { exact: true })).toBeVisible()
+  expect(warnings.filter((warning) => warning.includes("cleanups created outside"))).toEqual([])
 })
 
 test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {

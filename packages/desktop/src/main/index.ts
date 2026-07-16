@@ -341,7 +341,13 @@ const main = Effect.gen(function* () {
     encrypt: (value) => safeStorage.encryptString(value),
     decrypt: (value) => safeStorage.decryptString(value),
   })
-  const enterpriseCredentialHandlers = createEnterpriseCredentialHandlers(ENTERPRISE_ENABLED, enterpriseCredentials)
+  const enterpriseCredentialHandlers = createEnterpriseCredentialHandlers(
+    ENTERPRISE_ENABLED,
+    enterpriseCredentials,
+    ENTERPRISE_PROFILE.enabled
+      ? { defaultModelID: ENTERPRISE_PROFILE.defaultModelID, models: ENTERPRISE_PROFILE.models }
+      : { defaultModelID: "", models: [] },
+  )
   const enterpriseRecoveryAllowed =
     enterpriseStartupFailure instanceof EnterpriseStateError &&
     (enterpriseStartupFailure.kind === "recovery_required" || enterpriseStartupFailure.kind === "downgrade")
@@ -420,6 +426,7 @@ const main = Effect.gen(function* () {
       exportDebugLogs: () => exportDebugLogs(),
       recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
       enterprise: {
+        credentialCatalog: enterpriseCredentialHandlers.catalog,
         credentialStatus: enterpriseCredentialHandlers.status,
         setCredentials: enterpriseCredentialHandlers.set,
         clearCredentials: enterpriseCredentialHandlers.clear,
@@ -502,7 +509,10 @@ const main = Effect.gen(function* () {
       // Write server info to app/.env.local so the Vite dev server picks it up automatically.
       const authToken = Buffer.from(`opencode:${password}`).toString("base64")
       const envLocal = join(import.meta.dirname, "../../../app/.env.local")
-      writeFileSync(envLocal, `VITE_OPENCODE_SERVER_HOST=127.0.0.1\nVITE_OPENCODE_SERVER_PORT=${port}\nVITE_OPENCODE_AUTH_TOKEN=${authToken}\n`)
+      writeFileSync(
+        envLocal,
+        `VITE_OPENCODE_SERVER_HOST=127.0.0.1\nVITE_OPENCODE_SERVER_PORT=${port}\nVITE_OPENCODE_AUTH_TOKEN=${authToken}\n`,
+      )
       logger.log("wrote dev env", { path: envLocal })
     }
 

@@ -113,6 +113,54 @@ describe("enterprise credential store", () => {
     await expect(handlers.set({ modelID: "missing", apiKey: "secret" })).rejects.toThrow("model")
   })
 
+  test("credential handlers expose a non-secret authoritative model catalog", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const store = createEnterpriseCredentialStore({
+      file: join(dir, "credentials.bin"),
+      modelIDs: ["code", "reasoning"],
+      defaultModelID: "reasoning",
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    await store.setAll({
+      schemaVersion: 2,
+      models: {
+        code: { apiKey: "code-secret", headers: { Authorization: "code-header-secret" } },
+      },
+    })
+    const handlers = createEnterpriseCredentialHandlers(true, store, {
+      defaultModelID: "reasoning",
+      models: [
+        { id: "code", name: "Company Code", baseURL: "https://code.company.test/v1" },
+        { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.company.test/v1" },
+      ],
+    })
+
+    const catalog = await handlers.catalog()
+
+    expect(catalog).toEqual({
+      defaultModelID: "reasoning",
+      models: [
+        {
+          id: "code",
+          name: "Company Code",
+          baseURL: "https://code.company.test/v1",
+          credentialStatus: { configured: true },
+        },
+        {
+          id: "reasoning",
+          name: "Company Reasoning",
+          baseURL: "https://reasoning.company.test/v1",
+          credentialStatus: { configured: false },
+        },
+      ],
+    })
+    expect(JSON.stringify(catalog)).not.toContain("code-secret")
+    expect(JSON.stringify(catalog)).not.toContain("code-header-secret")
+  })
+
   test("persists only encrypted bytes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
     dirs.push(dir)

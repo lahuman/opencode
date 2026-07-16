@@ -17,6 +17,7 @@ describe("company guide command", () => {
     const opened: { version: string; markdown: string }[] = []
     const command = createCompanyGuideCommand({
       enterprise: {
+        credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
         credentialStatus: async () => ({ configured: true }),
         setCredentials: async () => ({ restartRequired: false }),
         clearCredentials: async () => ({ restartRequired: false }),
@@ -41,6 +42,7 @@ describe("company guide command", () => {
     let failures = 0
     const command = createCompanyGuideCommand({
       enterprise: {
+        credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
         credentialStatus: async () => ({ configured: true }),
         setCredentials: async () => ({ restartRequired: false }),
         clearCredentials: async () => ({ restartRequired: false }),

@@ -11,6 +11,19 @@ export type EnterpriseCredentials = {
   models: Record<string, EnterpriseCredential>
 }
 
+export type EnterpriseCredentialCatalog = {
+  defaultModelID: string
+  models: {
+    id: string
+    name: string
+    baseURL: string
+    credentialStatus: {
+      configured: boolean
+      errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
+    }
+  }[]
+}
+
 type Store = ReturnType<typeof createEnterpriseCredentialStore>
 
 export function enterpriseSidecarEnvironment(): Record<string, string> {
@@ -20,7 +33,14 @@ export function enterpriseSidecarEnvironment(): Record<string, string> {
   }
 }
 
-export function createEnterpriseCredentialHandlers(enabled: boolean, store: Store) {
+export function createEnterpriseCredentialHandlers(
+  enabled: boolean,
+  store: Store,
+  profile: { defaultModelID: string; models: { id: string; name: string; baseURL: string }[] } = {
+    defaultModelID: store.defaultModelID,
+    models: [],
+  },
+) {
   const status = async (modelID = store.defaultModelID) => {
     if (!enabled) return { configured: false }
     store.requireModel(modelID)
@@ -66,7 +86,31 @@ export function createEnterpriseCredentialHandlers(enabled: boolean, store: Stor
     return { restartRequired: true as const }
   }
 
-  return { status, set, clear }
+  const catalog = async (): Promise<EnterpriseCredentialCatalog> => {
+    if (!enabled) return { defaultModelID: "", models: [] }
+    const health = await store.health()
+    const credentials = health.state === "available" || health.state === "missing" ? await store.all() : undefined
+    const errorCode =
+      health.state === "corrupt"
+        ? ("credential_decryption_failed" as const)
+        : health.state === "encryption-unavailable"
+          ? ("credential_encryption_unavailable" as const)
+          : undefined
+    return {
+      defaultModelID: profile.defaultModelID,
+      models: profile.models.map((model) => ({
+        ...model,
+        credentialStatus: {
+          configured: Boolean(
+            credentials?.models[model.id]?.apiKey || Object.keys(credentials?.models[model.id]?.headers ?? {}).length,
+          ),
+          ...(errorCode ? { errorCode } : {}),
+        },
+      })),
+    }
+  }
+
+  return { catalog, status, set, clear }
 }
 
 type Input = {
@@ -212,9 +256,7 @@ function decodeCredential(value: unknown): EnterpriseCredential | undefined {
   if (!isRecord(value)) return
   if (value.headers !== undefined && !isRecord(value.headers)) return
   const entries = Object.entries(value.headers ?? {})
-  const headers = Object.fromEntries(
-    entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  )
+  const headers = Object.fromEntries(entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"))
   if (
     typeof value.apiKey !== "string" &&
     ((value.apiKey !== undefined && !Object.keys(headers).length) ||

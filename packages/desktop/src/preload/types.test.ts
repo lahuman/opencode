@@ -57,11 +57,13 @@ test("maps credential operations with an explicit model ID", async () => {
     return Promise.resolve({ configured: true, restartRequired: true })
   })
 
+  await enterprise.credentialCatalog()
   await enterprise.credentialStatus("reasoning")
   await enterprise.setCredentials({ modelID: "reasoning", apiKey: "secret" })
   await enterprise.clearCredentials("reasoning")
 
   expect(invocations).toEqual([
+    { channel: "enterprise-credential-catalog", args: [] },
     { channel: "enterprise-credential-status", args: ["reasoning"] },
     { channel: "enterprise-set-credentials", args: [{ modelID: "reasoning", apiKey: "secret" }] },
     { channel: "enterprise-clear-credentials", args: ["reasoning"] },
@@ -71,6 +73,7 @@ test("maps credential operations with an explicit model ID", async () => {
 test("maps the preload enterprise API to the app platform contract", () => {
   const enterprise = {
     enabled: true,
+    credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
     credentialStatus: async () => ({ configured: true }),
     setCredentials: async () => ({ restartRequired: true as const }),
     clearCredentials: async () => ({ restartRequired: true as const }),
@@ -83,6 +86,7 @@ test("maps the preload enterprise API to the app platform contract", () => {
   const platform = mapEnterpriseAPI(enterprise)
 
   expect(platform).toEqual({
+    credentialCatalog: enterprise.credentialCatalog,
     credentialStatus: enterprise.credentialStatus,
     setCredentials: enterprise.setCredentials,
     clearCredentials: enterprise.clearCredentials,
