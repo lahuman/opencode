@@ -34,7 +34,11 @@ export function useCompanyProviderSettingsState() {
   const config = createMemo(() => companyProviderConfig(serverSync().data.config))
   const [checking, setChecking] = createSignal(false)
   const [status, statusActions] = createResource(
-    () => ({ enterprise: platform.enterprise, modelID: config().defaultModelID }),
+    () => {
+      const modelID = config().defaultModelID
+      if (!modelID || !config().models.some((model) => model.id === modelID)) return
+      return { enterprise: platform.enterprise, modelID }
+    },
     (input) => input.enterprise?.credentialStatus(input.modelID),
   )
   const testConnection = async () => {
@@ -99,7 +103,11 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     error: undefined as string | undefined,
   })
   const [status, statusActions] = createResource(
-    () => ({ enterprise: platform.enterprise, modelID: state.modelID }),
+    () => {
+      const modelID = state.modelID
+      if (!modelID || !config().models.some((model) => model.id === modelID)) return
+      return { enterprise: platform.enterprise, modelID }
+    },
     (input) => input.enterprise?.credentialStatus(input.modelID),
   )
   const [readinessProvider, setReadinessProvider] = createSignal<{

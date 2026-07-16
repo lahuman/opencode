@@ -110,6 +110,7 @@ test("DialogCompanyProvider keeps credentials local and drives generated diagnos
   const status = dialog.locator('[data-slot="company-diagnostic-status"]')
 
   await expect(dialog).toContainText("Credentials not configured")
+  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual(["company-code"])
   await expect(status).toHaveAttribute("role", "status")
   await expect(status).toHaveAttribute("aria-live", "polite")
   await expect(status).toHaveText("Ready to test Company LLM connection")
@@ -208,6 +209,7 @@ test("DialogCompanyProvider clears model-scoped secrets and diagnostics when swi
 test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
   await page.goto(fixture("settings"))
   await expect(page.getByTestId("settings-credential-status")).toHaveText("Credentials not configured")
+  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual(["company-code"])
   await invokeFixtureControl(page, "Diagnostic failure")
 
   await page.getByRole("button", { name: "Settings test connection" }).click()

@@ -84,6 +84,7 @@ function createHarness() {
     requests: [] as RequestRecord[],
     storageWrites: [] as Array<{ name: string; key: string; value: string | null }>,
     credentialInputs: [] as CredentialInput[],
+    credentialStatusInputs: [] as string[],
     defaultWrites: [] as Array<ServerConnection.Key | null>,
     restartSnapshots: [] as string[][],
     externalLinks: [] as string[],
@@ -228,7 +229,8 @@ function createHarness() {
       setObservations("defaultWrites", observations.defaultWrites.length, key)
     },
     enterprise: {
-      async credentialStatus() {
+      async credentialStatus(modelID) {
+        setObservations("credentialStatusInputs", observations.credentialStatusInputs.length, modelID)
         return { configured: behavior.configured }
       },
       async setCredentials(input) {
@@ -334,6 +336,7 @@ function Observations(props: { harness: Harness }) {
       <output data-testid="requests">{JSON.stringify(props.harness.observations.requests)}</output>
       <output data-testid="storage-writes">{JSON.stringify(props.harness.observations.storageWrites)}</output>
       <output data-testid="credential-inputs">{JSON.stringify(props.harness.observations.credentialInputs)}</output>
+      <output data-testid="credential-status-inputs">{JSON.stringify(props.harness.observations.credentialStatusInputs)}</output>
       <output data-testid="default-writes">{JSON.stringify(props.harness.observations.defaultWrites)}</output>
       <output data-testid="restart-snapshots">{JSON.stringify(props.harness.observations.restartSnapshots)}</output>
       <output data-testid="external-links">{JSON.stringify(props.harness.observations.externalLinks)}</output>
