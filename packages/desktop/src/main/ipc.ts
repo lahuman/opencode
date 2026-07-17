@@ -57,8 +57,8 @@ type Deps = {
       modelID: string
       apiKey?: string
       headers?: Record<string, string>
-    }) => Promise<{ restartRequired: true }>
-    clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
+    }) => Promise<{ restartRequired: boolean }>
+    clearCredentials: (modelID: string) => Promise<{ restartRequired: boolean }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
