@@ -2,8 +2,9 @@ import { createHash } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { EnterpriseProfile } from "../enterprise-profile"
+import { verifyEnterpriseSkillPacks } from "./enterprise-skill-packs"
 
-const resourceNames = ["company-guide.md", "models.json", "opencode.jsonc"] as const
+const resourceNames = ["company-guide.md", "models.json", "opencode.jsonc", "skill-packs.json"] as const
 
 type ResourceName = (typeof resourceNames)[number]
 export type EnterpriseManifestResources = Record<ResourceName, string>
@@ -103,6 +104,7 @@ export async function verifyEnterpriseManifest(input: ManifestInput & { manifest
       "company-guide.md": resources[0][1],
       "models.json": resources[1][1],
       "opencode.jsonc": resources[2][1],
+      "skill-packs.json": resources[3][1],
     },
   })
   const expected = {
@@ -138,23 +140,27 @@ export function runEnterprisePreflight(input: {
   enterpriseDir: string
 }) {
   if (!input.profile.enabled) return Promise.resolve(undefined)
-  return verifyEnterpriseManifest({
-    manifest: join(input.enterpriseDir, "enterprise-manifest.json"),
-    appVersion: input.appVersion,
-    profile: {
-      models: input.profile.models,
-      defaultModelID: input.profile.defaultModelID,
-      defaultsVersion: input.profile.defaultsVersion,
-      guideVersion: input.profile.guideVersion,
-      catalogVersion: input.profile.catalogVersion,
-      allowedOrigins: input.profile.allowedOrigins,
-    },
-    resources: {
-      "opencode.jsonc": join(input.enterpriseDir, "opencode.jsonc"),
-      "company-guide.md": join(input.enterpriseDir, "company-guide.md"),
-      "models.json": join(input.enterpriseDir, "models.json"),
-    },
-  })
+  return Promise.all([
+    verifyEnterpriseManifest({
+      manifest: join(input.enterpriseDir, "enterprise-manifest.json"),
+      appVersion: input.appVersion,
+      profile: {
+        models: input.profile.models,
+        defaultModelID: input.profile.defaultModelID,
+        defaultsVersion: input.profile.defaultsVersion,
+        guideVersion: input.profile.guideVersion,
+        catalogVersion: input.profile.catalogVersion,
+        allowedOrigins: input.profile.allowedOrigins,
+      },
+      resources: {
+        "opencode.jsonc": join(input.enterpriseDir, "opencode.jsonc"),
+        "company-guide.md": join(input.enterpriseDir, "company-guide.md"),
+        "models.json": join(input.enterpriseDir, "models.json"),
+        "skill-packs.json": join(input.enterpriseDir, "skill-packs.json"),
+      },
+    }),
+    verifyEnterpriseSkillPacks(input.enterpriseDir),
+  ]).then(([manifest, skillPacks]) => ({ manifest, skillPacks }))
 }
 
 export function verifyEnterpriseManifestContents(input: {

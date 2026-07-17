@@ -62,6 +62,9 @@ type Deps = {
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
+    skillPacks: () => Promise<unknown> | unknown
+    setSkillPackEnabled: (id: string, enabled: boolean) => Promise<unknown>
+    openSkillPackSource: (id: string) => Promise<void>
     guide: {
       enabled: boolean
       path: string
@@ -149,6 +152,13 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("enterprise-state-backups", () => deps.enterprise.stateBackups())
   registry.handle("enterprise-state-restore", (_event: IpcMainInvokeEvent, backupID: string) =>
     deps.enterprise.restoreStateBackup(backupID),
+  )
+  registry.handle("enterprise-skill-packs", () => deps.enterprise.skillPacks())
+  registry.handle("enterprise-skill-pack-set", (_event: IpcMainInvokeEvent, id: string, enabled: boolean) =>
+    deps.enterprise.setSkillPackEnabled(id, enabled),
+  )
+  registry.handle("enterprise-skill-pack-source", (_event: IpcMainInvokeEvent, id: string) =>
+    deps.enterprise.openSkillPackSource(id),
   )
   registry.handle("enterprise-guide-read", () => readEnterpriseGuide(deps.enterprise.guide))
   registry.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {

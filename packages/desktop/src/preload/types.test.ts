@@ -73,6 +73,24 @@ test("maps credential operations with an explicit model ID", async () => {
   ])
 })
 
+test("maps skill pack reads and updates to private enterprise IPC channels", async () => {
+  const invocations: { channel: string; args: unknown[] }[] = []
+  const enterprise = createEnterpriseAPI(true, (channel, ...args) => {
+    invocations.push({ channel, args })
+    return Promise.resolve([])
+  })
+
+  await enterprise.skillPacks()
+  await enterprise.setSkillPackEnabled("caveman", true)
+  await enterprise.openSkillPackSource("caveman")
+
+  expect(invocations).toEqual([
+    { channel: "enterprise-skill-packs", args: [] },
+    { channel: "enterprise-skill-pack-set", args: ["caveman", true] },
+    { channel: "enterprise-skill-pack-source", args: ["caveman"] },
+  ])
+})
+
 test("maps the preload enterprise API to the app platform contract", () => {
   const enterprise = {
     enabled: true,
@@ -84,6 +102,9 @@ test("maps the preload enterprise API to the app platform contract", () => {
     readiness: async () => ({ schemaVersion: 1 as const, generatedAt: "now", overall: "pass" as const, checks: [] }),
     stateBackups: async () => [],
     restoreStateBackup: async () => ({ restartRequired: true as const }),
+    skillPacks: async () => [],
+    setSkillPackEnabled: async () => [],
+    openSkillPackSource: async () => undefined,
   }
 
   const platform = mapEnterpriseAPI(enterprise)
@@ -97,6 +118,9 @@ test("maps the preload enterprise API to the app platform contract", () => {
     readiness: enterprise.readiness,
     stateBackups: enterprise.stateBackups,
     restoreStateBackup: enterprise.restoreStateBackup,
+    skillPacks: enterprise.skillPacks,
+    setSkillPackEnabled: enterprise.setSkillPackEnabled,
+    openSkillPackSource: enterprise.openSkillPackSource,
   })
   expect("enabled" in platform).toBe(false)
 })

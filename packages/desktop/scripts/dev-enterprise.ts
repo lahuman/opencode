@@ -28,6 +28,7 @@ export async function runEnterpriseDev(input: { env: Env; spawn: Spawn; prepare?
       "opencode.jsonc": path.join(root, "resources", "enterprise", "opencode.jsonc"),
       "company-guide.md": path.join(root, "resources", "enterprise", "company-guide.md"),
       "models.json": path.join(root, "resources", "enterprise", "models.json"),
+      "skill-packs.json": path.join(root, "resources", "enterprise", "skill-packs.json"),
     },
   })
   return input.spawn(["bun", "run", "dev"], {

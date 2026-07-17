@@ -1,6 +1,7 @@
 export * as ConfigEnterprise from "./enterprise"
 
 import type { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import path from "node:path"
 import { mapValues, omit } from "remeda"
 import { ConfigPlugin } from "./plugin"
 
@@ -12,7 +13,7 @@ export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allow
 }
 export type DefaultsPolicy = Pick<
   Policy,
-  "enabled" | "defaultsPath" | "allowedOrigins" | "models" | "defaultModelID"
+  "enabled" | "defaultsPath" | "allowedOrigins" | "models" | "defaultModelID" | "skillPaths"
 > & { guidePath?: string }
 type Info = ConfigV1.Info & { plugin_origins?: ConfigPlugin.Origin[] }
 
@@ -27,6 +28,7 @@ export function settings() {
     defaultModelID: enabled
       ? process.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID ?? models[0]?.id
       : undefined,
+    skillPaths: enabled ? enterpriseSkillPaths() : [],
     allowedOrigins: new Set(
       (enabled ? process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS : undefined)
         ?.split(",")
@@ -75,6 +77,14 @@ export function materializeDefaults(info: Info, policy: DefaultsPolicy = setting
   return {
     ...info,
     model: info.model ?? `company-llm/${policy.defaultModelID}`,
+    ...(policy.skillPaths.length
+      ? {
+          skills: {
+            ...info.skills,
+            paths: [...new Set([...policy.skillPaths, ...(info.skills?.paths ?? [])])],
+          },
+        }
+      : {}),
     ...(guidePath
       ? { instructions: [guidePath, ...(info.instructions ?? []).filter((item) => item !== guidePath)] }
       : {}),
@@ -107,6 +117,18 @@ export function materializeDefaults(info: Info, policy: DefaultsPolicy = setting
       },
     },
   }
+}
+
+function enterpriseSkillPaths() {
+  const value: unknown = (() => {
+    try {
+      return JSON.parse(process.env.OPENCODE_ENTERPRISE_SKILL_PATHS ?? "[]")
+    } catch {
+      return []
+    }
+  })()
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return []
+  return value.filter(path.isAbsolute)
 }
 
 export function enforce(info: Info, policy: EnforcementPolicy = settings()): Info {

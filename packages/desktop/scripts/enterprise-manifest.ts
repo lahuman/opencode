@@ -1,6 +1,7 @@
 import type { EnterpriseManifestResources } from "../src/main/enterprise-preflight"
 import { createEnterpriseManifest, writeEnterpriseManifest } from "../src/main/enterprise-preflight"
 import { validateEnterpriseBuild } from "./enterprise-build"
+import path from "node:path"
 
 type Env = Record<string, string | undefined>
 
@@ -30,4 +31,19 @@ export async function generateEnterpriseManifest(input: {
 export async function prepareEnterpriseManifest(input: Parameters<typeof generateEnterpriseManifest>[0]) {
   if (input.env.OPENCODE_ENTERPRISE !== "1") return
   return generateEnterpriseManifest(input)
+}
+
+if (import.meta.main) {
+  const root = path.resolve(import.meta.dir, "..")
+  await generateEnterpriseManifest({
+    appVersion: (await Bun.file(path.join(root, "package.json")).json<{ version: string }>()).version,
+    env: { ...process.env, OPENCODE_ENTERPRISE: "1" },
+    output: path.join(root, "resources", "enterprise", "enterprise-manifest.json"),
+    resources: {
+      "opencode.jsonc": path.join(root, "resources", "enterprise", "opencode.jsonc"),
+      "company-guide.md": path.join(root, "resources", "enterprise", "company-guide.md"),
+      "models.json": path.join(root, "resources", "enterprise", "models.json"),
+      "skill-packs.json": path.join(root, "resources", "enterprise", "skill-packs.json"),
+    },
+  })
 }

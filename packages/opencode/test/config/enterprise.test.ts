@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import path from "node:path"
 import { ConfigEnterprise } from "@/config/enterprise"
 
 test("enterprise policy disables server upgrades", () => {
@@ -101,6 +102,7 @@ test("materializes only catalog company provider metadata as structured defaults
         { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
       ],
       defaultModelID: "company-code",
+      skillPaths: ["C:/app/enterprise/skill-packs/ponytail/skills"],
     },
   )
   expect(result.model).toBe("company-llm/company-code")
@@ -113,6 +115,32 @@ test("materializes only catalog company provider metadata as structured defaults
   )
   expect(result.provider?.["company-llm"]?.options?.baseURL).toBeUndefined()
   expect(result.provider?.["company-llm"]?.models?.rogue).toBeUndefined()
+  expect(result.skills?.paths).toEqual(["C:/app/enterprise/skill-packs/ponytail/skills"])
+})
+
+test("materializes verified enterprise skill paths without duplicating project configuration", () => {
+  const skillPath = "C:/app/enterprise/skill-packs/superpowers/skills"
+  const result = ConfigEnterprise.materializeDefaults(
+    { skills: { paths: ["project-skills"] } },
+    {
+      enabled: true,
+      defaultsPath: "C:/app/enterprise/opencode.jsonc",
+      allowedOrigins: new Set(["https://llm.corp.example"]),
+      models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+      defaultModelID: "company-code",
+      skillPaths: [skillPath],
+    },
+  )
+
+  expect(result.skills?.paths).toEqual([skillPath, "project-skills"])
+})
+
+test("accepts only absolute enterprise skill paths from the sidecar environment", () => {
+  using offline = environment("OPENCODE_ENTERPRISE_OFFLINE", "1")
+  const absolute = path.resolve("enterprise-skills")
+  using skillPaths = environment("OPENCODE_ENTERPRISE_SKILL_PATHS", JSON.stringify([absolute, "relative-skills"]))
+
+  expect(ConfigEnterprise.settings().skillPaths).toEqual([absolute])
 })
 
 test("enterprise enforcement rejects a provider when any model URL is outside policy", () => {
@@ -150,6 +178,20 @@ test("enterprise enforcement rejects a provider when any model URL is outside po
     ).provider,
   ).toEqual({})
 })
+
+function environment(key: string, value: string) {
+  const previous = process.env[key]
+  process.env[key] = value
+  return {
+    [Symbol.dispose]() {
+      if (previous === undefined) {
+        delete process.env[key]
+        return
+      }
+      process.env[key] = previous
+    },
+  }
+}
 
 test("enterprise enforcement rejects provider and model URLs with queries or fragments", () => {
   const policy = {

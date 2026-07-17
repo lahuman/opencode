@@ -2,6 +2,7 @@ import { lstat, readdir } from "node:fs/promises"
 import path from "node:path"
 import { type Entry, Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
 import { verifyEnterpriseManifestContents } from "../src/main/enterprise-preflight"
+import { verifyEnterpriseSkillPacks } from "../src/main/enterprise-skill-packs"
 
 export type EnterprisePackageSummary = {
   executable: string
@@ -11,6 +12,7 @@ export type EnterprisePackageSummary = {
   manifest: true
   appArchive: true
   license: true
+  skillPacks: true
 }
 
 const requiredEntries = [
@@ -20,6 +22,10 @@ const requiredEntries = [
   "resources/enterprise/company-guide.md",
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
+  "resources/enterprise/skill-packs.json",
+  "resources/enterprise/skill-packs/ponytail/LICENSE",
+  "resources/enterprise/skill-packs/caveman/LICENSE",
+  "resources/enterprise/skill-packs/superpowers/LICENSE",
   "resources/licenses/OpenCode-LICENSE",
 ] as const
 const enterpriseGuide = new Uint8Array(
@@ -59,6 +65,7 @@ type ArchiveRange = { end: number; start: number }
 
 export async function verifyEnterprisePackage(root: string): Promise<EnterprisePackageSummary> {
   validateEnterprisePackageFiles((await readEnterprisePackage(root)).required)
+  await verifyEnterpriseSkillPacks(path.join(root, "resources/enterprise"))
   return {
     executable: path.basename(requiredEntries[0]),
     defaults: true,
@@ -67,6 +74,7 @@ export async function verifyEnterprisePackage(root: string): Promise<EnterpriseP
     manifest: true,
     appArchive: true,
     license: true,
+    skillPacks: true,
   }
 }
 
@@ -226,6 +234,7 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
         "opencode.jsonc": files["resources/enterprise/opencode.jsonc"],
         "company-guide.md": files["resources/enterprise/company-guide.md"],
         "models.json": files["resources/enterprise/models.json"],
+        "skill-packs.json": files["resources/enterprise/skill-packs.json"],
       },
     })
   } catch {
@@ -254,6 +263,16 @@ function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEnt
     "resources/enterprise/company-guide.md": read("resources/enterprise/company-guide.md"),
     "resources/enterprise/models.json": read("resources/enterprise/models.json"),
     "resources/enterprise/enterprise-manifest.json": read("resources/enterprise/enterprise-manifest.json"),
+    "resources/enterprise/skill-packs.json": read("resources/enterprise/skill-packs.json"),
+    "resources/enterprise/skill-packs/ponytail/LICENSE": read(
+      "resources/enterprise/skill-packs/ponytail/LICENSE",
+    ),
+    "resources/enterprise/skill-packs/caveman/LICENSE": read(
+      "resources/enterprise/skill-packs/caveman/LICENSE",
+    ),
+    "resources/enterprise/skill-packs/superpowers/LICENSE": read(
+      "resources/enterprise/skill-packs/superpowers/LICENSE",
+    ),
     "resources/licenses/OpenCode-LICENSE": read("resources/licenses/OpenCode-LICENSE"),
   }
 }

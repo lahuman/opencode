@@ -25,6 +25,9 @@ describe("company guide command", () => {
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
         stateBackups: async () => [],
         restoreStateBackup: async () => ({ restartRequired: false }),
+        skillPacks: async () => [],
+        setSkillPackEnabled: async () => [],
+        openSkillPackSource: async () => undefined,
       },
       category: "Settings",
       open: (guide) => opened.push(guide),
@@ -49,6 +52,9 @@ describe("company guide command", () => {
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
         stateBackups: async () => [],
         restoreStateBackup: async () => ({ restartRequired: false }),
+        skillPacks: async () => [],
+        setSkillPackEnabled: async () => [],
+        openSkillPackSource: async () => undefined,
         readGuide: async () => {
           throw new Error("read failed")
         },

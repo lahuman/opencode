@@ -54,7 +54,7 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
 
 export function enterpriseEnvironment(
   profile: EnterpriseProfile,
-  paths: { defaults: string; guide: string; userData?: string },
+  paths: { defaults: string; guide: string; userData?: string; skillPacks?: string[] },
 ): Record<string, string> {
   if (!profile.enabled) return {}
   const userData = paths.userData?.replace(/[\\/]+$/, "")
@@ -67,6 +67,8 @@ export function enterpriseEnvironment(
     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: profile.allowedOrigins.join(","),
     OPENCODE_ENTERPRISE_MODELS: JSON.stringify(profile.models),
     OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: profile.defaultModelID,
+    OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(paths.skillPacks ?? []),
+    SUPERPOWERS_DISABLE_TELEMETRY: "1",
     ...(userData
       ? {
           XDG_DATA_HOME: `${userData}/data`,

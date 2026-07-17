@@ -436,6 +436,10 @@ function Expand-PortableArchive {
     "resources/enterprise/company-guide.md",
     "resources/enterprise/models.json",
     "resources/enterprise/enterprise-manifest.json",
+    "resources/enterprise/skill-packs.json",
+    "resources/enterprise/skill-packs/ponytail/LICENSE",
+    "resources/enterprise/skill-packs/caveman/LICENSE",
+    "resources/enterprise/skill-packs/superpowers/LICENSE",
     "resources/licenses/OpenCode-LICENSE"
   )) {
     [void](Assert-PortablePayload -ApplicationDirectory $executables[0].DirectoryName -RelativePath $resource)

@@ -17,6 +17,13 @@ const required = [
   "resources/enterprise/company-guide.md",
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
+  "resources/enterprise/skill-packs.json",
+  "resources/enterprise/skill-packs/ponytail/LICENSE",
+  "resources/enterprise/skill-packs/ponytail/skills/ponytail/SKILL.md",
+  "resources/enterprise/skill-packs/caveman/LICENSE",
+  "resources/enterprise/skill-packs/caveman/skills/caveman/SKILL.md",
+  "resources/enterprise/skill-packs/superpowers/LICENSE",
+  "resources/enterprise/skill-packs/superpowers/skills/using-superpowers/SKILL.md",
   "resources/licenses/OpenCode-LICENSE",
 ]
 const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
@@ -25,6 +32,24 @@ const enterpriseModels = JSON.stringify({ providers: [] })
 const enterpriseModelCatalog = [
   { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
 ]
+const packLicense = "MIT License\n"
+const packSkills = {
+  ponytail: "---\nname: ponytail\ndescription: Test.\n---\n\n# Ponytail\n",
+  caveman: "---\nname: caveman\ndescription: Test.\n---\n\n# Caveman\n",
+  superpowers: "---\nname: using-superpowers\ndescription: Test.\n---\n\n# Superpowers\n",
+}
+const enterpriseSkillPacks = `${JSON.stringify(
+  {
+    schemaVersion: 1,
+    packs: [
+      testPack("ponytail", "Ponytail", "4.8.4", true, "ponytail"),
+      testPack("caveman", "Caveman", "v1.9.1", false, "caveman"),
+      testPack("superpowers", "Superpowers", "v6.1.1", true, "using-superpowers"),
+    ],
+  },
+  null,
+  2,
+)}\n`
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -41,6 +66,7 @@ test("accepts a complete portable enterprise tree", async () => {
     manifest: true,
     appArchive: true,
     license: true,
+    skillPacks: true,
   })
 })
 
@@ -58,7 +84,7 @@ test.each(required)("rejects a package missing %s", async (relative) => {
   const root = await portableFixture()
   await rm(path.join(root, relative), { force: true })
 
-  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package")
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow(/Portable package|Enterprise skill pack/)
 })
 
 test.each(required)("rejects a package directory at %s", async (relative) => {
@@ -67,7 +93,7 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
   await rm(file, { force: true })
   await mkdir(file)
 
-  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package is missing required files")
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow(/Portable package is missing required files|Enterprise skill pack/)
 })
 
 test("rejects a required payload symlinked outside the package root", async () => {
@@ -603,6 +629,9 @@ async function writePortableFixture(root: string) {
   await Promise.all([
     mkdir(path.join(root, "resources/enterprise"), { recursive: true }),
     mkdir(path.join(root, "resources/licenses"), { recursive: true }),
+    ...Object.entries(packSkills).map(([id, skill]) =>
+      mkdir(path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}`), { recursive: true }),
+    ),
   ])
   await Promise.all([
     Bun.write(path.join(root, "Company OpenCode Pilot.exe"), "portable executable"),
@@ -614,6 +643,14 @@ async function writePortableFixture(root: string) {
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
     Bun.write(path.join(root, "resources/enterprise/models.json"), enterpriseModels),
     Bun.write(path.join(root, "resources/enterprise/enterprise-manifest.json"), enterpriseManifest()),
+    Bun.write(path.join(root, "resources/enterprise/skill-packs.json"), enterpriseSkillPacks),
+    ...Object.entries(packSkills).flatMap(([id, contents]) => [
+      Bun.write(path.join(root, `resources/enterprise/skill-packs/${id}/LICENSE`), packLicense),
+      Bun.write(
+        path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}/SKILL.md`),
+        contents,
+      ),
+    ]),
     Bun.write(path.join(root, "resources/licenses/OpenCode-LICENSE"), "MIT License\n"),
   ])
 }
@@ -879,6 +916,13 @@ const portableContents: Record<string, string> = {
   "resources/enterprise/company-guide.md": enterpriseGuide,
   "resources/enterprise/models.json": enterpriseModels,
   "resources/enterprise/enterprise-manifest.json": enterpriseManifest(),
+  "resources/enterprise/skill-packs.json": enterpriseSkillPacks,
+  "resources/enterprise/skill-packs/ponytail/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/ponytail/skills/ponytail/SKILL.md": packSkills.ponytail,
+  "resources/enterprise/skill-packs/caveman/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/caveman/skills/caveman/SKILL.md": packSkills.caveman,
+  "resources/enterprise/skill-packs/superpowers/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/superpowers/skills/using-superpowers/SKILL.md": packSkills.superpowers,
   "resources/licenses/OpenCode-LICENSE": "MIT License\n",
 }
 
@@ -900,9 +944,34 @@ function enterpriseManifest() {
         "company-guide.md": digest(enterpriseGuide),
         "models.json": digest(enterpriseModels),
         "opencode.jsonc": digest(enterpriseDefaults),
+        "skill-packs.json": digest(enterpriseSkillPacks),
       },
     },
     null,
     2,
   )}\n`
+}
+
+function testPack(id: keyof typeof packSkills, displayName: string, version: string, defaultEnabled: boolean, member: string) {
+  return {
+    id,
+    displayName,
+    description: "Test pack.",
+    version,
+    repository: `https://github.com/example/${id}`,
+    defaultEnabled,
+    root: `skill-packs/${id}/skills`,
+    members: [member],
+    license: `skill-packs/${id}/LICENSE`,
+    treeSHA256: createHash("sha256")
+      .update(
+        `LICENSE\0${createHash("sha256").update(packLicense).digest("hex")}\n` +
+          `skills/${member}/SKILL.md\0${createHash("sha256").update(packSkills[id]).digest("hex")}\n`,
+      )
+      .digest("hex"),
+  }
+}
+
+function skillName(id: string) {
+  return id === "superpowers" ? "using-superpowers" : id
 }

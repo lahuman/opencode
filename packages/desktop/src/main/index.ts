@@ -54,6 +54,8 @@ import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
 import { cleanupStoreFiles } from "./store-cleanup"
+import { getStore } from "./store"
+import { ENTERPRISE_SKILL_PACKS_KEY } from "./store-keys"
 import { resolveDesktopUserDataPath } from "./user-data"
 import {
   createEnterpriseCredentialHandlers,
@@ -61,6 +63,12 @@ import {
   enterpriseSidecarEnvironment,
 } from "./enterprise-credentials"
 import { runEnterprisePreflight } from "./enterprise-preflight"
+import {
+  createEnterpriseSkillPackController,
+  openEnterpriseSkillPackSource,
+  resolveEnterpriseSkillPackState,
+  type VerifiedEnterpriseSkillPack,
+} from "./enterprise-skill-packs"
 import {
   EnterpriseStateError,
   listCompatibleEnterpriseBackups,
@@ -178,13 +186,15 @@ const main = Effect.gen(function* () {
     ? join(process.resourcesPath, "enterprise")
     : join(import.meta.dirname, "../../resources/enterprise")
   const enterpriseGuide = join(enterpriseDir, "company-guide.md")
+  let verifiedSkillPacks: VerifiedEnterpriseSkillPack[] = []
   const enterpriseStartupFailure = yield* Effect.promise(async () => {
     try {
-      await runEnterprisePreflight({
+      const preflight = await runEnterprisePreflight({
         profile: ENTERPRISE_PROFILE,
         appVersion: app.getVersion(),
         enterpriseDir,
       })
+      verifiedSkillPacks = preflight?.skillPacks.packs ?? []
       await adoptEnterpriseLegacyState({
         enabled: ENTERPRISE_ENABLED,
         userData: app.getPath("userData"),
@@ -244,6 +254,13 @@ const main = Effect.gen(function* () {
       app.exit(0)
     })
   }
+  const enabledSkillPackPaths = () => {
+    const state = resolveEnterpriseSkillPackState(
+      verifiedSkillPacks,
+      getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
+    )
+    return verifiedSkillPacks.flatMap((pack) => (state[pack.id] ? [pack.root] : []))
+  }
 
   // Electron's Node exposes this newer API; defer resolution so other runtimes can load the entrypoint.
   const { getCACertificates, setDefaultCACertificates } = yield* Effect.promise(() => import("node:tls"))
@@ -278,6 +295,7 @@ const main = Effect.gen(function* () {
       defaults: join(enterpriseDir, "opencode.jsonc"),
       guide: enterpriseGuide,
       userData: app.getPath("userData"),
+      skillPacks: enabledSkillPackPaths(),
     }),
   )
 
@@ -348,6 +366,15 @@ const main = Effect.gen(function* () {
       ? { defaultModelID: ENTERPRISE_PROFILE.defaultModelID, models: ENTERPRISE_PROFILE.models }
       : { defaultModelID: "", models: [] },
   )
+  let restartEnterpriseSidecar: (paths: string[]) => Promise<void> = async () => {
+    throw new Error("Enterprise sidecar is not ready")
+  }
+  const enterpriseSkillPacks = createEnterpriseSkillPackController({
+    packs: verifiedSkillPacks,
+    read: () => getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
+    write: (value) => getStore().set(ENTERPRISE_SKILL_PACKS_KEY, value),
+    restart: (paths) => restartEnterpriseSidecar(paths),
+  })
   const enterpriseRecoveryAllowed =
     enterpriseStartupFailure instanceof EnterpriseStateError &&
     (enterpriseStartupFailure.kind === "recovery_required" || enterpriseStartupFailure.kind === "downgrade")
@@ -446,6 +473,9 @@ const main = Effect.gen(function* () {
           relaunch()
           return { restartRequired: true as const }
         },
+        skillPacks: enterpriseSkillPacks.list,
+        setSkillPackEnabled: enterpriseSkillPacks.setEnabled,
+        openSkillPackSource: (id) => openEnterpriseSkillPackSource(verifiedSkillPacks, id, shell.openExternal),
         guide: {
           enabled: ENTERPRISE_PROFILE.enabled,
           path: enterpriseGuide,
@@ -502,6 +532,41 @@ const main = Effect.gen(function* () {
   const url = `http://${hostname}:${port}`
   const password = randomUUID()
 
+  const spawnSidecar = async (skillPacks: string[]) => {
+    const result = await spawnLocalServer(hostname, port, password, {
+      userDataPath: app.getPath("userData"),
+      env: ENTERPRISE_ENABLED
+        ? {
+            ...enterpriseSidecarEnvironment(),
+            OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(skillPacks),
+          }
+        : undefined,
+      credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.all() : undefined,
+      onStdout: (message) => writeLog("server", "stdout", { message }),
+      onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
+      onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
+    })
+    server = result.listener
+    return result
+  }
+  restartEnterpriseSidecar = async (skillPacks) => {
+    await killSidecar()
+    const result = await spawnSidecar(skillPacks)
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Enterprise sidecar restart timed out")), 30_000)
+      void result.health.wait.then(
+        () => {
+          clearTimeout(timeout)
+          resolve()
+        },
+        (error) => {
+          clearTimeout(timeout)
+          reject(error)
+        },
+      )
+    })
+  }
+
   const loadingTask = yield* Effect.gen(function* () {
     if (enterpriseStartupFailure) return yield* Effect.fail(enterpriseStartupFailure)
     logger.log("sidecar connection started", { url })
@@ -520,17 +585,7 @@ const main = Effect.gen(function* () {
     useEnvProxy()
 
     logger.log("spawning sidecar", { url })
-    const { listener, health } = yield* Effect.promise(async () =>
-      spawnLocalServer(hostname, port, password, {
-        userDataPath: app.getPath("userData"),
-        env: ENTERPRISE_ENABLED ? enterpriseSidecarEnvironment() : undefined,
-        credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.all() : undefined,
-        onStdout: (message) => writeLog("server", "stdout", { message }),
-        onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
-        onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
-      }),
-    )
-    server = listener
+    const { health } = yield* Effect.promise(() => spawnSidecar(enabledSkillPackPaths()))
     yield* Deferred.succeed(serverReady, {
       url,
       username: "opencode",

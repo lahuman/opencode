@@ -18,6 +18,7 @@ await prepareEnterpriseManifest({
     "opencode.jsonc": fileURLToPath(new URL("../resources/enterprise/opencode.jsonc", import.meta.url)),
     "company-guide.md": fileURLToPath(new URL("../resources/enterprise/company-guide.md", import.meta.url)),
     "models.json": fileURLToPath(new URL("../resources/enterprise/models.json", import.meta.url)),
+    "skill-packs.json": fileURLToPath(new URL("../resources/enterprise/skill-packs.json", import.meta.url)),
   },
 })
 

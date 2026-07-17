@@ -5,6 +5,42 @@
   height: 100%;
 }
 
+.settings-v2-skills-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px 12px;
+}
+
+.settings-v2-skills-heading h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-v2-skills-heading p,
+.settings-v2-skills-pending {
+  color: var(--text-weak);
+  font-size: 12px;
+}
+
+.settings-v2-skills-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-v2-skills-actions button {
+  color: var(--text-weak);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.settings-v2-skills-error {
+  margin: 0 4px 12px;
+  color: var(--text-danger);
+  font-size: 12px;
+}
+
 [data-component="dialog-v2"][data-variant="settings"] [data-slot="dialog-container"] {
   background: var(--v2-background-bg-base);
 }

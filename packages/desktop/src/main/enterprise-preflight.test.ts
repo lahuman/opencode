@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 
@@ -10,6 +10,7 @@ import {
   verifyEnterpriseManifest,
   writeEnterpriseManifest,
 } from "./enterprise-preflight"
+import { skillPackTreeHash } from "./enterprise-skill-packs"
 
 const profile = {
   models: [
@@ -45,6 +46,7 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
       "company-guide.md": expect.stringMatching(/^[a-f0-9]{64}$/),
       "models.json": expect.stringMatching(/^[a-f0-9]{64}$/),
       "opencode.jsonc": expect.stringMatching(/^[a-f0-9]{64}$/),
+      "skill-packs.json": expect.stringMatching(/^[a-f0-9]{64}$/),
     },
   })
   expect(JSON.stringify(manifest)).not.toContain("/v1")
@@ -153,20 +155,78 @@ test("skips ordinary builds and verifies enabled packaged profiles", async () =>
       appVersion: "1.2.3",
       enterpriseDir: fixture.root,
     }),
-  ).toMatchObject({ schemaVersion: 2, catalogVersion: profile.catalogVersion })
+  ).toMatchObject({
+    manifest: { schemaVersion: 2, catalogVersion: profile.catalogVersion },
+    skillPacks: { packs: [{ id: "ponytail", members: ["ponytail"] }] },
+  })
+})
+
+test("fails closed when a cataloged skill pack changes", async () => {
+  await using fixture = await enterpriseFixture()
+  await writeEnterpriseManifest(
+    fixture.manifest,
+    await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources }),
+  )
+  await Bun.write(join(fixture.root, "skill-packs/ponytail/skills/ponytail/SKILL.md"), "tampered")
+
+  await expect(
+    runEnterprisePreflight({
+      profile: {
+        enabled: true,
+        models: profile.models,
+        defaultModelID: profile.defaultModelID,
+        defaultsVersion: profile.defaultsVersion,
+        guideVersion: profile.guideVersion,
+        catalogVersion: profile.catalogVersion,
+        allowedOrigins: profile.allowedOrigins,
+      },
+      appVersion: "1.2.3",
+      enterpriseDir: fixture.root,
+    }),
+  ).rejects.toThrow("Enterprise skill pack verification failed")
 })
 
 async function enterpriseFixture() {
   const root = await mkdtemp(join(tmpdir(), "enterprise-preflight-"))
+  const pack = join(root, "skill-packs/ponytail")
+  await mkdir(join(pack, "skills/ponytail"), { recursive: true })
+  await Promise.all([
+    Bun.write(
+      join(pack, "skills/ponytail/SKILL.md"),
+      "---\nname: ponytail\ndescription: Test.\n---\n\n# Ponytail\n",
+    ),
+    Bun.write(join(pack, "LICENSE"), "MIT License\n"),
+  ])
   const resources = {
     "opencode.jsonc": join(root, "opencode.jsonc"),
     "company-guide.md": join(root, "company-guide.md"),
     "models.json": join(root, "models.json"),
+    "skill-packs.json": join(root, "skill-packs.json"),
   }
   await Promise.all([
     Bun.write(resources["opencode.jsonc"], '{"provider":"company-llm","marker":"secret-marker"}'),
     Bun.write(resources["company-guide.md"], "# Company guide"),
     Bun.write(resources["models.json"], "{}"),
+    Bun.write(
+      resources["skill-packs.json"],
+      JSON.stringify({
+        schemaVersion: 1,
+        packs: [
+          {
+            id: "ponytail",
+            displayName: "Ponytail",
+            description: "Test pack.",
+            version: "4.8.4",
+            repository: "https://github.com/DietrichGebert/ponytail",
+            defaultEnabled: true,
+            root: "skill-packs/ponytail/skills",
+            members: ["ponytail"],
+            license: "skill-packs/ponytail/LICENSE",
+            treeSHA256: await skillPackTreeHash(pack),
+          },
+        ],
+      }),
+    ),
   ])
   return {
     root,

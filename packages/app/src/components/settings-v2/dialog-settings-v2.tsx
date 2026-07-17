@@ -1,4 +1,4 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, Show, createSignal, startTransition } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -10,6 +10,7 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import "./settings-v2.css"
 import { SettingsServersV2 } from "./servers"
+import { SettingsSkillsV2 } from "./skills"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
 export const DialogSettings: Component<{
@@ -52,6 +53,18 @@ export const DialogSettings: Component<{
                   </div>
                 </div>
 
+                <Show when={platform.enterprise}>
+                  <div class="flex flex-col gap-1.5">
+                    <TabsV2.SectionTitle>{language.t("settings.section.enterprise")}</TabsV2.SectionTitle>
+                    <div class="flex flex-col gap-1.5 w-full">
+                      <TabsV2.Trigger value="skills">
+                        <Icon name="brain" />
+                        {language.t("settings.skills.title")}
+                      </TabsV2.Trigger>
+                    </div>
+                  </div>
+                </Show>
+
                 <div class="flex flex-col gap-1.5">
                   <TabsV2.SectionTitle>{language.t("settings.section.server")}</TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
@@ -83,6 +96,11 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="shortcuts" class="settings-v2-panel">
           <SettingsKeybinds v2 />
         </TabsV2.Content>
+        <Show when={platform.enterprise}>
+          <TabsV2.Content value="skills" class="settings-v2-panel">
+            <SettingsSkillsV2 />
+          </TabsV2.Content>
+        </Show>
         <TabsV2.Content value="servers" class="settings-v2-panel">
           <SettingsServersV2 />
         </TabsV2.Content>

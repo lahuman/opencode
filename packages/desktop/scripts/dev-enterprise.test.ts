@@ -46,6 +46,7 @@ test("validates, prepares the enterprise manifest, and starts desktop developmen
         "opencode.jsonc": path.resolve(import.meta.dir, "../resources/enterprise/opencode.jsonc"),
         "company-guide.md": path.resolve(import.meta.dir, "../resources/enterprise/company-guide.md"),
         "models.json": path.resolve(import.meta.dir, "../resources/enterprise/models.json"),
+        "skill-packs.json": path.resolve(import.meta.dir, "../resources/enterprise/skill-packs.json"),
       },
     },
   ])

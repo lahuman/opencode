@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "ponytail",
+      "displayName": "Ponytail",
+      "description": "Prefer existing helpers, platform features, and installed dependencies before adding code.",
+      "version": "4.8.4",
+      "repository": "https://github.com/DietrichGebert/ponytail",
+      "defaultEnabled": true,
+      "root": "skill-packs/ponytail/skills",
+      "members": [
+        "ponytail",
+        "ponytail-audit",
+        "ponytail-debt",
+        "ponytail-gain",
+        "ponytail-help",
+        "ponytail-review"
+      ],
+      "license": "skill-packs/ponytail/LICENSE",
+      "treeSHA256": "802feee0d5b2dcef6ea8ec5790c3b69fd8997c390b20d4222b88df934b323feb"
+    },
+    {
+      "id": "caveman",
+      "displayName": "Caveman",
+      "description": "Compress instructions and responses while preserving exact technical tokens.",
+      "version": "v1.9.1",
+      "repository": "https://github.com/JuliusBrussee/caveman",
+      "defaultEnabled": false,
+      "root": "skill-packs/caveman/skills",
+      "members": [
+        "caveman",
+        "caveman-commit",
+        "caveman-compress",
+        "caveman-help",
+        "caveman-review"
+      ],
+      "license": "skill-packs/caveman/LICENSE",
+      "treeSHA256": "b86cfb81fb6c8a5594ca33328f9cc816babc3a66c6a6b30f08c4c25588511ab7"
+    },
+    {
+      "id": "superpowers",
+      "displayName": "Superpowers",
+      "description": "Structured brainstorming, planning, TDD, debugging, review, and verification workflows.",
+      "version": "v6.1.1",
+      "repository": "https://github.com/obra/superpowers",
+      "defaultEnabled": true,
+      "root": "skill-packs/superpowers/skills",
+      "members": [
+        "brainstorming",
+        "dispatching-parallel-agents",
+        "executing-plans",
+        "finishing-a-development-branch",
+        "receiving-code-review",
+        "requesting-code-review",
+        "subagent-driven-development",
+        "systematic-debugging",
+        "test-driven-development",
+        "using-git-worktrees",
+        "using-superpowers",
+        "verification-before-completion",
+        "writing-plans",
+        "writing-skills"
+      ],
+      "license": "skill-packs/superpowers/LICENSE",
+      "treeSHA256": "659d8542c133854ba8546e38de90fdb9efe10c8fb1b4854fb6f450f73522cf2b"
+    }
+  ]
+}

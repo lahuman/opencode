@@ -71,11 +71,13 @@ async function manifestFixture() {
     "opencode.jsonc": join(root, "opencode.jsonc"),
     "company-guide.md": join(root, "company-guide.md"),
     "models.json": join(root, "models.json"),
+    "skill-packs.json": join(root, "skill-packs.json"),
   }
   await Promise.all([
     Bun.write(resources["opencode.jsonc"], "{}"),
     Bun.write(resources["company-guide.md"], "# Guide"),
     Bun.write(resources["models.json"], "{}"),
+    Bun.write(resources["skill-packs.json"], '{"schemaVersion":1,"packs":[]}'),
   ])
   return {
     resources,

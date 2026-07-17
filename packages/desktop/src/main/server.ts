@@ -182,8 +182,15 @@ export async function spawnLocalServer(
         child.postMessage({ type: "stop" })
         stopping = Promise.race([
           exit.promise.then(() => undefined),
-          delay(SIDECAR_STOP_TIMEOUT).then(() => {
+          delay(SIDECAR_STOP_TIMEOUT).then(async () => {
             if (!exited) child.kill()
+            if (exited) return
+            await Promise.race([
+              exit.promise,
+              delay(SIDECAR_STOP_TIMEOUT).then(() => {
+                throw new Error("Sidecar did not exit after forced termination")
+              }),
+            ])
           }),
         ])
         return stopping

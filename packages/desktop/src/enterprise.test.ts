@@ -190,6 +190,7 @@ describe("enterprise profile", () => {
         defaults: "C:/app/enterprise/opencode.jsonc",
         guide: "C:/app/enterprise/company-guide.md",
         userData: "C:/Users/person/AppData/Local/company-opencode",
+        skillPacks: ["C:/app/enterprise/skill-packs/ponytail/skills"],
       }),
     ).toEqual({
       OPENCODE_ENTERPRISE_OFFLINE: "1",
@@ -215,6 +216,8 @@ describe("enterprise profile", () => {
       OPENCODE_DISABLE_SHARE: "1",
       OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(["C:/app/enterprise/skill-packs/ponytail/skills"]),
+      SUPERPOWERS_DISABLE_TELEMETRY: "1",
     })
   })
 })

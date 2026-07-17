@@ -117,6 +117,21 @@ type PlatformBase = {
     }>
     stateBackups(): Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup(backupID: string): Promise<{ restartRequired: boolean }>
+    skillPacks(): Promise<
+      {
+        id: string
+        displayName: string
+        description: string
+        version: string
+        repository: string
+        root: string
+        members: string[]
+        license: string
+        enabled: boolean
+      }[]
+    >
+    setSkillPackEnabled(id: string, enabled: boolean): ReturnType<NonNullable<PlatformBase["enterprise"]>["skillPacks"]>
+    openSkillPackSource(id: string): Promise<void>
   }
 
   /** Fetch override */

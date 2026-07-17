@@ -74,6 +74,17 @@ export type EnterpriseReadinessReport = {
     detail?: string
   }[]
 }
+export type EnterpriseSkillPackInfo = {
+  id: string
+  displayName: string
+  description: string
+  version: string
+  repository: string
+  root: string
+  members: string[]
+  license: string
+  enabled: boolean
+}
 
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
@@ -93,6 +104,9 @@ export type ElectronAPI = {
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
+    skillPacks: () => Promise<EnterpriseSkillPackInfo[]>
+    setSkillPackEnabled: (id: string, enabled: boolean) => Promise<EnterpriseSkillPackInfo[]>
+    openSkillPackSource: (id: string) => Promise<void>
   }
   wslServers: WslServersAPI
   updater: UpdaterAPI
@@ -176,6 +190,13 @@ export function createEnterpriseAPI(
     stateBackups: () => invoke("enterprise-state-backups") as ReturnType<ElectronAPI["enterprise"]["stateBackups"]>,
     restoreStateBackup: (backupID) =>
       invoke("enterprise-state-restore", backupID) as ReturnType<ElectronAPI["enterprise"]["restoreStateBackup"]>,
+    skillPacks: () => invoke("enterprise-skill-packs") as ReturnType<ElectronAPI["enterprise"]["skillPacks"]>,
+    setSkillPackEnabled: (id, enabled) =>
+      invoke("enterprise-skill-pack-set", id, enabled) as ReturnType<
+        ElectronAPI["enterprise"]["setSkillPackEnabled"]
+      >,
+    openSkillPackSource: (id) =>
+      invoke("enterprise-skill-pack-source", id) as ReturnType<ElectronAPI["enterprise"]["openSkillPackSource"]>,
   }
 }
 
@@ -189,5 +210,8 @@ export function mapEnterpriseAPI(enterprise: ElectronAPI["enterprise"]) {
     readiness: enterprise.readiness,
     stateBackups: enterprise.stateBackups,
     restoreStateBackup: enterprise.restoreStateBackup,
+    skillPacks: enterprise.skillPacks,
+    setSkillPackEnabled: enterprise.setSkillPackEnabled,
+    openSkillPackSource: enterprise.openSkillPackSource,
   }
 }
