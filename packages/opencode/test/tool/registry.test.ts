@@ -2,7 +2,7 @@ import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
-import { Effect, Layer, Result, Schema } from "effect"
+import { Effect, Layer, Logger, Result, Schema } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
@@ -296,6 +296,42 @@ describe("tool.registry", () => {
       const registry = yield* ToolRegistry.Service
       const ids = yield* registry.ids()
       expect(ids).toContain("hello")
+    }),
+  )
+
+  it.instance("isolates custom tool import failures and logs the failed file", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const tools = path.join(test.directory, ".opencode", "tools")
+      yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
+      yield* Effect.promise(() =>
+        Promise.all([
+          Bun.write(path.join(tools, "broken.ts"), "throw new Error('broken custom tool')\n"),
+          Bun.write(
+            path.join(tools, "healthy.ts"),
+            [
+              "export default {",
+              "  description: 'healthy tool',",
+              "  args: {},",
+              "  execute: async () => 'ok',",
+              "}",
+              "",
+            ].join("\n"),
+          ),
+        ]),
+      )
+
+      const logs: unknown[] = []
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids().pipe(Effect.withLogger(Logger.make((entry) => logs.push(entry.message))))
+
+      expect(ids).toContain("read")
+      expect(ids).toContain("healthy")
+      expect(ids).not.toContain("broken")
+      expect(JSON.stringify(logs)).toContain("failed to load custom tool")
+      expect(JSON.stringify(logs)).toContain("broken.ts")
+      expect(JSON.stringify(logs)).toContain('"namespace":"broken"')
+      expect(JSON.stringify(logs)).toContain('"cause":{"_id":"Cause"')
     }),
   )
 

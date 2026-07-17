@@ -1210,13 +1210,38 @@ const layer = Layer.effect(
             yield* sessions.updateMessage(msg)
           })
 
-          const handle = yield* processor
+          const finalizeFailedAssistant = Effect.fn("SessionPrompt.finalizeFailedAssistant")(function* (
+            cause: Cause.Cause<unknown>,
+          ) {
+            if (msg.time.completed) return
+            msg.error = MessageV2.fromError(Cause.squash(cause), { providerID: msg.providerID })
+            msg.finish = "error"
+            msg.time.completed = Date.now()
+            yield* Effect.logError("failed before session response", {
+              "session.id": sessionID,
+              messageID: msg.id,
+              cause,
+            })
+            yield* sessions.updateMessage(msg)
+            yield* events.publish(Session.Event.Error, { sessionID, error: msg.error })
+          })
+
+          const created = yield* processor
             .create({
               assistantMessage: msg,
               sessionID,
               model,
             })
-            .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
+            .pipe(
+              Effect.onInterrupt(() => finalizeInterruptedAssistant),
+              Effect.map(Option.some),
+              Effect.catchCauseIf(
+                (cause) => !Cause.hasInterruptsOnly(cause),
+                (cause) => finalizeFailedAssistant(cause).pipe(Effect.as(Option.none())),
+              ),
+            )
+          if (Option.isNone(created)) break
+          const handle = created.value
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
@@ -1330,6 +1355,10 @@ const layer = Layer.effect(
           }).pipe(
             Effect.ensuring(instruction.clear(handle.message.id)),
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (cause) => finalizeFailedAssistant(cause).pipe(Effect.as("break" as const)),
+            ),
           )
           if (outcome === "break") break
           continue
