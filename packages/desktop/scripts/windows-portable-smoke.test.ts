@@ -651,6 +651,64 @@ Stop-ProcessTree -RootProcessIdentity $root -KnownProcessIdentities $knownProces
   }
 })
 
+test("portable smoke normalizes artifact paths before using .NET file APIs", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const verification = script.indexOf("$expectedHash = Read-PortableChecksum")
+
+  for (const name of ["Archive", "Checksum", "ReleaseMetadata", "SentinelProject"]) {
+    const normalization = script.indexOf(`$${name} = [System.IO.Path]::GetFullPath($${name})`)
+    expect(normalization).toBeGreaterThan(0)
+    expect(normalization).toBeLessThan(verification)
+  }
+})
+
+test("portable smoke uses a valid backup path for atomic acceptance metadata replacement", async () => {
+  const script = await Bun.file(scriptPath).text()
+  expect(script).toContain("[System.IO.File]::Replace($metadataTemporary, $ReleaseMetadata, $metadataBackup)")
+  expect(script).not.toContain("[System.IO.File]::Replace($metadataTemporary, $ReleaseMetadata, $null)")
+  expect(script).toContain("Remove-Item -LiteralPath $metadataBackup -Force")
+})
+
+test.if(process.platform === "win32")("PowerShell cleanup tolerates a process exiting during Stop-Process", async () => {
+  const script = await Bun.file(scriptPath).text()
+  const processFunctions = script.slice(
+    script.indexOf("function Get-ProcessCreationTime"),
+    script.indexOf("function Test-AllowedRemoteAddress"),
+  )
+  const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-"))
+  const harness = join(temp, "stop-exited-process.ps1")
+
+  try {
+    await Bun.write(
+      harness,
+      `$ErrorActionPreference = "Stop"
+$script:processes = @(
+  [PSCustomObject]@{ ProcessId = 10; ParentProcessId = 0; CreationDate = [DateTime]"2026-07-15T00:00:10Z" }
+)
+function Get-CimInstance { [CmdletBinding()] param([string] $ClassName) return @($script:processes) }
+function Stop-Process {
+  [CmdletBinding()]
+  param([int] $Id, [switch] $Force)
+  $script:processes = @()
+  throw "process already exited"
+}
+function Start-Sleep { [CmdletBinding()] param([int] $Milliseconds) }
+${processFunctions}
+$knownProcessIdentities = [System.Collections.Generic.Dictionary[string, object]]::new()
+$root = New-ProcessIdentity -Process $script:processes[0]
+[void](Stop-ProcessTree -RootProcessIdentity $root -KnownProcessIdentities $knownProcessIdentities)`,
+    )
+    const process = Bun.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    expect(await process.exited).toBe(0)
+  } finally {
+    await rm(temp, { force: true, recursive: true })
+  }
+})
+
 test.if(process.platform === "win32")(
   "PowerShell extracted-resource fixtures require each named payload to be a file",
   async () => {

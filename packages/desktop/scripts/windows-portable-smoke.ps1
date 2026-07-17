@@ -9,6 +9,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$Archive = [System.IO.Path]::GetFullPath($Archive)
+$Checksum = [System.IO.Path]::GetFullPath($Checksum)
+$ReleaseMetadata = [System.IO.Path]::GetFullPath($ReleaseMetadata)
+$SentinelProject = [System.IO.Path]::GetFullPath($SentinelProject)
+
 function Get-AllowedAddresses {
   param([string] $TargetHost)
 
@@ -345,7 +350,15 @@ function Stop-ProcessTree {
         if ($null -eq $currentProcess -or -not (Test-ProcessIdentity -ProcessIdentity $processIdentity -Process $currentProcess)) { continue }
         Stop-Process -Id $processIdentity.ProcessId -Force -ErrorAction Stop
       } catch {
-        if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+        $stopFailure = $_
+        try {
+          $remainingProcess = Get-CimProcess -ProcessId $processIdentity.ProcessId
+          if ($null -ne $remainingProcess -and (Test-ProcessIdentity -ProcessIdentity $processIdentity -Process $remainingProcess)) {
+            if ($null -eq $cleanupFailure) { $cleanupFailure = $stopFailure }
+          }
+        } catch {
+          if ($null -eq $cleanupFailure) { $cleanupFailure = $_ }
+        }
       }
     }
     Start-Sleep -Milliseconds 100
@@ -575,16 +588,20 @@ try {
 
 $metadata.windowsAcceptance = @($existingAcceptance) + $record
 $metadataTemporary = "$ReleaseMetadata.$([Guid]::NewGuid().ToString('N')).tmp"
+$metadataBackup = "$ReleaseMetadata.$([Guid]::NewGuid().ToString('N')).bak"
 try {
   [System.IO.File]::WriteAllText(
     $metadataTemporary,
     (($metadata | ConvertTo-Json -Depth 8) + [Environment]::NewLine),
     [System.Text.UTF8Encoding]::new($false)
   )
-  [System.IO.File]::Replace($metadataTemporary, $ReleaseMetadata, $null)
+  [System.IO.File]::Replace($metadataTemporary, $ReleaseMetadata, $metadataBackup)
   $metadataTemporary = $null
 } finally {
   if ($null -ne $metadataTemporary -and (Test-Path -LiteralPath $metadataTemporary)) {
     Remove-Item -LiteralPath $metadataTemporary -Force
+  }
+  if (Test-Path -LiteralPath $metadataBackup) {
+    Remove-Item -LiteralPath $metadataBackup -Force
   }
 }
