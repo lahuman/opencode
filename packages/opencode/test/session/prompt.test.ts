@@ -164,6 +164,23 @@ const blockingProcessor = Layer.succeed(
   }),
 )
 
+const failingProcessor = Layer.succeed(
+  SessionProcessor.Service,
+  SessionProcessor.Service.of({
+    create: () => Effect.die(new Error("processor setup failed")),
+  }),
+)
+
+const failingToolRegistry = Layer.succeed(
+  ToolRegistry.Service,
+  ToolRegistry.Service.of({
+    ids: () => Effect.succeed([]),
+    all: () => Effect.succeed([]),
+    named: () => Effect.die("unexpected named tool lookup"),
+    tools: () => Effect.die(new Error("tool setup failed")),
+  }),
+)
+
 const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true })
 
 const testLLMServerNode = LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] })
@@ -208,7 +225,11 @@ const promptRoot = LayerNode.group([
   RuntimeFlags.node,
 ])
 
-function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makePrompt(input?: {
+  mcpInstructions?: MCP.ServerInstructions[]
+  processor?: "blocking" | "failing"
+  toolRegistry?: "failing"
+}) {
   const replacements = [
     [SessionSummary.node, summary],
     [LSP.node, lsp],
@@ -218,10 +239,20 @@ function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; proces
   if (input?.processor === "blocking") {
     return LayerNode.compile(promptRoot, [...replacements, [SessionProcessor.node, blockingProcessor]])
   }
+  if (input?.processor === "failing") {
+    return LayerNode.compile(promptRoot, [...replacements, [SessionProcessor.node, failingProcessor]])
+  }
+  if (input?.toolRegistry === "failing") {
+    return LayerNode.compile(promptRoot, [...replacements, [ToolRegistry.node, failingToolRegistry]])
+  }
   return LayerNode.compile(promptRoot, replacements)
 }
 
-function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makeHttp(input?: {
+  mcpInstructions?: MCP.ServerInstructions[]
+  processor?: "blocking" | "failing"
+  toolRegistry?: "failing"
+}) {
   const root = LayerNode.group([promptRoot, testLLMServerNode])
   const replacements = [
     [SessionSummary.node, summary],
@@ -232,16 +263,28 @@ function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processo
   if (input?.processor === "blocking") {
     return LayerNode.compile(root, [...replacements, [SessionProcessor.node, blockingProcessor]])
   }
+  if (input?.processor === "failing") {
+    return LayerNode.compile(root, [...replacements, [SessionProcessor.node, failingProcessor]])
+  }
+  if (input?.toolRegistry === "failing") {
+    return LayerNode.compile(root, [...replacements, [ToolRegistry.node, failingToolRegistry]])
+  }
   return LayerNode.compile(root, replacements)
 }
 
-function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makeHttpNoLLMServer(input?: {
+  mcpInstructions?: MCP.ServerInstructions[]
+  processor?: "blocking" | "failing"
+  toolRegistry?: "failing"
+}) {
   return makePrompt(input)
 }
 
 const it = testEffect(makeHttp())
 const noLLMServer = testEffect(makeHttpNoLLMServer())
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
+const failingNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "failing" }))
+const failingToolsNoLLMServer = testEffect(makeHttpNoLLMServer({ toolRegistry: "failing" }))
 const withMcpInstructions = testEffect(
   makeHttp({
     mcpInstructions: [
@@ -1215,6 +1258,92 @@ raceNoLLMServer.instance(
     }),
   { config: cfg },
   3_000,
+)
+
+failingNoLLMServer.instance(
+  "finalizes assistant and publishes one error when processor setup fails",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const status = yield* SessionStatus.Service
+      const chat = yield* sessions.create({ title: "Processor setup failure" })
+      const errors: NonNullable<SessionV1.Assistant["error"]>[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type !== Session.Event.Error.type) return Effect.void
+        const data = event.data as typeof Session.Event.Error.data.Type
+        if (data.sessionID === chat.id && data.error) errors.push(data.error)
+        return Effect.void
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      yield* off
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect(result.info.finish).toBe("error")
+        expect(result.info.time.completed).toBeNumber()
+        expect(result.info.error).toBeDefined()
+      }
+      expect(
+        messages.filter(
+          (message) =>
+            message.info.role === "assistant" &&
+            !message.info.finish &&
+            !message.info.time.completed &&
+            !message.info.error,
+        ),
+      ).toHaveLength(0)
+      expect(errors).toHaveLength(1)
+      expect((yield* status.get(chat.id)).type).toBe("idle")
+    }),
+  { config: cfg },
+)
+
+failingToolsNoLLMServer.instance(
+  "finalizes assistant when tool setup fails after processor creation",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Tool setup failure" })
+      const errors: NonNullable<SessionV1.Assistant["error"]>[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type !== Session.Event.Error.type) return Effect.void
+        const data = event.data as typeof Session.Event.Error.data.Type
+        if (data.sessionID === chat.id && data.error) errors.push(data.error)
+        return Effect.void
+      })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      yield* off
+
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect(result.info.finish).toBe("error")
+        expect(result.info.time.completed).toBeNumber()
+        expect(result.info.error).toBeDefined()
+      }
+      expect(errors).toHaveLength(1)
+    }),
+  { config: cfg },
 )
 
 noLLMServer.instance(
