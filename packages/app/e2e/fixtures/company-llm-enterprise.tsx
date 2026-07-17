@@ -138,33 +138,46 @@ function createHarness(scenario?: string | null) {
 
     if (url.pathname === "/global/health") return json({ healthy: true, version: "test" })
     if (url.pathname === "/global/config") {
+      return json({ $schema: "https://opencode.ai/config.json" })
+    }
+    if (url.pathname === "/provider") {
+      if (!scenario?.startsWith("company") && scenario !== "connect" && scenario !== "settings") {
+        return json({ all: [], connected: [], default: {} })
+      }
+      const model = (id: string, name: string, url: string) => ({
+        id,
+        providerID: "company-llm",
+        name,
+        api: { id, url, npm: "@ai-sdk/openai-compatible" },
+        status: "active",
+      })
       return json({
-        model: "company-llm/company-code",
-        provider: {
-          "company-llm": {
+        all: [
+          {
+            id: "company-llm",
+            name: "Company LLM",
+            source: "config",
+            env: [],
+            options: {},
             models: {
-              "company-code": {
-                name: "Company Code",
-                provider: { api: "https://llm.company.test/v1" },
-              },
-              "company-reasoning": {
-                name: "Company Reasoning",
-                provider: { api: "https://reasoning.company.test/v1" },
-              },
+              "company-code": model("company-code", "Company Code", "https://llm.company.test/v1"),
+              "company-reasoning": model(
+                "company-reasoning",
+                "Company Reasoning",
+                "https://reasoning.company.test/v1",
+              ),
               ...(scenario === "company-mismatch"
                 ? {
-                    "pending-model": {
-                      name: "Pending Model",
-                      provider: { api: "https://pending.company.test/v1" },
-                    },
+                    "pending-model": model("pending-model", "Pending Model", "https://pending.company.test/v1"),
                   }
                 : {}),
             },
           },
-        },
+        ],
+        connected: [],
+        default: { "company-llm": "company-code" },
       })
     }
-    if (url.pathname === "/provider") return json({ all: [], connected: [], default: {} })
     if (url.pathname === "/path") {
       return json({
         home: "/home",

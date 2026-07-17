@@ -15,7 +15,6 @@ import {
   applyCompanyProviderCredentialMutation,
   COMPANY_PROVIDER_FAILURE_MESSAGE,
   companyProviderCanStart,
-  companyProviderConfig,
   companyProviderCredentialInput,
   companyProviderCredentialModels,
   companyProviderDiagnosticResult,
@@ -35,9 +34,10 @@ export function useCompanyProviderSettingsState() {
     () => platform.enterprise,
     (enterprise) => enterprise?.credentialCatalog(),
   )
-  const models = createMemo(() =>
-    catalog.latest ? companyProviderCredentialModels(serverSync().data.config, catalog.latest) : [],
-  )
+  const models = createMemo(() => {
+    if (!catalog.latest || !serverSync().data.ready) return []
+    return companyProviderCredentialModels(serverSync().data.provider.all.get("company-llm"), catalog.latest)
+  })
   const defaultModel = createMemo(
     () => models().find((model) => model.isDefault) ?? models().find((model) => model.synchronized),
   )
@@ -69,7 +69,7 @@ export function useCompanyProviderSettingsState() {
   }
 
   const statusLabel = () => {
-    if (catalog.loading) return "Checking credentials..."
+    if (catalog.loading || !serverSync().data.ready) return "Checking credentials..."
     if (catalog.error) return language.t("common.requestFailed")
     const model = defaultModel()
     if (!model) return "Credentials not configured"
@@ -92,18 +92,18 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const language = useLanguage()
   const serverSDK = useServerSDK()
   const serverSync = useServerSync()
-  const config = createMemo(() => companyProviderConfig(serverSync().data.config))
   const [catalog, catalogActions] = createResource(
     () => platform.enterprise,
     (enterprise) => enterprise?.credentialCatalog(),
   )
-  const models = createMemo(() =>
-    catalog.latest ? companyProviderCredentialModels(serverSync().data.config, catalog.latest) : [],
-  )
+  const models = createMemo(() => {
+    if (!catalog.latest || !serverSync().data.ready) return []
+    return companyProviderCredentialModels(serverSync().data.provider.all.get("company-llm"), catalog.latest)
+  })
   const [state, setState] = createStore({
     apiKey: "",
     headers: [{ key: "", value: "" }],
-    modelID: config().defaultModelID,
+    modelID: "",
     action: undefined as CompanyProviderAction,
     result: undefined as CompanyProviderDiagnosticResult | undefined,
     error: undefined as string | undefined,
@@ -217,7 +217,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   }
 
   const statusLabel = () => {
-    if (catalog.loading) return "Checking credentials..."
+    if (catalog.loading || !serverSync().data.ready) return "Checking credentials..."
     if (catalog.error) return language.t("common.requestFailed")
     const model = selectedModel()
     if (!model) return "Credentials not configured"
@@ -258,7 +258,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           <div class="flex min-w-0 flex-col gap-2" aria-label="Enterprise models">
             <span class="text-12-medium text-text-weak">Models</span>
             <Show
-              when={!catalog.loading}
+              when={!catalog.loading && serverSync().data.ready}
               fallback={<span class="text-12-regular text-text-weak">Loading models...</span>}
             >
               <For each={models()} fallback={<span class="text-12-regular text-text-weak">No configured models</span>}>

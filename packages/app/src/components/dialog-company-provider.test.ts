@@ -2,12 +2,10 @@ import { describe, expect, test } from "bun:test"
 import {
   applyCompanyProviderCredentialMutation,
   companyProviderCanStart,
-  companyProviderConfig,
   companyProviderCredentialStatus,
   companyProviderCredentialInput,
   diagnoseCompanyProvider,
   companyProviderDiagnosticResult,
-  companyProviderModels,
   companyProviderCredentialModels,
   companyProviderModelCredentialStatus,
   companyProviderShouldRestart,
@@ -47,61 +45,16 @@ describe("companyProviderCredentialInput", () => {
   })
 })
 
-describe("company provider config", () => {
-  test("reads configured company models", () => {
-    expect(
-      companyProviderModels({
-        provider: {
-          "company-llm": {
-            models: { code: { name: "Company Code", provider: { api: "https://code.company.test/v1" } } },
-          },
-        },
-      }),
-    ).toEqual([{ id: "code", name: "Company Code", baseURL: "https://code.company.test/v1" }])
-  })
-
-  test("projects model URLs and the configured default without secrets", () => {
-    const config = companyProviderConfig({
-      model: "company-llm/fallback",
-      provider: {
-        "company-llm": {
-          options: {
-            baseURL: "https://llm.company.test/v1",
-            apiKey: "must-not-escape",
-            headers: { Authorization: "must-not-escape" },
-          },
-          models: {
-            code: { name: "Company Code", provider: { api: "https://code.company.test/v1" } },
-            fallback: { provider: { api: "https://fallback.company.test/v1" } },
-          },
-        },
-      },
-    })
-
-    expect(config).toEqual({
-      models: [
-        { id: "code", name: "Company Code", baseURL: "https://code.company.test/v1" },
-        { id: "fallback", name: "fallback", baseURL: "https://fallback.company.test/v1" },
-      ],
-      defaultModelID: "fallback",
-    })
-    expect(JSON.stringify(config)).not.toContain("must-not-escape")
-  })
-
+describe("company provider catalog", () => {
   test("merges authoritative credentials with sidecar models and marks restart mismatches", () => {
-    const config = {
-      model: "company-llm/code",
-      provider: {
-        "company-llm": {
-          models: {
-            code: { name: "Server Code", provider: { api: "https://code.company.test/v1" } },
-            pending: { name: "Pending Model", provider: { api: "https://pending.company.test/v1" } },
-            changed: { name: "Changed Model", provider: { api: "https://changed-new.company.test/v1" } },
-          },
-        },
+    const provider = {
+      models: {
+        code: { id: "code", name: "Server Code", api: { url: "https://code.company.test/v1" } },
+        pending: { id: "pending", name: "Pending Model", api: { url: "https://pending.company.test/v1" } },
+        changed: { id: "changed", name: "Changed Model", api: { url: "https://changed-new.company.test/v1" } },
       },
     }
-    const rows = companyProviderCredentialModels(config, {
+    const rows = companyProviderCredentialModels(provider, {
       defaultModelID: "code",
       models: [
         {
@@ -162,6 +115,33 @@ describe("company provider config", () => {
     expect(companyProviderModelCredentialStatus(rows[0], "Request failed")).toBe("Credentials configured")
     expect(companyProviderModelCredentialStatus(rows[1], "Request failed")).toBe("Restart required")
     expect(companyProviderModelCredentialStatus(rows[3], "Request failed")).toBe("Restart required")
+  })
+
+  test("compares credentials with resolved provider models instead of global config", () => {
+    const rows = companyProviderCredentialModels(
+      {
+        models: {
+          code: {
+            id: "code",
+            name: "Company Code",
+            api: { url: "https://code.company.test/v1" },
+          },
+        },
+      },
+      {
+        defaultModelID: "code",
+        models: [
+          {
+            id: "code",
+            name: "Company Code",
+            baseURL: "https://code.company.test/v1",
+            credentialStatus: { configured: false },
+          },
+        ],
+      },
+    )
+
+    expect(rows[0]?.synchronized).toBe(true)
   })
 })
 

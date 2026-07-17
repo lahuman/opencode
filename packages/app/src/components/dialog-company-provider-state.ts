@@ -1,14 +1,3 @@
-export type CompanyConfig = {
-  model?: string
-  provider?: Record<
-    string,
-    {
-      options?: { baseURL?: unknown; [key: string]: unknown }
-      models?: Record<string, { name?: string; provider?: { api?: unknown } }>
-    }
-  >
-}
-
 export type CompanyProviderDiagnosticResult = {
   ok: boolean
   checks: {
@@ -29,6 +18,16 @@ export type CompanyCredentialCatalog = {
     baseURL: string
     credentialStatus: { configured: boolean; errorCode?: string }
   }[]
+}
+export type CompanyResolvedProvider = {
+  models?: Record<
+    string,
+    {
+      id?: string
+      name?: string
+      api?: { url?: unknown }
+    }
+  >
 }
 export type CompanyProviderCredentialModel = {
   id: string
@@ -57,28 +56,15 @@ export function companyProviderCredentialInput(apiKey: string, headers: { key: s
   }
 }
 
-export function companyProviderModels(config: CompanyConfig) {
-  return Object.entries(config.provider?.["company-llm"]?.models ?? {}).map(([id, model]) => ({
-    id,
-    name: model.name ?? id,
-    baseURL: typeof model.provider?.api === "string" ? model.provider.api : "",
-  }))
-}
-
-export function companyProviderConfig(config: CompanyConfig) {
-  const models = companyProviderModels(config)
-  const configured = config.model?.startsWith("company-llm/") ? config.model.slice("company-llm/".length) : undefined
-  return {
-    models,
-    defaultModelID: configured && models.some((model) => model.id === configured) ? configured : (models[0]?.id ?? ""),
-  }
-}
-
 export function companyProviderCredentialModels(
-  config: CompanyConfig,
+  provider: CompanyResolvedProvider | undefined,
   catalog: CompanyCredentialCatalog,
 ): CompanyProviderCredentialModel[] {
-  const serverModels = companyProviderModels(config)
+  const serverModels = Object.entries(provider?.models ?? {}).map(([id, model]) => ({
+    id,
+    name: model.name ?? id,
+    baseURL: typeof model.api?.url === "string" ? model.api.url : "",
+  }))
   const server = new Map(serverModels.map((model) => [model.id, model]))
   const main = new Set(catalog.models.map((model) => model.id))
   return [
