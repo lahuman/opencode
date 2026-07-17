@@ -380,3 +380,11 @@ test("exposes the exact Bun TypeScript enterprise package script", async () => {
     "bun ./scripts/verify-enterprise-package.ts ./dist/win-unpacked",
   )
 })
+
+test("supports an explicit git executable for restricted packaging environments", async () => {
+  const source = await Bun.file(new URL("./package-enterprise-win.ts", import.meta.url)).text()
+  const prebuild = await Bun.file(new URL("./prebuild.ts", import.meta.url)).text()
+  expect(source.match(/env\.GIT \?\? "git"/g)).toHaveLength(2)
+  expect(source.match(/env\.BUN \?\? "bun"/g)).toHaveLength(2)
+  expect(prebuild).toContain('process.env.BUN ?? "bun"')
+})

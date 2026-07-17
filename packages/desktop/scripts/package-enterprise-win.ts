@@ -51,9 +51,9 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
     stderr: "inherit" as const,
   }
   const reviewedCommit = await input.verifySource?.(options.cwd, env)
-  const build = await input.spawn(["bun", "run", "build"], options).exited
+  const build = await input.spawn([env.BUN ?? "bun", "run", "build"], options).exited
   if (build !== 0) return build
-  const packageCode = await input.spawn(["bun", "run", "package:win", "--x64"], options).exited
+  const packageCode = await input.spawn([env.BUN ?? "bun", "run", "package:win", "--x64"], options).exited
   if (packageCode !== 0) return packageCode
 
   const version =
@@ -127,7 +127,12 @@ async function enterpriseArchiveEntries(directory: string, relative = "") {
 }
 
 async function resolveGitCommit(cwd: string, env: Env) {
-  const process = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd, env, stdout: "pipe", stderr: "inherit" })
+  const process = Bun.spawn([env.GIT ?? "git", "rev-parse", "HEAD"], {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "inherit",
+  })
   if ((await process.exited) !== 0) throw new Error("Unable to resolve the enterprise package git commit")
   const commit = (await new Response(process.stdout).text()).trim()
   if (!commit) throw new Error("Unable to resolve the enterprise package git commit")
@@ -135,7 +140,7 @@ async function resolveGitCommit(cwd: string, env: Env) {
 }
 
 export async function verifyEnterpriseSource(cwd: string, env: Env) {
-  const status = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=all"], {
+  const status = Bun.spawn([env.GIT ?? "git", "status", "--porcelain=v1", "--untracked-files=all"], {
     cwd,
     env,
     stdout: "pipe",

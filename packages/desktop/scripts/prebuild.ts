@@ -22,7 +22,7 @@ await prepareEnterpriseManifest({
   },
 })
 
-const child = Bun.spawn(["bun", "script/build-node.ts"], {
+const child = Bun.spawn([process.env.BUN ?? "bun", "script/build-node.ts"], {
   cwd: fileURLToPath(new URL("../../opencode/", import.meta.url)),
   env: enterpriseModelEnvironment(
     process.env,
