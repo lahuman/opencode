@@ -1905,6 +1905,66 @@ unix(
   30_000,
 )
 
+it.instance("skill slash command hides expanded instructions from the user timeline", () =>
+  Effect.gen(function* () {
+    const { directory: dir } = yield* TestInstance
+    const llm = yield* TestLLMServer
+    yield* writeText(
+      path.join(dir, "skills", "superpowers-check", "SKILL.md"),
+      [
+        "---",
+        "name: superpowers-check",
+        "description: Test skill",
+        "---",
+        "# Superpowers Check",
+        "",
+        "Keep this instruction hidden.",
+      ].join("\n"),
+    )
+    yield* writeConfig(dir, {
+      ...providerCfg(llm.url),
+      skills: { paths: [path.join(dir, "skills")] },
+    })
+
+    const { prompt, sessions, chat } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "superpowers-check", arguments: "" })
+
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const message = messages.findLast((item) => item.info.role === "user")
+    if (!message || message.info.role !== "user") throw new Error("expected user command message")
+    const text = message.parts.filter((part): part is SessionV1.TextPart => part.type === "text")
+
+    expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual(["/superpowers-check"])
+    expect(text.find((part) => part.synthetic)?.text).toContain("# Superpowers Check")
+    expect(JSON.stringify((yield* llm.inputs).at(-1)?.messages)).toContain("# Superpowers Check")
+  }),
+)
+
+it.instance("ordinary slash command keeps expanded instructions visible", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: {
+        ordinary: {
+          template: "Ordinary expanded prompt",
+        },
+      },
+    }))
+    const { prompt, sessions, chat } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "ordinary", arguments: "" })
+
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const message = messages.findLast((item) => item.info.role === "user")
+    if (!message || message.info.role !== "user") throw new Error("expected user command message")
+    const text = message.parts.filter((part): part is SessionV1.TextPart => part.type === "text")
+
+    expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual(["Ordinary expanded prompt"])
+    expect(text.some((part) => part.synthetic)).toBe(false)
+  }),
+)
+
 unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
   () =>
