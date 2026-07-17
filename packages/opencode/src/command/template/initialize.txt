@@ -1,66 +1,41 @@
-Create or update `AGENTS.md` for this repository.
+Create or update the root `AGENTS.md` for this repository.
 
-The goal is a compact instruction file that helps future OpenCode sessions avoid mistakes and ramp up quickly. Every line should answer: "Would an agent likely miss this without help?" If not, leave it out.
+The result must be compact, project-specific guidance that helps future OpenCode sessions avoid mistakes. Include a line only when an agent would likely miss it without investigation.
 
-User-provided focus or constraints (honor these):
+User-provided focus or constraints:
 $ARGUMENTS
 
-## How to investigate
+## 1. Investigate
 
-Read the highest-value sources first:
-- `README*`, root manifests, workspace config, lockfiles
-- build, test, lint, formatter, typecheck, and codegen config
-- CI workflows and pre-commit / task runner config
-- existing instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`)
-- repo-local OpenCode config such as `opencode.json`
+Read the highest-value executable sources of truth before writing:
+- existing instruction files, `README*`, root manifests, workspace configuration, and lockfiles
+- build, test, lint, format, typecheck, code generation, CI, and task-runner configuration
+- a small number of representative entrypoints when configuration does not reveal package boundaries or runtime flow
 
-If architecture is still unclear after reading config and docs, inspect a small number of representative code files to find the real entrypoints, package boundaries, and execution flow. Prefer reading the files that explain how the system is wired together over random leaf files.
+Trace the real implementation path before describing architecture. Search for existing helpers and established patterns first, then consider the standard library, native platform capabilities, and installed dependencies before assuming custom code is required. Prefer executable configuration and scripts when prose is stale or contradictory.
 
-Prefer executable sources of truth over prose. If docs conflict with config or scripts, trust the executable source and only keep what you can verify.
+Record only facts verified from this repository. Keep directory-scoped rules in their existing nested instruction files; do not promote them to the root unless they truly apply repository-wide. Ask the user one short batch of questions only when an important convention cannot be established from the repository.
 
-## What to extract
+## 2. Write
 
-Look for the highest-signal facts for an agent working in this repo:
-- exact developer commands, especially non-obvious ones
-- how to run a single test, a single package, or a focused verification step
-- required command order when it matters, such as `lint -> typecheck -> test`
-- monorepo or multi-package boundaries, ownership of major directories, and the real app/library entrypoints
-- framework or toolchain quirks: generated code, migrations, codegen, build artifacts, special env loading, dev servers, infra deploy flow
-- repo-specific style or workflow conventions that differ from defaults
-- testing quirks: fixtures, integration test prerequisites, snapshot workflows, required services, flaky or expensive suites
-- important constraints from existing instruction files worth preserving
+Only create or update `${path}/AGENTS.md`. Do not modify any other project file or add, install, copy, or configure skills.
 
-Good `AGENTS.md` content is usually hard-earned context that took reading multiple files to infer.
+Preserve useful verified guidance already present, remove stale or duplicated claims, and organize the result into short sections and bullets. Prioritize:
+- exact developer commands, focused test commands, required command order, and working-directory requirements
+- package boundaries, real entrypoints, generated files, migrations, environment loading, and operational constraints
+- repository-specific style, testing, review, branch, release, and code-generation rules that differ from common defaults
 
-## Questions
+Preserve commands, paths, symbols, URLs, environment variables, and versions exactly. Remove filler, repetition, hedging, tutorials, exhaustive file trees, generic software advice, and claims that could not be verified. A simple repository should produce a simple file; a large repository should still include only facts that change how an agent works.
 
-Only ask the user questions if the repo cannot answer something important. Use the `question` tool for one short batch at most.
+Do not copy tool, skill, framework, or persona names into `AGENTS.md` unless they are independently verified project facts.
 
-Good questions:
-- undocumented team conventions
-- branch / PR / release expectations
-- missing setup or test prerequisites that are known but not written down
+## 3. Verify
 
-Do not ask about anything the repo already makes clear.
+Re-read `${path}/AGENTS.md` and verify that:
+- every instruction is supported by a repository source or an explicit user constraint
+- commands, paths, symbols, URLs, environment variables, and versions match their sources character-for-character
+- root guidance does not claim that nested-only rules apply everywhere
+- no duplicated, generic, speculative, or stale guidance remains
+- no file other than `${path}/AGENTS.md` was changed
 
-## Writing rules
-
-Include only high-signal, repo-specific guidance such as:
-- exact commands and shortcuts the agent would otherwise guess wrong
-- architecture notes that are not obvious from filenames
-- conventions that differ from language or framework defaults
-- setup requirements, environment quirks, and operational gotchas
-- references to existing instruction sources that matter
-
-Exclude:
-- generic software advice
-- long tutorials or exhaustive file trees
-- obvious language conventions
-- speculative claims or anything you could not verify
-- content better stored in another file referenced via `opencode.json` `instructions`
-
-When in doubt, omit.
-
-Prefer short sections and bullets. If the repo is simple, keep the file simple. If the repo is large, summarize the few structural facts that actually change how an agent should work.
-
-If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase.
+If any check fails, correct `AGENTS.md` before finishing.
