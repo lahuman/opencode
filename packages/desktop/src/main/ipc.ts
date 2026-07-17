@@ -300,9 +300,7 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
     win?.show()
   })
 
-  registry.on("relaunch", () => {
-    deps.relaunch()
-  })
+  registry.handle("relaunch", () => deps.relaunch())
 
   registry.handle("get-zoom-factor", (event: IpcMainInvokeEvent) => event.sender.getZoomFactor())
   registry.handle("set-zoom-factor", (event: IpcMainInvokeEvent, factor: number) => {

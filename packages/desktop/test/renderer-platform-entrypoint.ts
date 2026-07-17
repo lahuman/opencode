@@ -17,6 +17,7 @@ Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: tr
 
 const openLinkCalls: string[] = []
 const fetchCalls: Array<{ url: string; method: string }> = []
+const restartCalls: string[] = []
 const api = {
   enterprise: {
     enabled: mode === "enterprise",
@@ -30,6 +31,12 @@ const api = {
   onPinchZoomEnabledChanged() {},
   onZoomFactorChanged() {},
   openLink: (url: string) => openLinkCalls.push(url),
+  killSidecar: async () => {
+    restartCalls.push("kill-sidecar")
+  },
+  relaunch: async () => {
+    restartCalls.push("relaunch")
+  },
 }
 Object.assign(window, { api })
 
@@ -66,5 +73,6 @@ const failures = await Promise.all(
 
 await rendererFetch(new Request("https://llm.corp.example/v1/models", { method: "POST" }))
 await rendererFetch("http://localhost:4096/api", { method: "PUT" })
+await platform.restart()
 
-console.log(JSON.stringify({ mode, openLinkCalls, fetchCalls, failures }))
+console.log(JSON.stringify({ mode, openLinkCalls, fetchCalls, failures, restartCalls }))

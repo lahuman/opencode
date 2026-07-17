@@ -31,5 +31,6 @@ await import("../src/preload/index")
 
 if (!exposed) throw new Error("Preload entrypoint did not expose an API")
 const guide = await exposed.api.enterprise.readGuide()
+await exposed.api.relaunch()
 
 console.log(JSON.stringify({ key: exposed.key, guide, invocations }))

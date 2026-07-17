@@ -18,7 +18,10 @@ test("the preload entrypoint exposes the concrete API with enterprise guide wiri
     JSON.stringify({
       key: "api",
       guide: { version: "2026.08", markdown: "# Concrete guide" },
-      invocations: [{ channel: "enterprise-guide-read", args: [] }],
+      invocations: [
+        { channel: "enterprise-guide-read", args: [] },
+        { channel: "relaunch", args: [] },
+      ],
     }),
   )
 })

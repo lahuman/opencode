@@ -36,6 +36,7 @@ test("enterprise createPlatform rejects renderer egress before IPC or native fet
       "Enterprise offline policy blocked https://opencode.ai",
       "Enterprise offline policy blocked null",
     ],
+    restartCalls: ["relaunch"],
   })
   for (const secret of ["open-link-secret", "string-secret", "url-secret", "request-secret", "/Users/private"]) {
     expect(stdout).not.toContain(secret)
@@ -56,6 +57,7 @@ test("public createPlatform preserves openLink and fetch behavior", async () => 
       { url: "http://localhost:4096/api", method: "PUT" },
     ],
     failures: [null, null, null],
+    restartCalls: ["relaunch"],
   })
 })
 

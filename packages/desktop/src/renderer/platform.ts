@@ -161,10 +161,7 @@ export function createPlatform(
 
     recordFatalRendererError: (error) => window.api.recordFatalRendererError(error),
 
-    restart: async () => {
-      await window.api.killSidecar().catch(() => undefined)
-      window.api.relaunch()
-    },
+    restart: () => window.api.relaunch(),
 
     notify: async (title, description, href) => {
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())

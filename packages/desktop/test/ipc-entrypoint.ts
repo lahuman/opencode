@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const shellOpenExternalURLs: string[] = []
+let relaunchCalls = 0
 
 mock.module("electron", () => ({
   default: { app: { getPath: () => "" } },
@@ -57,7 +58,9 @@ try {
   registerMainIpcHandlers(
     {
       killSidecar() {},
-      relaunch() {},
+      relaunch() {
+        relaunchCalls++
+      },
       awaitInitialization: async () => ({ url: "http://localhost", username: null, password: null }),
       consumeInitialDeepLinks: () => [],
       getDefaultServerUrl: () => null,
@@ -117,12 +120,14 @@ try {
   await listeners.get("open-link")?.({}, "https://opencode.ai/docs?token=main-secret")
   await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
   await listeners.get("open-link")?.({}, "https://user:secret@llm.corp.example/docs")
+  await handlers.get("relaunch")?.()
 
   console.log(
     JSON.stringify({
       registered: handlers.has("enterprise-guide-read"),
       credentialCatalog: await handlers.get("enterprise-credential-catalog")?.(),
       guide: await handlers.get("enterprise-guide-read")?.(),
+      relaunchCalls,
       shellOpenExternalURLs,
     }),
   )

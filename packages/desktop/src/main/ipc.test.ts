@@ -58,6 +58,7 @@ describe("enterprise guide IPC", () => {
           ],
         },
         guide: { version: "2026.08", markdown: "# Registered guide\n" },
+        relaunchCalls: 1,
         shellOpenExternalURLs: ["https://llm.corp.example/docs"],
       }),
     )
