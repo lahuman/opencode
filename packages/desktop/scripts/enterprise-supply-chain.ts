@@ -11,7 +11,7 @@ export async function writeEnterpriseSupplyChain(input: {
   nodeModules?: string
 }) {
   const root = path.resolve(import.meta.dir, "../../..")
-  const lockfile = await Bun.file(input.lockfile ?? path.join(root, "bun.lock")).json<Lockfile>()
+  const lockfile: Lockfile = Bun.JSONC.parse(await Bun.file(input.lockfile ?? path.join(root, "bun.lock")).text())
   const dependencies = Object.values(lockfile.packages ?? {})
     .flatMap((entry) => {
       if (!Array.isArray(entry) || typeof entry[0] !== "string") return []

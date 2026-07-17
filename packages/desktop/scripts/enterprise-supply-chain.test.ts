@@ -19,7 +19,12 @@ test("writes deterministic CycloneDX and third-party license artifacts from the 
   await Bun.write(archive, "zip")
   await Bun.write(
     path.join(root, "bun.lock"),
-    JSON.stringify({ packages: { alpha: ["alpha@1.2.3", "", {}], beta: ["beta@2.0.0", "", {}] } }),
+    `{
+      "packages": {
+        "alpha": ["alpha@1.2.3", "", {}],
+        "beta": ["beta@2.0.0", "", {}],
+      },
+    }`,
   )
   await Bun.write(path.join(modules, "alpha", "package.json"), JSON.stringify({ name: "alpha", version: "1.2.3", license: "MIT" }))
   await Bun.write(path.join(modules, "alpha", "LICENSE"), "Alpha license text")
