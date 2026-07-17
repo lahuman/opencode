@@ -219,14 +219,18 @@ describe("company provider operation state", () => {
 
   test("does not restart when the enterprise API does not request it", async () => {
     const events: string[] = []
-    await applyCompanyProviderCredentialMutation({
-      mutation: async () => ({ restartRequired: false }),
+    const result = await applyCompanyProviderCredentialMutation({
+      mutation: async () => {
+        events.push("mutation")
+        return { restartRequired: false }
+      },
       clearLocal: () => events.push("clearLocal"),
       restart: async () => {
         events.push("restart")
       },
     })
-    expect(events).toEqual(["clearLocal"])
+    expect(result).toEqual({ restartRequired: false })
+    expect(events).toEqual(["mutation", "clearLocal"])
   })
 
   test("sends the generated company provider diagnose request", async () => {

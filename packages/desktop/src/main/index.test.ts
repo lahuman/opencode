@@ -7,7 +7,7 @@ import { forwardInitializationFailure } from "./initialization"
 import { desktopRuntimeFeatures } from "./runtime-features"
 
 async function runMain(
-  mode: "identity" | "enterprise" | "ordinary-packaged" | "ordinary-unpackaged",
+  mode: "identity" | "enterprise" | "enterprise-credential-restart" | "ordinary-packaged" | "ordinary-unpackaged",
   env?: Record<string, string>,
 ) {
   const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/main-index-entrypoint.ts`, mode], {
@@ -76,6 +76,17 @@ test("real enterprise main entrypoint applies isolated identity without claiming
   })
   expect(stdout).not.toContain("main-index-secret")
   expect(stdout).not.toContain("user:secret")
+})
+
+test("enterprise credential save restarts only the sidecar", async () => {
+  const { result } = await runMain("enterprise-credential-restart")
+
+  expect(result).toEqual({
+    mutation: { restartRequired: false },
+    sidecarStarts: 2,
+    sidecarStops: 1,
+    relaunches: 0,
+  })
 })
 
 test("ordinary packaged and unpackaged main entrypoints preserve their identities and protocol", async () => {

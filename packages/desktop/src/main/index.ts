@@ -62,6 +62,7 @@ import {
   createEnterpriseCredentialStore,
   enterpriseSidecarEnvironment,
 } from "./enterprise-credentials"
+import { createEnterpriseCredentialRuntime } from "./enterprise-credential-runtime"
 import { runEnterprisePreflight } from "./enterprise-preflight"
 import {
   createEnterpriseSkillPackController,
@@ -369,6 +370,14 @@ const main = Effect.gen(function* () {
   let restartEnterpriseSidecar: (paths: string[]) => Promise<void> = async () => {
     throw new Error("Enterprise sidecar is not ready")
   }
+  const enterpriseCredentialRuntime = ENTERPRISE_ENABLED
+    ? createEnterpriseCredentialRuntime({
+        handlers: enterpriseCredentialHandlers,
+        read: enterpriseCredentials.all,
+        write: enterpriseCredentials.setAll,
+        restart: () => restartEnterpriseSidecar(enabledSkillPackPaths()),
+      })
+    : enterpriseCredentialHandlers
   const enterpriseSkillPacks = createEnterpriseSkillPackController({
     packs: verifiedSkillPacks,
     read: () => getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
@@ -453,10 +462,10 @@ const main = Effect.gen(function* () {
       exportDebugLogs: () => exportDebugLogs(),
       recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
       enterprise: {
-        credentialCatalog: enterpriseCredentialHandlers.catalog,
-        credentialStatus: enterpriseCredentialHandlers.status,
-        setCredentials: enterpriseCredentialHandlers.set,
-        clearCredentials: enterpriseCredentialHandlers.clear,
+        credentialCatalog: enterpriseCredentialRuntime.catalog,
+        credentialStatus: enterpriseCredentialRuntime.status,
+        setCredentials: enterpriseCredentialRuntime.set,
+        clearCredentials: enterpriseCredentialRuntime.clear,
         readiness: enterpriseReadiness,
         stateBackups: () =>
           enterpriseRecoveryAllowed

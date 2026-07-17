@@ -98,8 +98,8 @@ export type ElectronAPI = {
       modelID: string
       apiKey?: string
       headers?: Record<string, string>
-    }) => Promise<{ restartRequired: true }>
-    clearCredentials: (modelID: string) => Promise<{ restartRequired: true }>
+    }) => Promise<{ restartRequired: boolean }>
+    clearCredentials: (modelID: string) => Promise<{ restartRequired: boolean }>
     readGuide: () => Promise<{ version: string; markdown: string }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>

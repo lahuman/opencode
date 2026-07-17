@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const mode = process.argv[2] ?? "enterprise"
-const enterprise = mode === "enterprise"
+const enterprise = mode === "enterprise" || mode === "enterprise-credential-restart"
 Object.assign(process.env, {
   OPENCODE_CHANNEL: "prod",
   OPENCODE_ENTERPRISE: enterprise ? "1" : "0",
@@ -25,6 +25,9 @@ let rendererProtocolRegistrations = 0
 let preflightCalls = 0
 let statePrepared = 0
 let stateHealthy = 0
+let sidecarStarts = 0
+let sidecarStops = 0
+let relaunches = 0
 let appName = "Electron"
 let appUserModelId = ""
 const appData = join(tmpdir(), "opencode-main-index-app-data")
@@ -44,7 +47,9 @@ const app = {
   on() {},
   once() {},
   quit() {},
-  relaunch() {},
+  relaunch() {
+    relaunches++
+  },
   requestSingleInstanceLock: () => true,
   setAppUserModelId(value: string) {
     appUserModelId = value
@@ -123,10 +128,17 @@ mock.module("../src/main/server", () => ({
   getDefaultServerUrl: () => null,
   preferAppEnv() {},
   setDefaultServerUrl() {},
-  spawnLocalServer: async () => ({
-    listener: { stop: async () => undefined },
-    health: { wait: Promise.resolve() },
-  }),
+  spawnLocalServer: async () => {
+    sidecarStarts++
+    return {
+      listener: {
+        stop: async () => {
+          sidecarStops++
+        },
+      },
+      health: { wait: Promise.resolve() },
+    }
+  },
 }))
 mock.module("../src/main/store", () => ({
   getStore: () => ({
@@ -214,6 +226,15 @@ await import("../src/main/index")
 
 for (let attempts = 0; attempts < 100 && !listeners.has("open-link"); attempts++) await Bun.sleep(10)
 for (let attempts = 0; attempts < 100 && enterprise && stateHealthy === 0; attempts++) await Bun.sleep(10)
+
+if (mode === "enterprise-credential-restart") {
+  const mutation = await handlers.get("enterprise-set-credentials")?.(
+    {},
+    { modelID: "company-code", apiKey: "entrypoint-secret" },
+  )
+  console.log(JSON.stringify({ mutation, sidecarStarts, sidecarStops, relaunches }))
+  process.exit(0)
+}
 
 await listeners.get("open-link")?.({}, "https://opencode.ai/docs?token=main-index-secret")
 await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
