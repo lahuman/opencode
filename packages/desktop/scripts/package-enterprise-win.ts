@@ -1,4 +1,8 @@
+import { createWriteStream } from "node:fs"
+import { readdir, rename, rm } from "node:fs/promises"
 import path from "node:path"
+import { Writable } from "node:stream"
+import { BlobReader, ZipWriter } from "@zip.js/zip.js"
 
 import { enterprisePackageEnvironment, validateEnterpriseBuild, type EnterpriseBuildMetadata } from "./enterprise-build"
 import { writeEnterpriseRelease, type EnterpriseReleaseInput } from "./enterprise-release"
@@ -24,6 +28,7 @@ type EnterprisePackageInput = {
   version?: string
   validate?: (env: Env) => EnterpriseBuildMetadata
   verifyPackage?: (root: string) => Promise<unknown>
+  writeArchive?: typeof writeEnterpriseArchive
   verifyArchive?: (archive: string, root?: string) => Promise<unknown>
   gitCommit?: () => Promise<string>
   release?: (input: EnterpriseReleaseInput) => Promise<unknown>
@@ -56,6 +61,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
   const archive = path.join(options.cwd, "dist", `company-opencode-pilot-${version}-win-x64.zip`)
   const root = path.join(options.cwd, "dist", "win-unpacked")
   await (input.verifyPackage ?? verifyEnterprisePackage)(root)
+  await (input.writeArchive ?? writeEnterpriseArchive)({ archive, root })
   await (input.verifyArchive ?? verifyEnterpriseArchive)(archive, root)
   const packagedCommit = await input.verifySource?.(options.cwd, env)
   if (reviewedCommit && packagedCommit !== reviewedCommit) {
@@ -76,6 +82,48 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
     ...supplyChain,
   })
   return 0
+}
+
+export async function writeEnterpriseArchive(input: { archive: string; root: string }) {
+  const temporary = `${input.archive}.tmp`
+  await rm(temporary, { force: true })
+  const writer = new ZipWriter(Writable.toWeb(createWriteStream(temporary)), {
+    extendedTimestamp: false,
+    keepOrder: true,
+    level: 7,
+  })
+  await (await enterpriseArchiveEntries(input.root)).reduce(async (previous, entry) => {
+    await previous
+    await writer.add(entry.name, entry.directory ? undefined : new BlobReader(Bun.file(entry.path)), {
+      directory: entry.directory,
+      extendedTimestamp: false,
+      lastModDate: new Date(1980, 0, 1),
+      msDosCompatible: true,
+    })
+  }, Promise.resolve())
+  await writer.close()
+  await rename(temporary, input.archive)
+}
+
+async function enterpriseArchiveEntries(directory: string, relative = "") {
+  return (
+    await Promise.all(
+      (await readdir(directory, { withFileTypes: true }))
+        .toSorted((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+        .map(async (entry) => {
+          const name = relative ? `${relative}/${entry.name}` : entry.name
+          const entryPath = path.join(directory, entry.name)
+          if (entry.isDirectory()) {
+            return [
+              { directory: true, name: `${name}/`, path: entryPath },
+              ...(await enterpriseArchiveEntries(entryPath, name)),
+            ]
+          }
+          if (entry.isFile()) return [{ directory: false, name, path: entryPath }]
+          throw new Error("Enterprise package contains an unsupported filesystem entry")
+        }),
+    )
+  ).flat()
 }
 
 async function resolveGitCommit(cwd: string, env: Env) {

@@ -101,6 +101,14 @@ test("runs validation, build, package, verification, git, and release in order",
       expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve({})
     },
+    writeArchive(input) {
+      steps.push("write-zip")
+      expect(input).toEqual({
+        archive: path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"),
+        root: path.resolve(import.meta.dir, "../dist/win-unpacked"),
+      })
+      return Promise.resolve()
+    },
     verifyArchive(archive, root) {
       steps.push("verify-zip")
       expect(archive).toBe(path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"))
@@ -137,6 +145,7 @@ test("runs validation, build, package, verification, git, and release in order",
     "build",
     "package:win",
     "verify-unpacked",
+    "write-zip",
     "verify-zip",
     "source",
     "authenticode",
@@ -173,6 +182,7 @@ test("rejects a source revision change after packaging", async () => {
       version: "1.17.18",
       spawn: () => ({ exited: Promise.resolve(0) }),
       verifyPackage: async () => ({}),
+      writeArchive: async () => undefined,
       verifyArchive: async () => [],
       verifySource: async () => (++checks === 1 ? "reviewed" : "changed"),
     }),
@@ -250,6 +260,10 @@ test("stops after an archive verification failure", async () => {
         steps.push("verify-unpacked")
         return Promise.resolve({})
       },
+      writeArchive() {
+        steps.push("write-zip")
+        return Promise.resolve()
+      },
       verifyArchive() {
         steps.push("verify-zip")
         return Promise.reject(new Error("Portable archive is invalid"))
@@ -264,7 +278,7 @@ test("stops after an archive verification failure", async () => {
       },
     }),
   ).rejects.toThrow("Portable archive")
-  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip"])
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "write-zip", "verify-zip"])
 })
 
 test("stops after git revision resolution failure", async () => {
@@ -284,6 +298,10 @@ test("stops after git revision resolution failure", async () => {
         steps.push("verify-unpacked")
         return Promise.resolve({})
       },
+      writeArchive() {
+        steps.push("write-zip")
+        return Promise.resolve()
+      },
       verifyArchive() {
         steps.push("verify-zip")
         return Promise.resolve([])
@@ -298,7 +316,7 @@ test("stops after git revision resolution failure", async () => {
       },
     }),
   ).rejects.toThrow("Unable to resolve")
-  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "verify-zip", "git-commit"])
+  expect(steps).toEqual(["build", "package:win", "verify-unpacked", "write-zip", "verify-zip", "git-commit"])
 })
 
 test("stops after release metadata write failure", async () => {
@@ -317,6 +335,10 @@ test("stops after release metadata write failure", async () => {
       verifyPackage() {
         steps.push("verify-unpacked")
         return Promise.resolve({})
+      },
+      writeArchive() {
+        steps.push("write-zip")
+        return Promise.resolve()
       },
       verifyArchive() {
         steps.push("verify-zip")
@@ -343,6 +365,7 @@ test("stops after release metadata write failure", async () => {
     "build",
     "package:win",
     "verify-unpacked",
+    "write-zip",
     "verify-zip",
     "git-commit",
     "supply-chain",

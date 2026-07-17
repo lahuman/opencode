@@ -7,6 +7,7 @@ import { BlobWriter, TextReader, ZipWriter, type ZipWriterAddDataOptions } from 
 
 import { verifyEnterpriseArchive, verifyEnterprisePackage } from "./verify-enterprise-package"
 import { enterpriseModelCatalogIdentity } from "../src/main/enterprise-preflight"
+import { writeEnterpriseArchive } from "./package-enterprise-win"
 
 const roots: string[] = []
 const required = [
@@ -41,6 +42,16 @@ test("accepts a complete portable enterprise tree", async () => {
     appArchive: true,
     license: true,
   })
+})
+
+test("writes a timestamp-free archive accepted by the portable verifier", async () => {
+  const root = await portableFixture()
+  const output = await temporaryDirectory("enterprise-portable-output-")
+  const archive = path.join(output, "company-opencode-pilot-1.17.18-win-x64.zip")
+
+  await writeEnterpriseArchive({ archive, root })
+
+  await expect(verifyEnterpriseArchive(archive, root)).resolves.toEqual(expect.arrayContaining(required))
 })
 
 test.each(required)("rejects a package missing %s", async (relative) => {
