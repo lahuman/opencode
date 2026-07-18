@@ -15,6 +15,7 @@ import {
 } from "solid-js"
 import { Dialog as Kobalte } from "@kobalte/core/dialog"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import { createDialogFocusManager } from "./dialog-focus"
 
 type DialogElement = () => JSX.Element
 
@@ -33,6 +34,10 @@ function init() {
   const [stack, setStack] = createSignal<Active[]>([])
   const timer = { current: undefined as ReturnType<typeof setTimeout> | undefined }
   const lock = { value: false }
+  const focus = createDialogFocusManager({
+    active: () => (document.activeElement instanceof HTMLElement ? document.activeElement : undefined),
+    schedule: (run) => requestAnimationFrame(run),
+  })
 
   onCleanup(() => {
     if (timer.current === undefined) return
@@ -56,8 +61,10 @@ function init() {
 
     timer.current = setTimeout(() => {
       timer.current = undefined
+      const remaining = stack().filter((item) => item.id !== closed)
       current.dispose()
-      setStack((items) => items.filter((item) => item.id !== closed))
+      setStack(remaining)
+      focus.closed(remaining.length)
       lock.value = false
     }, 100)
   }
@@ -76,6 +83,7 @@ function init() {
   })
 
   const mount = (element: DialogElement, owner: Owner, onClose: (() => void) | undefined, layer: number) => {
+    focus.opened(layer)
     const id = Math.random().toString(36).slice(2)
     const zIndex = 50 + layer * 10
     let dispose: (() => void) | undefined
