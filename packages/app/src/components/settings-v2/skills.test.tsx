@@ -32,7 +32,19 @@ mock.module("@/context/platform", () => ({
     openPath: async () => undefined,
   }),
 }))
-const { skillPackFailureKey, updateSkillPack } = await import("./skills")
+const { requestSkillPackConfirmation, skillPackFailureKey, updateSkillPack } = await import("./skills")
+
+function confirmationHarness() {
+  const state: {
+    actions?: { cancel(): void; confirm(): void }
+    close?: () => void
+  } = {}
+  const result = requestSkillPackConfirmation((actions, close) => {
+    state.actions = actions
+    state.close = close
+  })
+  return { state, result }
+}
 
 test("cancels without starting an update", async () => {
   const events: string[] = []
@@ -85,6 +97,25 @@ test("waits for confirmation before entering pending state or restarting the sid
   confirmation.resolve(true)
   expect(await result).toBe(true)
   expect(events).toEqual(["pending:true", "update", "complete:enabled", "pending:false"])
+})
+
+test("resolves skill restart confirmation when Continue is selected", async () => {
+  const confirmation = confirmationHarness()
+  confirmation.state.actions?.confirm()
+  expect(await confirmation.result).toBe(true)
+})
+
+test("cancels skill restart confirmation from the Cancel action", async () => {
+  const confirmation = confirmationHarness()
+  confirmation.state.actions?.cancel()
+  expect(await confirmation.result).toBe(false)
+})
+
+test("cancels skill restart confirmation when its dialog layer closes", async () => {
+  const confirmation = confirmationHarness()
+  confirmation.state.close?.()
+  confirmation.state.actions?.confirm()
+  expect(await confirmation.result).toBe(false)
 })
 
 test("maps rollback outcomes to actionable skill setting messages", () => {
