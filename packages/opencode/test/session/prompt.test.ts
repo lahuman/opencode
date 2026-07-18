@@ -1905,7 +1905,7 @@ unix(
   30_000,
 )
 
-it.instance("skill slash command hides expanded instructions from the user timeline", () =>
+it.instance("skill slash command shows user arguments and hides expanded instructions", () =>
   Effect.gen(function* () {
     const { directory: dir } = yield* TestInstance
     const llm = yield* TestLLMServer
@@ -1928,7 +1928,53 @@ it.instance("skill slash command hides expanded instructions from the user timel
 
     const { prompt, sessions, chat } = yield* boot()
     yield* llm.text("done")
-    yield* prompt.command({ sessionID: chat.id, command: "superpowers-check", arguments: "" })
+    yield* prompt.command({
+      sessionID: chat.id,
+      command: "superpowers-check",
+      arguments: "  Review the payment flow.\nKeep user context.  ",
+    })
+
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const message = messages.findLast((item) => item.info.role === "user")
+    if (!message || message.info.role !== "user") throw new Error("expected user command message")
+    const text = message.parts.filter((part): part is SessionV1.TextPart => part.type === "text")
+
+    expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual([
+      "/superpowers-check Review the payment flow.\nKeep user context.",
+    ])
+    expect(text.find((part) => !part.synthetic)?.ignored).toBe(true)
+    expect(text.some((part) => part.synthetic && part.text.includes("# Superpowers Check"))).toBe(true)
+    const modelInput = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+    expect(modelInput).toContain("# Superpowers Check")
+    expect(modelInput.match(/Review the payment flow\./g)).toHaveLength(1)
+    expect(modelInput).toContain("/superpowers-check")
+  }),
+)
+
+it.instance("skill slash command omits whitespace-only arguments", () =>
+  Effect.gen(function* () {
+    const { directory: dir } = yield* TestInstance
+    const llm = yield* TestLLMServer
+    yield* writeText(
+      path.join(dir, "skills", "superpowers-check", "SKILL.md"),
+      [
+        "---",
+        "name: superpowers-check",
+        "description: Test skill",
+        "---",
+        "# Superpowers Check",
+        "",
+        "Keep this instruction hidden.",
+      ].join("\n"),
+    )
+    yield* writeConfig(dir, {
+      ...providerCfg(llm.url),
+      skills: { paths: [path.join(dir, "skills")] },
+    })
+
+    const { prompt, sessions, chat } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "superpowers-check", arguments: "  \n  " })
 
     const messages = yield* sessions.messages({ sessionID: chat.id })
     const message = messages.findLast((item) => item.info.role === "user")
@@ -1936,8 +1982,7 @@ it.instance("skill slash command hides expanded instructions from the user timel
     const text = message.parts.filter((part): part is SessionV1.TextPart => part.type === "text")
 
     expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual(["/superpowers-check"])
-    expect(text.find((part) => part.synthetic)?.text).toContain("# Superpowers Check")
-    expect(JSON.stringify((yield* llm.inputs).at(-1)?.messages)).toContain("# Superpowers Check")
+    expect(text.some((part) => part.synthetic && part.text.includes("# Superpowers Check"))).toBe(true)
   }),
 )
 

@@ -1468,7 +1468,12 @@ const layer = Layer.effect(
       const commandParts =
         cmd.source === "skill"
           ? [
-              { type: "text" as const, text: `/${input.command}` },
+              {
+                type: "text" as const,
+                text: `/${input.command}${input.arguments.trim() ? ` ${input.arguments.trim()}` : ""}`,
+                ignored: true,
+              },
+              { type: "text" as const, text: `/${input.command}`, synthetic: true },
               ...uniqueTemplateParts.map((part) => (part.type === "text" ? { ...part, synthetic: true } : part)),
             ]
           : uniqueTemplateParts
