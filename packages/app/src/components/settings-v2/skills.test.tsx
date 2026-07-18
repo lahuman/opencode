@@ -38,7 +38,7 @@ test("cancels without starting an update", async () => {
   const events: string[] = []
   expect(
     await updateSkillPack({
-      confirm: () => false,
+      confirm: async () => false,
       pending: (value) => events.push(`pending:${value}`),
       update: async () => events.push("update"),
       complete: () => events.push("complete"),
@@ -52,7 +52,7 @@ test("keeps pending state around the sidecar update and applies the result", asy
   const events: string[] = []
   expect(
     await updateSkillPack({
-      confirm: () => true,
+      confirm: async () => true,
       pending: (value) => events.push(`pending:${value}`),
       update: async () => {
         events.push("update")
@@ -62,6 +62,28 @@ test("keeps pending state around the sidecar update and applies the result", asy
       fail: () => events.push("fail"),
     }),
   ).toBe(true)
+  expect(events).toEqual(["pending:true", "update", "complete:enabled", "pending:false"])
+})
+
+test("waits for confirmation before entering pending state or restarting the sidecar", async () => {
+  const confirmation = Promise.withResolvers<boolean>()
+  const events: string[] = []
+  const result = updateSkillPack({
+    confirm: () => confirmation.promise,
+    pending: (value) => events.push(`pending:${value}`),
+    update: async () => {
+      events.push("update")
+      return "enabled"
+    },
+    complete: (value) => events.push(`complete:${value}`),
+    fail: () => events.push("fail"),
+  })
+
+  await Promise.resolve()
+  expect(events).toEqual([])
+
+  confirmation.resolve(true)
+  expect(await result).toBe(true)
   expect(events).toEqual(["pending:true", "update", "complete:enabled", "pending:false"])
 })
 

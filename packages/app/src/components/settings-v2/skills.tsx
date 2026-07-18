@@ -68,13 +68,13 @@ export function SettingsSkillsV2() {
 }
 
 export async function updateSkillPack<T>(input: {
-  confirm: () => boolean
+  confirm: () => Promise<boolean>
   pending: (value: boolean) => void
   update: () => Promise<T>
   complete: (value: T) => void
   fail: (failure: unknown) => void
 }) {
-  if (!input.confirm()) return false
+  if (!(await input.confirm())) return false
   input.pending(true)
   try {
     input.complete(await input.update())
