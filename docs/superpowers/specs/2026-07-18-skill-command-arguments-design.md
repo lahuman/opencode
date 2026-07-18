@@ -11,12 +11,13 @@ Show the content a user supplies after a skill slash command while keeping the e
 - Whitespace inside the argument string, including line breaks, is preserved.
 - A skill invocation with empty or whitespace-only arguments is displayed as `/<skill-name>`.
 - Expanded skill instructions remain synthetic text parts. They continue to be available to the model but are not rendered as the user's command text.
+- The full visible invocation is a user-only ignored part, while the existing compact `/<skill-name>` marker remains a synthetic model-only part. This prevents the arguments from reaching the model twice.
 - Input attachments remain separate message parts and are not duplicated in the command display.
 - Ordinary slash commands retain their current expanded-template display behavior.
 
 ## Architecture and Data Flow
 
-`SessionPrompt.command` already distinguishes skill-backed commands from ordinary commands after resolving the command template. For a skill command, it will derive the visible text directly from `input.command` and `input.arguments.trim()`. The resolved skill template remains in synthetic text parts, followed by any input attachment parts.
+`SessionPrompt.command` already distinguishes skill-backed commands from ordinary commands after resolving the command template. For a skill command, it will derive the visible text directly from `input.command` and `input.arguments.trim()` and mark that part `ignored` so it is user-facing only. The existing compact `/<skill-name>` marker and the resolved skill template remain synthetic model-facing parts, followed by any input attachment parts.
 
 This keeps the change inside the existing session prompt boundary. It requires no public API, Protocol, persisted-message schema, desktop UI, or localization changes.
 
@@ -34,6 +35,7 @@ No new failure path is introduced. Argument display uses the already-validated s
 
 - Extend the existing skill slash-command regression test with surrounding whitespace and multiline arguments.
 - Assert the only non-synthetic text is the compact command plus trimmed user arguments.
+- Assert the visible part is ignored by model conversion and the user arguments occur only once in model input through the expanded template.
 - Assert the synthetic part still contains the expanded skill instructions and that the model input still receives them.
 - Add or retain coverage for an empty argument string displaying only `/<skill-name>`.
 - Run the focused session prompt test and `bun typecheck` from `packages/opencode`.

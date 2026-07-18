@@ -4,7 +4,7 @@
 
 **Goal:** Display trimmed user-supplied arguments after a compact skill slash command while keeping expanded skill instructions hidden from the user timeline.
 
-**Architecture:** Keep the existing `SessionPrompt.command` split between visible skill invocation text and synthetic expanded template parts. Build the visible text from `input.command` and `input.arguments.trim()`; leave ordinary commands, attachments, persisted schemas, and model-facing prompt content unchanged.
+**Architecture:** Keep the existing `SessionPrompt.command` split between visible skill invocation text and synthetic expanded template parts. Build a user-only ignored display part from `input.command` and `input.arguments.trim()`, preserve the existing compact `/<skill-name>` marker as a synthetic model-only part, and leave ordinary commands, attachments, persisted schemas, and model-facing prompt content unchanged.
 
 **Tech Stack:** TypeScript, Effect, Bun test runner
 
@@ -14,6 +14,7 @@
 - Remove only leading and trailing argument whitespace; preserve internal spaces and line breaks.
 - Whitespace-only arguments display as `/<skill-name>`.
 - Expanded skill instructions remain synthetic and available to the model.
+- The visible invocation is ignored by model conversion, and the existing compact marker remains synthetic so user arguments are not duplicated in model input.
 - Ordinary slash commands and attachment handling remain unchanged.
 - Do not change public API, Protocol, generated clients, desktop UI, or localization.
 - Run tests and type checking from `packages/opencode`, never from the repository root.
@@ -72,8 +73,12 @@ it.instance("skill slash command shows user arguments and hides expanded instruc
     expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual([
       "/superpowers-check Review the payment flow.\nKeep user context.",
     ])
-    expect(text.find((part) => part.synthetic)?.text).toContain("# Superpowers Check")
-    expect(JSON.stringify((yield* llm.inputs).at(-1)?.messages)).toContain("# Superpowers Check")
+    expect(text.find((part) => !part.synthetic)?.ignored).toBe(true)
+    expect(text.some((part) => part.synthetic && part.text.includes("# Superpowers Check"))).toBe(true)
+    const modelInput = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+    expect(modelInput).toContain("# Superpowers Check")
+    expect(modelInput.match(/Review the payment flow\./g)).toHaveLength(1)
+    expect(modelInput).toContain("/superpowers-check")
   }),
 )
 
@@ -108,7 +113,7 @@ it.instance("skill slash command omits whitespace-only arguments", () =>
     const text = message.parts.filter((part): part is SessionV1.TextPart => part.type === "text")
 
     expect(text.filter((part) => !part.synthetic).map((part) => part.text)).toEqual(["/superpowers-check"])
-    expect(text.find((part) => part.synthetic)?.text).toContain("# Superpowers Check")
+    expect(text.some((part) => part.synthetic && part.text.includes("# Superpowers Check"))).toBe(true)
   }),
 )
 ```
@@ -118,7 +123,7 @@ it.instance("skill slash command omits whitespace-only arguments", () =>
 Run from `packages/opencode`:
 
 ```powershell
-& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test test/session/prompt.test.ts --test-name-pattern "skill slash command"
+& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test --timeout 30000 test/session/prompt.test.ts --test-name-pattern "skill slash command"
 ```
 
 Expected: FAIL because the visible text is `/superpowers-check` instead of `/superpowers-check Review the payment flow.\nKeep user context.`
@@ -134,7 +139,9 @@ const commandParts =
         {
           type: "text" as const,
           text: `/${input.command}${input.arguments.trim() ? ` ${input.arguments.trim()}` : ""}`,
+          ignored: true,
         },
+        { type: "text" as const, text: `/${input.command}`, synthetic: true },
         ...uniqueTemplateParts.map((part) => (part.type === "text" ? { ...part, synthetic: true } : part)),
       ]
     : uniqueTemplateParts
@@ -145,7 +152,7 @@ const commandParts =
 Run from `packages/opencode`:
 
 ```powershell
-& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test test/session/prompt.test.ts --test-name-pattern "skill slash command|ordinary slash command"
+& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test --timeout 30000 test/session/prompt.test.ts --test-name-pattern "skill slash command|ordinary slash command"
 ```
 
 Expected: all selected tests pass. The skill test proves visible arguments and hidden expanded instructions; the ordinary command test proves unchanged behavior.
@@ -204,7 +211,7 @@ Expected: merge completes without conflicts.
 Run from `packages/opencode`:
 
 ```powershell
-& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test test/session/prompt.test.ts --test-name-pattern "skill slash command|ordinary slash command"
+& 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' test --timeout 30000 test/session/prompt.test.ts --test-name-pattern "skill slash command|ordinary slash command"
 & 'C:\Users\lahuman\AppData\Roaming\npm\bun.cmd' typecheck
 ```
 
