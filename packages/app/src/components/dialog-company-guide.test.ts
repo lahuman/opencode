@@ -37,6 +37,7 @@ describe("company guide command", () => {
     await command?.onSelect?.()
 
     expect(command?.id).toBe("company.guide.open")
+    expect(command?.title).toBe("Kernexa AI 가이드")
     expect(opened).toEqual([{ version: "2026.07", markdown: "# Company guide" }])
   })
 

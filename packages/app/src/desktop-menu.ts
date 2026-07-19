@@ -204,7 +204,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     label: "Help",
     items: [
-      { type: "item", edition: "enterprise", label: "Company AI Guide", command: "company.guide.open" },
+      { type: "item", edition: "enterprise", label: "Kernexa AI 가이드", command: "company.guide.open" },
       {
         type: "item",
         edition: "public",

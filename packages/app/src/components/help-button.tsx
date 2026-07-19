@@ -66,7 +66,7 @@ export function HelpButton() {
     >
       <button
         type="button"
-        aria-label="Open the Company AI Guide"
+        aria-label="Kernexa AI 가이드 열기"
         data-component="icon-button-v2"
         data-size="large"
         class={`${triggerClass} fixed bottom-5 right-5 z-50 flex items-center justify-center`}
