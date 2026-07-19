@@ -46,11 +46,7 @@ describe("enterprise profile", () => {
       defaultsVersion: "pilot-1",
       guideVersion: "pilot-1",
       catalogVersion: "catalog-1",
-      allowedOrigins: [
-        "https://code.corp.example",
-        "https://reasoning.corp.example",
-        "https://llm-dr.corp.example",
-      ],
+      allowedOrigins: ["https://code.corp.example", "https://reasoning.corp.example", "https://llm-dr.corp.example"],
     })
   })
 
@@ -190,7 +186,7 @@ describe("enterprise profile", () => {
         defaults: "C:/app/enterprise/opencode.jsonc",
         guide: "C:/app/enterprise/company-guide.md",
         userData: "C:/Users/person/AppData/Local/company-opencode",
-        skillPacks: ["C:/app/enterprise/skill-packs/ponytail/skills"],
+        skillPacks: ["C:/app/enterprise/skill-packs/analyze-codebase/skills"],
       }),
     ).toEqual({
       OPENCODE_ENTERPRISE_OFFLINE: "1",
@@ -216,8 +212,9 @@ describe("enterprise profile", () => {
       OPENCODE_DISABLE_SHARE: "1",
       OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
-      OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(["C:/app/enterprise/skill-packs/ponytail/skills"]),
-      SUPERPOWERS_DISABLE_TELEMETRY: "1",
+      OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify([
+        "C:/app/enterprise/skill-packs/analyze-codebase/skills",
+      ]),
     })
   })
 })
@@ -276,18 +273,12 @@ describe("enterprise URL policy", () => {
     const profile = enabledProfile()
 
     expect(
-      enterpriseRendererRequestAllowed(
-        profile,
-        "ws://localhost:5173/@vite/client",
-        "http://localhost:5173/index.html",
-      ),
+      enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/@vite/client", "http://localhost:5173/index.html"),
     ).toBe(true)
     expect(
       enterpriseRendererRequestAllowed(profile, "wss://[::1]:8443/hmr", "https://[::1]:8443/nested/index.html"),
     ).toBe(true)
-    expect(enterpriseRendererRequestAllowed(profile, "ws://LOCALHOST:80/hmr", "http://localhost/index.html")).toBe(
-      true,
-    )
+    expect(enterpriseRendererRequestAllowed(profile, "ws://LOCALHOST:80/hmr", "http://localhost/index.html")).toBe(true)
   })
 
   test("allows only authenticated loopback PTY websockets outside development", () => {
@@ -315,21 +306,13 @@ describe("enterprise URL policy", () => {
   test("denies websocket requests that are not the exact development renderer endpoint", () => {
     const profile = enabledProfile()
 
-    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5174/hmr", "http://localhost:5173")).toBe(
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5174/hmr", "http://localhost:5173")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://127.0.0.1:5173/hmr", "http://localhost:5173")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "https://localhost:5173")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "wss://localhost:5173/hmr", "http://localhost:5173")).toBe(false)
+    expect(enterpriseRendererRequestAllowed(profile, "wss://llm.corp.example/hmr", "https://llm.corp.example")).toBe(
       false,
     )
-    expect(enterpriseRendererRequestAllowed(profile, "ws://127.0.0.1:5173/hmr", "http://localhost:5173")).toBe(
-      false,
-    )
-    expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "https://localhost:5173")).toBe(
-      false,
-    )
-    expect(enterpriseRendererRequestAllowed(profile, "wss://localhost:5173/hmr", "http://localhost:5173")).toBe(
-      false,
-    )
-    expect(
-      enterpriseRendererRequestAllowed(profile, "wss://llm.corp.example/hmr", "https://llm.corp.example"),
-    ).toBe(false)
     expect(enterpriseRendererRequestAllowed(profile, "ws://localhost:5173/hmr", "not a renderer URL")).toBe(false)
     expect(enterpriseRendererRequestAllowed(profile, "not a websocket URL", "http://localhost:5173")).toBe(false)
     expect(

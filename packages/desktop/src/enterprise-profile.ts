@@ -68,7 +68,6 @@ export function enterpriseEnvironment(
     OPENCODE_ENTERPRISE_MODELS: JSON.stringify(profile.models),
     OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: profile.defaultModelID,
     OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(paths.skillPacks ?? []),
-    SUPERPOWERS_DISABLE_TELEMETRY: "1",
     ...(userData
       ? {
           XDG_DATA_HOME: `${userData}/data`,

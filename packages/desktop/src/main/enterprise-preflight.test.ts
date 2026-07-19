@@ -157,7 +157,7 @@ test("skips ordinary builds and verifies enabled packaged profiles", async () =>
     }),
   ).toMatchObject({
     manifest: { schemaVersion: 2, catalogVersion: profile.catalogVersion },
-    skillPacks: { packs: [{ id: "ponytail", members: ["ponytail"] }] },
+    skillPacks: { packs: [{ id: "analyze-codebase", members: ["analyze-codebase"] }] },
   })
 })
 
@@ -167,7 +167,10 @@ test("fails closed when a cataloged skill pack changes", async () => {
     fixture.manifest,
     await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources }),
   )
-  await Bun.write(join(fixture.root, "skill-packs/ponytail/skills/ponytail/SKILL.md"), "tampered")
+  await Bun.write(
+    join(fixture.root, "skill-packs/analyze-codebase/skills/analyze-codebase/SKILL.md"),
+    "tampered",
+  )
 
   await expect(
     runEnterprisePreflight({
@@ -188,12 +191,12 @@ test("fails closed when a cataloged skill pack changes", async () => {
 
 async function enterpriseFixture() {
   const root = await mkdtemp(join(tmpdir(), "enterprise-preflight-"))
-  const pack = join(root, "skill-packs/ponytail")
-  await mkdir(join(pack, "skills/ponytail"), { recursive: true })
+  const pack = join(root, "skill-packs/analyze-codebase")
+  await mkdir(join(pack, "skills/analyze-codebase"), { recursive: true })
   await Promise.all([
     Bun.write(
-      join(pack, "skills/ponytail/SKILL.md"),
-      "---\nname: ponytail\ndescription: Test.\n---\n\n# Ponytail\n",
+      join(pack, "skills/analyze-codebase/SKILL.md"),
+      "---\nname: analyze-codebase\ndescription: Test.\n---\n\n# Analyze Codebase\n",
     ),
     Bun.write(join(pack, "LICENSE"), "MIT License\n"),
   ])
@@ -213,15 +216,15 @@ async function enterpriseFixture() {
         schemaVersion: 1,
         packs: [
           {
-            id: "ponytail",
-            displayName: "Ponytail",
+            id: "analyze-codebase",
+            displayName: "Codebase Analysis",
             description: "Test pack.",
             version: "4.8.4",
-            repository: "https://github.com/DietrichGebert/ponytail",
+            repository: "https://github.com/anomalyco/opencode",
             defaultEnabled: true,
-            root: "skill-packs/ponytail/skills",
-            members: ["ponytail"],
-            license: "skill-packs/ponytail/LICENSE",
+            root: "skill-packs/analyze-codebase/skills",
+            members: ["analyze-codebase"],
+            license: "skill-packs/analyze-codebase/LICENSE",
             treeSHA256: await skillPackTreeHash(pack),
           },
         ],

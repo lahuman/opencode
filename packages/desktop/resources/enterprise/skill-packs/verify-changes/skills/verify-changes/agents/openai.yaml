@@ -1,0 +1,4 @@
+interface:
+  display_name: "Change Verification"
+  short_description: "변경사항을 실행 결과로 최종 검증"
+  default_prompt: "Use $verify-changes to verify the current changes with fresh tests and checks."

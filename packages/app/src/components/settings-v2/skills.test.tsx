@@ -2,14 +2,14 @@ import { expect, mock, test } from "bun:test"
 
 const updates: [string, boolean][] = []
 const pack = {
-  id: "caveman",
-  displayName: "Caveman",
-  description: "Compress instructions.",
+  id: "debug-problems",
+  displayName: "Problem Debugging",
+  description: "문제의 근본 원인을 조사합니다.",
   version: "v1.9.1",
-  repository: "https://github.com/JuliusBrussee/caveman",
-  root: "C:/enterprise/caveman/skills",
-  members: ["caveman"],
-  license: "C:/enterprise/caveman/LICENSE",
+  repository: "https://github.com/anomalyco/opencode",
+  root: "C:/enterprise/debug-problems/skills",
+  members: ["debug-problems"],
+  license: "C:/enterprise/debug-problems/LICENSE",
   enabled: false,
 }
 
@@ -120,8 +120,6 @@ test("cancels skill restart confirmation when its dialog layer closes", async ()
 
 test("maps rollback outcomes to actionable skill setting messages", () => {
   expect(skillPackFailureKey(new Error("restart_failed_rolled_back"))).toBe("settings.skills.error.rolledBack")
-  expect(skillPackFailureKey(new Error("restart_failed_recovery_failed"))).toBe(
-    "settings.skills.error.recoveryFailed",
-  )
+  expect(skillPackFailureKey(new Error("restart_failed_recovery_failed"))).toBe("settings.skills.error.recoveryFailed")
   expect(skillPackFailureKey(new Error("unexpected"))).toBe("settings.skills.error.generic")
 })

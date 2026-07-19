@@ -2,68 +2,46 @@
   "schemaVersion": 1,
   "packs": [
     {
-      "id": "ponytail",
-      "displayName": "Ponytail",
-      "description": "Prefer existing helpers, platform features, and installed dependencies before adding code.",
-      "version": "4.8.4",
-      "repository": "https://github.com/DietrichGebert/ponytail",
+      "id": "analyze-codebase",
+      "displayName": "Codebase Analysis",
+      "description": "기존 코드의 구조, 동작 흐름, 변경 영향 범위를 분석합니다.",
+      "version": "1.0.0",
+      "repository": "https://github.com/anomalyco/opencode",
       "defaultEnabled": true,
-      "root": "skill-packs/ponytail/skills",
+      "root": "skill-packs/analyze-codebase/skills",
       "members": [
-        "ponytail",
-        "ponytail-audit",
-        "ponytail-debt",
-        "ponytail-gain",
-        "ponytail-help",
-        "ponytail-review"
+        "analyze-codebase"
       ],
-      "license": "skill-packs/ponytail/LICENSE",
-      "treeSHA256": "802feee0d5b2dcef6ea8ec5790c3b69fd8997c390b20d4222b88df934b323feb"
+      "license": "skill-packs/analyze-codebase/LICENSE",
+      "treeSHA256": "61674f0c5f473b1266f912ea7f258fe53c6df3cc8ddd7a4d6f2537cc2aa1b316"
     },
     {
-      "id": "caveman",
-      "displayName": "Caveman",
-      "description": "Compress instructions and responses while preserving exact technical tokens.",
-      "version": "v1.9.1",
-      "repository": "https://github.com/JuliusBrussee/caveman",
-      "defaultEnabled": false,
-      "root": "skill-packs/caveman/skills",
+      "id": "debug-problems",
+      "displayName": "Problem Debugging",
+      "description": "버그, 테스트 실패, 빌드 오류의 근본 원인을 체계적으로 조사합니다.",
+      "version": "1.0.0",
+      "repository": "https://github.com/anomalyco/opencode",
+      "defaultEnabled": true,
+      "root": "skill-packs/debug-problems/skills",
       "members": [
-        "caveman",
-        "caveman-commit",
-        "caveman-compress",
-        "caveman-help",
-        "caveman-review"
+        "debug-problems"
       ],
-      "license": "skill-packs/caveman/LICENSE",
-      "treeSHA256": "b86cfb81fb6c8a5594ca33328f9cc816babc3a66c6a6b30f08c4c25588511ab7"
+      "license": "skill-packs/debug-problems/LICENSE",
+      "treeSHA256": "536d1d736f0f2260f5ee2ad90cc0aadb4619c15c88bd7432a60c4afdcbfc3938"
     },
     {
-      "id": "superpowers",
-      "displayName": "Superpowers",
-      "description": "Structured brainstorming, planning, TDD, debugging, review, and verification workflows.",
-      "version": "v6.1.1",
-      "repository": "https://github.com/obra/superpowers",
+      "id": "verify-changes",
+      "displayName": "Change Verification",
+      "description": "변경사항을 테스트, 타입 검사, 빌드와 diff로 최종 검증합니다.",
+      "version": "1.0.0",
+      "repository": "https://github.com/anomalyco/opencode",
       "defaultEnabled": true,
-      "root": "skill-packs/superpowers/skills",
+      "root": "skill-packs/verify-changes/skills",
       "members": [
-        "brainstorming",
-        "dispatching-parallel-agents",
-        "executing-plans",
-        "finishing-a-development-branch",
-        "receiving-code-review",
-        "requesting-code-review",
-        "subagent-driven-development",
-        "systematic-debugging",
-        "test-driven-development",
-        "using-git-worktrees",
-        "using-superpowers",
-        "verification-before-completion",
-        "writing-plans",
-        "writing-skills"
+        "verify-changes"
       ],
-      "license": "skill-packs/superpowers/LICENSE",
-      "treeSHA256": "659d8542c133854ba8546e38de90fdb9efe10c8fb1b4854fb6f450f73522cf2b"
+      "license": "skill-packs/verify-changes/LICENSE",
+      "treeSHA256": "8a70a54f02419ce20fe10d2dd55b6410f3ec5840aed80917cb9f80d966293ad4"
     }
   ]
 }

@@ -23,9 +23,9 @@ const requiredEntries = [
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
   "resources/enterprise/skill-packs.json",
-  "resources/enterprise/skill-packs/ponytail/LICENSE",
-  "resources/enterprise/skill-packs/caveman/LICENSE",
-  "resources/enterprise/skill-packs/superpowers/LICENSE",
+  "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
+  "resources/enterprise/skill-packs/debug-problems/LICENSE",
+  "resources/enterprise/skill-packs/verify-changes/LICENSE",
   "resources/licenses/OpenCode-LICENSE",
 ] as const
 const enterpriseGuide = new Uint8Array(
@@ -264,14 +264,14 @@ function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEnt
     "resources/enterprise/models.json": read("resources/enterprise/models.json"),
     "resources/enterprise/enterprise-manifest.json": read("resources/enterprise/enterprise-manifest.json"),
     "resources/enterprise/skill-packs.json": read("resources/enterprise/skill-packs.json"),
-    "resources/enterprise/skill-packs/ponytail/LICENSE": read(
-      "resources/enterprise/skill-packs/ponytail/LICENSE",
+    "resources/enterprise/skill-packs/analyze-codebase/LICENSE": read(
+      "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
     ),
-    "resources/enterprise/skill-packs/caveman/LICENSE": read(
-      "resources/enterprise/skill-packs/caveman/LICENSE",
+    "resources/enterprise/skill-packs/debug-problems/LICENSE": read(
+      "resources/enterprise/skill-packs/debug-problems/LICENSE",
     ),
-    "resources/enterprise/skill-packs/superpowers/LICENSE": read(
-      "resources/enterprise/skill-packs/superpowers/LICENSE",
+    "resources/enterprise/skill-packs/verify-changes/LICENSE": read(
+      "resources/enterprise/skill-packs/verify-changes/LICENSE",
     ),
     "resources/licenses/OpenCode-LICENSE": read("resources/licenses/OpenCode-LICENSE"),
   }

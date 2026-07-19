@@ -18,33 +18,31 @@ const required = [
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
   "resources/enterprise/skill-packs.json",
-  "resources/enterprise/skill-packs/ponytail/LICENSE",
-  "resources/enterprise/skill-packs/ponytail/skills/ponytail/SKILL.md",
-  "resources/enterprise/skill-packs/caveman/LICENSE",
-  "resources/enterprise/skill-packs/caveman/skills/caveman/SKILL.md",
-  "resources/enterprise/skill-packs/superpowers/LICENSE",
-  "resources/enterprise/skill-packs/superpowers/skills/using-superpowers/SKILL.md",
+  "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
+  "resources/enterprise/skill-packs/analyze-codebase/skills/analyze-codebase/SKILL.md",
+  "resources/enterprise/skill-packs/debug-problems/LICENSE",
+  "resources/enterprise/skill-packs/debug-problems/skills/debug-problems/SKILL.md",
+  "resources/enterprise/skill-packs/verify-changes/LICENSE",
+  "resources/enterprise/skill-packs/verify-changes/skills/verify-changes/SKILL.md",
   "resources/licenses/OpenCode-LICENSE",
 ]
 const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
 const enterpriseDefaults = JSON.stringify({ enabled_providers: ["company-llm"] })
 const enterpriseModels = JSON.stringify({ providers: [] })
-const enterpriseModelCatalog = [
-  { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
-]
+const enterpriseModelCatalog = [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]
 const packLicense = "MIT License\n"
 const packSkills = {
-  ponytail: "---\nname: ponytail\ndescription: Test.\n---\n\n# Ponytail\n",
-  caveman: "---\nname: caveman\ndescription: Test.\n---\n\n# Caveman\n",
-  superpowers: "---\nname: using-superpowers\ndescription: Test.\n---\n\n# Superpowers\n",
+  "analyze-codebase": "---\nname: analyze-codebase\ndescription: Test.\n---\n\n# Analyze Codebase\n",
+  "debug-problems": "---\nname: debug-problems\ndescription: Test.\n---\n\n# Debug Problems\n",
+  "verify-changes": "---\nname: verify-changes\ndescription: Test.\n---\n\n# Verify Changes\n",
 }
 const enterpriseSkillPacks = `${JSON.stringify(
   {
     schemaVersion: 1,
     packs: [
-      testPack("ponytail", "Ponytail", "4.8.4", true, "ponytail"),
-      testPack("caveman", "Caveman", "v1.9.1", false, "caveman"),
-      testPack("superpowers", "Superpowers", "v6.1.1", true, "using-superpowers"),
+      testPack("analyze-codebase", "Codebase Analysis", "1.0.0", true, "analyze-codebase"),
+      testPack("debug-problems", "Problem Debugging", "1.0.0", true, "debug-problems"),
+      testPack("verify-changes", "Change Verification", "1.0.0", true, "verify-changes"),
     ],
   },
   null,
@@ -93,7 +91,9 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
   await rm(file, { force: true })
   await mkdir(file)
 
-  await expect(verifyEnterprisePackage(root)).rejects.toThrow(/Portable package is missing required files|Enterprise skill pack/)
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow(
+    /Portable package is missing required files|Enterprise skill pack/,
+  )
 })
 
 test("rejects a required payload symlinked outside the package root", async () => {
@@ -636,20 +636,14 @@ async function writePortableFixture(root: string) {
   await Promise.all([
     Bun.write(path.join(root, "Company OpenCode Pilot.exe"), "portable executable"),
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
-    Bun.write(
-      path.join(root, "resources/enterprise/opencode.jsonc"),
-      enterpriseDefaults,
-    ),
+    Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), enterpriseDefaults),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
     Bun.write(path.join(root, "resources/enterprise/models.json"), enterpriseModels),
     Bun.write(path.join(root, "resources/enterprise/enterprise-manifest.json"), enterpriseManifest()),
     Bun.write(path.join(root, "resources/enterprise/skill-packs.json"), enterpriseSkillPacks),
     ...Object.entries(packSkills).flatMap(([id, contents]) => [
       Bun.write(path.join(root, `resources/enterprise/skill-packs/${id}/LICENSE`), packLicense),
-      Bun.write(
-        path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}/SKILL.md`),
-        contents,
-      ),
+      Bun.write(path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}/SKILL.md`), contents),
     ]),
     Bun.write(path.join(root, "resources/licenses/OpenCode-LICENSE"), "MIT License\n"),
   ])
@@ -917,12 +911,12 @@ const portableContents: Record<string, string> = {
   "resources/enterprise/models.json": enterpriseModels,
   "resources/enterprise/enterprise-manifest.json": enterpriseManifest(),
   "resources/enterprise/skill-packs.json": enterpriseSkillPacks,
-  "resources/enterprise/skill-packs/ponytail/LICENSE": packLicense,
-  "resources/enterprise/skill-packs/ponytail/skills/ponytail/SKILL.md": packSkills.ponytail,
-  "resources/enterprise/skill-packs/caveman/LICENSE": packLicense,
-  "resources/enterprise/skill-packs/caveman/skills/caveman/SKILL.md": packSkills.caveman,
-  "resources/enterprise/skill-packs/superpowers/LICENSE": packLicense,
-  "resources/enterprise/skill-packs/superpowers/skills/using-superpowers/SKILL.md": packSkills.superpowers,
+  "resources/enterprise/skill-packs/analyze-codebase/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/analyze-codebase/skills/analyze-codebase/SKILL.md": packSkills["analyze-codebase"],
+  "resources/enterprise/skill-packs/debug-problems/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/debug-problems/skills/debug-problems/SKILL.md": packSkills["debug-problems"],
+  "resources/enterprise/skill-packs/verify-changes/LICENSE": packLicense,
+  "resources/enterprise/skill-packs/verify-changes/skills/verify-changes/SKILL.md": packSkills["verify-changes"],
   "resources/licenses/OpenCode-LICENSE": "MIT License\n",
 }
 
@@ -952,7 +946,13 @@ function enterpriseManifest() {
   )}\n`
 }
 
-function testPack(id: keyof typeof packSkills, displayName: string, version: string, defaultEnabled: boolean, member: string) {
+function testPack(
+  id: keyof typeof packSkills,
+  displayName: string,
+  version: string,
+  defaultEnabled: boolean,
+  member: string,
+) {
   return {
     id,
     displayName,
@@ -973,5 +973,5 @@ function testPack(id: keyof typeof packSkills, displayName: string, version: str
 }
 
 function skillName(id: string) {
-  return id === "superpowers" ? "using-superpowers" : id
+  return id
 }

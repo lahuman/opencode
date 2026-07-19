@@ -81,13 +81,13 @@ test("maps skill pack reads and updates to private enterprise IPC channels", asy
   })
 
   await enterprise.skillPacks()
-  await enterprise.setSkillPackEnabled("caveman", true)
-  await enterprise.openSkillPackSource("caveman")
+  await enterprise.setSkillPackEnabled("verify-changes", true)
+  await enterprise.openSkillPackSource("verify-changes")
 
   expect(invocations).toEqual([
     { channel: "enterprise-skill-packs", args: [] },
-    { channel: "enterprise-skill-pack-set", args: ["caveman", true] },
-    { channel: "enterprise-skill-pack-source", args: ["caveman"] },
+    { channel: "enterprise-skill-pack-set", args: ["verify-changes", true] },
+    { channel: "enterprise-skill-pack-source", args: ["verify-changes"] },
   ])
 })
 

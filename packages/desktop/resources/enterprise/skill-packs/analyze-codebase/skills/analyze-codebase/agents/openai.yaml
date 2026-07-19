@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codebase Analysis"
+  short_description: "코드 구조와 변경 영향 범위 분석"
+  default_prompt: "Use $analyze-codebase to analyze the current code structure and change impact."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Problem Debugging"
+  short_description: "문제의 근본 원인을 체계적으로 조사"
+  default_prompt: "Use $debug-problems to investigate the root cause before proposing a fix."
