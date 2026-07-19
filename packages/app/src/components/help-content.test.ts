@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { KERNEXA_ONBOARDING } from "./help-content"
+import { KERNEXA_ONBOARDING, onboardingContent } from "./help-content"
 
 test("defines the approved Korean Kernexa onboarding copy", () => {
   expect(KERNEXA_ONBOARDING.card).toEqual({
@@ -16,4 +16,13 @@ test("defines the approved Korean Kernexa onboarding copy", () => {
   expect(KERNEXA_ONBOARDING.drawer.sections.map((section) => section.title)).toEqual(["분석", "구현", "검증"])
   expect(KERNEXA_ONBOARDING.drawer.offline).toContain("폐쇄망")
   expect(KERNEXA_ONBOARDING.drawer.guide).toContain("Kernexa AI 가이드")
+})
+
+test("selects Kernexa onboarding only for enterprise editions", () => {
+  expect(onboardingContent(true)).toBe(KERNEXA_ONBOARDING)
+  expect(onboardingContent(false).card).toMatchObject({
+    title: "Introducing Tabs",
+    description: "Organize your work and active sessions with tabs",
+  })
+  expect(onboardingContent(false).drawer.title).toBe("Introducing Tabs")
 })

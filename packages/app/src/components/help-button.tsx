@@ -10,7 +10,7 @@ import { useCommand } from "@/context/command"
 import { openEditionHelp } from "./dialog-company-guide"
 import homeImage from "@/assets/help/home.png"
 import tabsImage from "@/assets/help/tabs.png"
-import { KERNEXA_ONBOARDING } from "./help-content"
+import { KERNEXA_ONBOARDING, onboardingContent } from "./help-content"
 
 const helpIcon = (
   <svg
@@ -85,21 +85,18 @@ export function TabsInfoPopup() {
   const platform = usePlatform()
   const [drawerOpen, setDrawerOpen] = createSignal(false)
   const enterprise = () => Boolean(platform.enterprise)
+  const content = () => onboardingContent(enterprise())
 
   return (
     <Drawer open={drawerOpen()} onOpenChange={setDrawerOpen} side="right">
       <Show when={settings.general.shouldDisplayTabsToast()}>
         <div
           class="fixed bottom-14 right-5 z-50 h-[240px] w-[192px] rounded-[8px] bg-v2-background-bg-base p-1 shadow-[var(--v2-elevation-floating)]"
-          aria-label={
-            enterprise()
-              ? KERNEXA_ONBOARDING.card.ariaLabel
-              : "Introducing Tabs. Organize your work and active sessions with tabs"
-          }
+          aria-label={content().card.ariaLabel}
         >
           <button
             type="button"
-            aria-label={enterprise() ? KERNEXA_ONBOARDING.card.dismissLabel : "Dismiss Tabs information"}
+            aria-label={content().card.dismissLabel}
             class="absolute top-3 right-3 z-10 size-5 flex items-center justify-center rounded-[4px] bg-[rgba(0,0,0,0.4)]"
             onClick={settings.general.dismissTabsToast}
           >
@@ -141,12 +138,10 @@ export function TabsInfoPopup() {
             </Show>
             <div class="absolute inset-x-0 bottom-0 flex w-full flex-col items-start gap-1.5 bg-[linear-gradient(180deg,rgba(0,0,0,0)_0%,#000000_100%)] px-3 py-5">
               <p class="w-full select-none text-[13px] font-[530] leading-none tracking-[-0.04px] text-[#FFFFFF]">
-                {enterprise() ? KERNEXA_ONBOARDING.card.title : "Introducing Tabs"}
+                {content().card.title}
               </p>
               <p class="w-full select-none text-[13px] font-[440] leading-[140%] tracking-[-0.04px] text-[#808080]">
-                {enterprise()
-                  ? KERNEXA_ONBOARDING.card.description
-                  : "Organize your work and active sessions with tabs"}
+                {content().card.description}
               </p>
             </div>
           </button>
@@ -155,7 +150,7 @@ export function TabsInfoPopup() {
       <DrawerContent>
         <div class="flex h-[52px] w-full shrink-0 items-center gap-4 self-stretch border-b border-v2-border-border-muted p-4">
           <p class="min-h-0 min-w-0 flex-1 text-[13px] font-[530] leading-5 tracking-[-0.04px] tabular-nums text-v2-text-text-muted">
-            {enterprise() ? KERNEXA_ONBOARDING.drawer.header : "July 14"}
+            {content().drawer.header}
           </p>
           <Show when={platform.platform !== "desktop" || platform.os !== "windows"}>
             <DrawerClose
@@ -163,14 +158,14 @@ export function TabsInfoPopup() {
               type="button"
               size="small"
               variant="ghost-muted"
-              aria-label={enterprise() ? KERNEXA_ONBOARDING.drawer.closeLabel : "Close"}
+              aria-label={content().drawer.closeLabel}
               icon={<IconV2 name="xmark-small" />}
             />
           </Show>
         </div>
         <div class="relative flex min-h-0 w-full flex-1 flex-col items-start gap-6 overflow-y-auto p-8">
           <p class="w-full shrink-0 self-stretch text-[21px] font-[610] leading-6 tracking-[-0.37px] tabular-nums text-v2-text-text-base">
-            {enterprise() ? KERNEXA_ONBOARDING.drawer.title : "Introducing Tabs"}
+            {content().drawer.title}
           </p>
           <div class="flex w-full flex-1 flex-col gap-4 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base">
             <Show

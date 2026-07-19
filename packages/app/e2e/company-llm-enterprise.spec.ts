@@ -329,8 +329,8 @@ responsiveViewports.forEach((viewport) => {
     await expect(body).toHaveAttribute("tabindex", "0")
     await expect(body).toBeFocused()
     await expect(dialog.getByText("Kernexa AI 가이드", { exact: true })).toBeVisible()
-    await expect(dialog.getByText("Version 2026.07", { exact: true })).toBeVisible()
-    await expect(dialog.getByRole("heading", { name: "Internal AI guide", level: 1 })).toBeVisible()
+    await expect(dialog.getByText("버전 kernexa-1", { exact: true })).toBeVisible()
+    await expect(dialog.getByRole("heading", { name: "Kernexa AI 사용 가이드", level: 1 })).toBeVisible()
     await expect(dialog.locator("a")).toHaveCount(0)
     expect(await output<string[]>(page, "external-links")).toEqual([])
 
@@ -361,6 +361,9 @@ responsiveViewports.forEach((viewport) => {
     const pageDownStart = await body.evaluate((node) => node.scrollTop)
     await page.keyboard.press("PageDown")
     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(pageDownStart)
+    await body.evaluate((node) => {
+      node.scrollTop = 0
+    })
     const arrowStart = await body.evaluate((node) => node.scrollTop)
     await page.keyboard.press("ArrowDown")
     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(arrowStart)

@@ -21,7 +21,7 @@ describe("company guide command", () => {
         credentialStatus: async () => ({ configured: true }),
         setCredentials: async () => ({ restartRequired: false }),
         clearCredentials: async () => ({ restartRequired: false }),
-        readGuide: async () => ({ version: "2026.07", markdown: "# Company guide" }),
+        readGuide: async () => ({ version: "kernexa-1", markdown: "# Kernexa AI 사용 가이드" }),
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
         stateBackups: async () => [],
         restoreStateBackup: async () => ({ restartRequired: false }),
@@ -38,7 +38,7 @@ describe("company guide command", () => {
 
     expect(command?.id).toBe("company.guide.open")
     expect(command?.title).toBe("Kernexa AI 가이드")
-    expect(opened).toEqual([{ version: "2026.07", markdown: "# Company guide" }])
+    expect(opened).toEqual([{ version: "kernexa-1", markdown: "# Kernexa AI 사용 가이드" }])
   })
 
   test("reports read failures without opening a dialog", async () => {

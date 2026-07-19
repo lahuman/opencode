@@ -34,7 +34,7 @@ const DIAGNOSTIC_FAILURE = {
   failure: { kind: "connection", message: "Install the Company TLS CA certificate and try again." },
 } as const
 const GUIDE_MARKDOWN = [
-  "# Internal AI guide",
+  "# Kernexa AI 사용 가이드",
   "",
   "Use only company-approved data and systems.",
   "",
@@ -283,7 +283,7 @@ function createHarness(scenario?: string | null) {
         return { restartRequired: behavior.credentialMode === "restart" }
       },
       async readGuide() {
-        return { version: "2026.07", markdown: GUIDE_MARKDOWN }
+        return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
       },
       async readiness() {
         return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }

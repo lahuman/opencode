@@ -20,3 +20,22 @@ export const KERNEXA_ONBOARDING = {
     guide: "자세한 운영 기준은 도움말 메뉴의 Kernexa AI 가이드에서 확인할 수 있습니다.",
   },
 } as const
+
+const PUBLIC_TABS_ONBOARDING = {
+  card: {
+    ariaLabel: "Introducing Tabs. Organize your work and active sessions with tabs",
+    dismissLabel: "Dismiss Tabs information",
+    title: "Introducing Tabs",
+    description: "Organize your work and active sessions with tabs",
+  },
+  drawer: {
+    header: "July 14",
+    closeLabel: "Close",
+    title: "Introducing Tabs",
+  },
+} as const
+
+export function onboardingContent(enterprise: boolean) {
+  if (enterprise) return KERNEXA_ONBOARDING
+  return PUBLIC_TABS_ONBOARDING
+}

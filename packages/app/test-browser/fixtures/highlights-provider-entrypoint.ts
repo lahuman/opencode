@@ -32,7 +32,7 @@ async function mountHighlights(enterprise: boolean) {
             credentialStatus: async () => ({ configured: false }),
             setCredentials: async () => ({ restartRequired: true }),
             clearCredentials: async () => ({ restartRequired: true }),
-            readGuide: async () => ({ version: "pilot-1", markdown: "" }),
+            readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
           },
         }
       : {}),
