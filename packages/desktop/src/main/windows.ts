@@ -519,6 +519,7 @@ function enterpriseContentSecurityPolicy(profile: EnterpriseProfile) {
   const connectSources = Array.from(
     new Set([
       "'self'",
+      "data:",
       ...["http", "https", "ws", "wss"].flatMap((scheme) => loopbackHosts.map((host) => `${scheme}://${host}:*`)),
       ...profile.allowedOrigins.flatMap((value) => {
         if (!URL.canParse(value)) return []
@@ -532,7 +533,7 @@ function enterpriseContentSecurityPolicy(profile: EnterpriseProfile) {
   )
   return [
     ["default-src", "'none'"],
-    ["script-src", "'self'"],
+    ["script-src", "'self'", "'wasm-unsafe-eval'"],
     ["style-src", "'self'", "'unsafe-inline'"],
     ["font-src", "'self'", "data:"],
     ["img-src", "'self'", "data:", "blob:"],

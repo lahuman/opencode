@@ -100,7 +100,7 @@ test("production windows enforce one session policy and exact packaged document 
   const directives = parseCSP(csp)
   expect(directives).toEqual({
     "default-src": ["'none'"],
-    "script-src": ["'self'"],
+    "script-src": ["'self'", "'wasm-unsafe-eval'"],
     "style-src": ["'self'", "'unsafe-inline'"],
     "font-src": ["'self'", "data:"],
     "img-src": ["'self'", "data:", "blob:"],
@@ -109,6 +109,7 @@ test("production windows enforce one session policy and exact packaged document 
     "manifest-src": ["'none'"],
     "connect-src": [
       "'self'",
+      "data:",
       "http://localhost:*",
       "http://127.0.0.1:*",
       "http://[::1]:*",
@@ -130,7 +131,7 @@ test("production windows enforce one session policy and exact packaged document 
     "frame-ancestors": ["'none'"],
     "form-action": ["'none'"],
   })
-  expect(csp).not.toContain("unsafe-eval")
+  expect(directives["script-src"]).not.toContain("'unsafe-eval'")
   expect(csp).not.toContain("opencode.ai")
   expect(csp).not.toContain("/v1")
   expect(csp).not.toContain("/private")
