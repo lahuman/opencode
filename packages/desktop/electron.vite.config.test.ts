@@ -8,7 +8,7 @@ const enabledProfile = {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
@@ -66,12 +66,12 @@ describe("enterprise Vite configuration", () => {
       defines: {
         main: {
           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
-          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
         },
         renderer: {
           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
-          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("pilot-1"),
+          "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
         },
       },

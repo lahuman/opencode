@@ -106,7 +106,7 @@ try {
         ]),
         OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-        OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
       openExternal: (url) => shellOpenExternalURLs.push(url),

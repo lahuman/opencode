@@ -16,7 +16,7 @@ export type EnterprisePackageSummary = {
 }
 
 const requiredEntries = [
-  "Company OpenCode Pilot.exe",
+  "Kernexa.exe",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -240,7 +240,7 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
   } catch {
     throw new Error("Portable package enterprise manifest is invalid")
   }
-  if (files["Company OpenCode Pilot.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
+  if (files["Kernexa.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
   if (files["resources/app.asar"].byteLength === 0) throw new Error("Portable package archive is empty")
   if (!new TextDecoder().decode(files["resources/licenses/OpenCode-LICENSE"]).includes("MIT License")) {
     throw new Error("Portable package license is invalid")
@@ -257,7 +257,7 @@ function parseJSON(input: Uint8Array, error: string): unknown {
 
 function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEntry, T> {
   return {
-    "Company OpenCode Pilot.exe": read("Company OpenCode Pilot.exe"),
+    "Kernexa.exe": read("Kernexa.exe"),
     "resources/app.asar": read("resources/app.asar"),
     "resources/enterprise/opencode.jsonc": read("resources/enterprise/opencode.jsonc"),
     "resources/enterprise/company-guide.md": read("resources/enterprise/company-guide.md"),

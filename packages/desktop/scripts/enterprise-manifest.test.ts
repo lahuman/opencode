@@ -1,9 +1,24 @@
 import { expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 
 import { generateEnterpriseManifest, prepareEnterpriseManifest } from "./enterprise-manifest"
+
+test("keeps the generated Kernexa guide and manifest version aligned", async () => {
+  const root = resolve(import.meta.dir, "..")
+  const guide = Bun.file(join(root, "resources/enterprise/company-guide.md"))
+  const manifest = await Bun.file(join(root, "resources/enterprise/enterprise-manifest.json")).json<{
+    guideVersion: string
+    resources: Record<string, string>
+  }>()
+
+  expect(manifest.guideVersion).toBe("kernexa-1")
+  expect(await guide.text()).toStartWith("# Kernexa AI 사용 가이드\n")
+  expect(manifest.resources["company-guide.md"]).toBe(
+    new Bun.CryptoHasher("sha256").update(await guide.arrayBuffer()).digest("hex"),
+  )
+})
 
 test("generates the packaged manifest from validated enterprise build inputs", async () => {
   await using fixture = await manifestFixture()

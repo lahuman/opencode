@@ -11,7 +11,7 @@ import { writeEnterpriseArchive } from "./package-enterprise-win"
 
 const roots: string[] = []
 const required = [
-  "Company OpenCode Pilot.exe",
+  "Kernexa.exe",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -57,7 +57,7 @@ test("accepts a complete portable enterprise tree", async () => {
   const root = await portableFixture()
 
   await expect(verifyEnterprisePackage(root)).resolves.toEqual({
-    executable: "Company OpenCode Pilot.exe",
+    executable: "Kernexa.exe",
     defaults: true,
     guide: true,
     models: true,
@@ -71,7 +71,7 @@ test("accepts a complete portable enterprise tree", async () => {
 test("writes a timestamp-free archive accepted by the portable verifier", async () => {
   const root = await portableFixture()
   const output = await temporaryDirectory("enterprise-portable-output-")
-  const archive = path.join(output, "company-opencode-pilot-1.17.18-win-x64.zip")
+  const archive = path.join(output, "kernexa-1.17.18-win-x64.zip")
 
   await writeEnterpriseArchive({ archive, root })
 
@@ -99,8 +99,8 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
 test("rejects a required payload symlinked outside the package root", async () => {
   const root = await portableFixture()
   const outside = await temporaryDirectory("enterprise-portable-outside-")
-  const executable = path.join(root, "Company OpenCode Pilot.exe")
-  const target = path.join(outside, "Company OpenCode Pilot.exe")
+  const executable = path.join(root, "Kernexa.exe")
+  const target = path.join(outside, "Kernexa.exe")
   await Bun.write(target, "portable executable")
   await rm(executable)
   await symlink(target, executable, "file")
@@ -198,7 +198,7 @@ test("rejects an empty app archive", async () => {
 
 test("rejects an empty portable executable", async () => {
   const root = await portableFixture()
-  await Bun.write(path.join(root, "Company OpenCode Pilot.exe"), "")
+  await Bun.write(path.join(root, "Kernexa.exe"), "")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package executable")
 })
@@ -308,7 +308,7 @@ test("rejects a local header name that differs from its central directory name",
 
 test("rejects a local header general-purpose flag mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
     view.setUint16(offset + 6, view.getUint16(offset + 6, true) ^ 0x800, true)
   })
 
@@ -317,7 +317,7 @@ test("rejects a local header general-purpose flag mismatch", async () => {
 
 test("rejects a local header compression method mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
     view.setUint16(offset + 8, view.getUint16(offset + 8, true) === 0 ? 8 : 0, true)
   })
 
@@ -326,7 +326,7 @@ test("rejects a local header compression method mismatch", async () => {
 
 test("rejects a local header DOS timestamp mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Company OpenCode Pilot.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
     view.setUint16(offset + 10, view.getUint16(offset + 10, true) ^ 1, true)
     view.setUint16(offset + 12, view.getUint16(offset + 12, true) ^ 1, true)
   })
@@ -382,15 +382,15 @@ test("rejects an unexplained gap before the central directory", async () => {
 
 test.each([
   "resources\\app.asar",
-  "resources/../Company OpenCode Pilot.exe",
-  "/Company OpenCode Pilot.exe",
+  "resources/../Kernexa.exe",
+  "/Kernexa.exe",
   "C:..\\outside",
   "C:../outside",
   "C:/outside",
   "\\\\server\\share\\outside",
   "\\\\?\\C:\\outside",
-  "Company OpenCode Pilot Setup.exe",
-  "Uninstall Company OpenCode Pilot.exe",
+  "Kernexa Setup.exe",
+  "Uninstall Kernexa.exe",
   "Setup.EXE",
 ])("rejects unsafe archive entry %s", async (entry) => {
   const archive = await archiveFixture([...required, entry])
@@ -604,7 +604,7 @@ test("rejects required archive contents that differ from the verified unpacked p
 })
 
 test.each([
-  ["an empty executable", "Company OpenCode Pilot.exe", "", "Portable package executable"],
+  ["an empty executable", "Kernexa.exe", "", "Portable package executable"],
   [
     "a different guide",
     "resources/enterprise/company-guide.md",
@@ -634,7 +634,7 @@ async function writePortableFixture(root: string) {
     ),
   ])
   await Promise.all([
-    Bun.write(path.join(root, "Company OpenCode Pilot.exe"), "portable executable"),
+    Bun.write(path.join(root, "Kernexa.exe"), "portable executable"),
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
     Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), enterpriseDefaults),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
@@ -672,7 +672,7 @@ async function archiveFixture(
       { msDosCompatible: true, ...options[entry] },
     )
   }
-  const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
+  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
   await Bun.write(archive, await writer.close())
   return archive
 }
@@ -904,7 +904,7 @@ async function rewriteArchiveExtraFieldType(archive: string, name: string, sourc
 }
 
 const portableContents: Record<string, string> = {
-  "Company OpenCode Pilot.exe": "portable executable",
+  "Kernexa.exe": "portable executable",
   "resources/app.asar": "application archive",
   "resources/enterprise/opencode.jsonc": enterpriseDefaults,
   "resources/enterprise/company-guide.md": enterpriseGuide,
@@ -928,7 +928,7 @@ function enterpriseManifest() {
       schemaVersion: 2,
       appVersion: "1.17.18",
       defaultsVersion: "pilot-1",
-      guideVersion: "pilot-1",
+      guideVersion: "kernexa-1",
       catalogVersion: "pilot-1",
       defaultModelID: "company-code",
       modelIDs: identity.modelIDs,

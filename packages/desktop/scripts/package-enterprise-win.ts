@@ -58,7 +58,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
 
   const version =
     input.version ?? (await Bun.file(path.join(options.cwd, "package.json")).json<{ version: string }>()).version
-  const archive = path.join(options.cwd, "dist", `company-opencode-pilot-${version}-win-x64.zip`)
+  const archive = path.join(options.cwd, "dist", `kernexa-${version}-win-x64.zip`)
   const root = path.join(options.cwd, "dist", "win-unpacked")
   await (input.verifyPackage ?? verifyEnterprisePackage)(root)
   await (input.writeArchive ?? writeEnterpriseArchive)({ archive, root })
@@ -68,7 +68,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
     throw new Error("Enterprise package source changed during the build")
   }
   const gitCommit = packagedCommit ?? reviewedCommit ?? (await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))())
-  const authenticode = await (input.authenticode?.(path.join(root, "Company OpenCode Pilot.exe"), env) ??
+  const authenticode = await (input.authenticode?.(path.join(root, "Kernexa.exe"), env) ??
     Promise.resolve("NotSigned" as const))
   const builtAt = new Date()
   const supplyChain = await (input.supplyChain ?? writeEnterpriseSupplyChain)({ archive, appVersion: version, builtAt })

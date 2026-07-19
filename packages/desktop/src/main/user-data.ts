@@ -1,6 +1,6 @@
 import { join, win32 } from "node:path"
 
-const ENTERPRISE_WINDOWS_USER_DATA_ID = "com.company.opencode.pilot"
+const ENTERPRISE_WINDOWS_USER_DATA_ID = "com.company.kernexa"
 
 export function resolveDesktopUserDataPath(input: {
   platform: NodeJS.Platform
@@ -11,7 +11,7 @@ export function resolveDesktopUserDataPath(input: {
 }) {
   if (input.enterprise && input.platform === "win32") {
     if (!input.localAppData) {
-      throw new Error("LOCALAPPDATA is required for enterprise OpenCode Pilot on Windows")
+      throw new Error("LOCALAPPDATA is required for Kernexa on Windows")
     }
     return win32.join(input.localAppData, ENTERPRISE_WINDOWS_USER_DATA_ID)
   }

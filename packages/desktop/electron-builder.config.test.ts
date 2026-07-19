@@ -9,7 +9,7 @@ const enterprise = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
@@ -97,9 +97,9 @@ test("loads a portable unsigned enterprise ZIP configuration", () => {
 
   expect(result.exitCode).toBe(0)
   expect(result.summary).toMatchObject({
-    appId: "com.company.opencode.pilot",
-    productName: "Company OpenCode Pilot",
-    artifactName: "company-opencode-pilot-${version}-${os}-${arch}.${ext}",
+    appId: "com.company.kernexa",
+    productName: "Kernexa",
+    artifactName: "kernexa-${version}-${os}-${arch}.${ext}",
     winTarget: ["zip"],
     ordinarySignFunction: false,
     standardCSC: true,

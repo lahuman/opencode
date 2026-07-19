@@ -6,13 +6,13 @@ test("uses LOCALAPPDATA for enterprise Windows state", () => {
     resolveDesktopUserDataPath({
       platform: "win32",
       enterprise: true,
-      appId: "com.company.opencode.pilot",
+      appId: "com.company.kernexa",
       localAppData: "C:\\Users\\Avery\\AppData\\Local",
       appData: () => {
         throw new Error("Electron appData must not be read")
       },
     }),
-  ).toBe("C:\\Users\\Avery\\AppData\\Local\\com.company.opencode.pilot")
+  ).toBe("C:\\Users\\Avery\\AppData\\Local\\com.company.kernexa")
 })
 
 test("fails closed when enterprise Windows LOCALAPPDATA is unavailable", () => {
@@ -20,12 +20,12 @@ test("fails closed when enterprise Windows LOCALAPPDATA is unavailable", () => {
     resolveDesktopUserDataPath({
       platform: "win32",
       enterprise: true,
-      appId: "com.company.opencode.pilot",
+      appId: "com.company.kernexa",
       appData: () => {
         throw new Error("Electron appData must not be read")
       },
     }),
-  ).toThrow("LOCALAPPDATA is required for enterprise OpenCode Pilot on Windows")
+  ).toThrow("LOCALAPPDATA is required for Kernexa on Windows")
 })
 
 test("keeps ordinary Windows state under Electron appData", () => {
@@ -45,9 +45,9 @@ test("keeps non-Windows enterprise state under Electron appData", () => {
     resolveDesktopUserDataPath({
       platform: "darwin",
       enterprise: true,
-      appId: "com.company.opencode.pilot",
+      appId: "com.company.kernexa",
       localAppData: "/Users/avery/Library/Application Support",
       appData: () => "/Users/avery/Library/Application Support",
     }),
-  ).toBe("/Users/avery/Library/Application Support/com.company.opencode.pilot")
+  ).toBe("/Users/avery/Library/Application Support/com.company.kernexa")
 })

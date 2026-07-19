@@ -59,7 +59,7 @@ export async function writeEnterpriseSupplyChain(input: {
         version: 1,
         metadata: {
           timestamp: input.builtAt.toISOString(),
-          component: { type: "application", name: "company-opencode-pilot", version: input.appVersion },
+          component: { type: "application", name: "kernexa", version: input.appVersion },
         },
         components: notices.map((dependency) => {
           const purl = `pkg:npm/${dependency.name.startsWith("@") ? `%40${dependency.name.slice(1)}` : dependency.name}@${dependency.version}`
@@ -79,7 +79,7 @@ export async function writeEnterpriseSupplyChain(input: {
   )
   await Bun.write(
     licenses,
-    `Company OpenCode Pilot third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
+    `Kernexa third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
       .map(
         (dependency) =>
           `${dependency.name}@${dependency.version}\nDeclared license: ${dependency.license}\n${dependency.text || "License text unavailable in the local dependency installation."}`,

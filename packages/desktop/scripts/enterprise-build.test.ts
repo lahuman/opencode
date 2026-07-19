@@ -8,7 +8,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
@@ -21,7 +21,7 @@ const multiModel = {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
 }
@@ -34,7 +34,7 @@ test("validates normalized multi-model build metadata", () => {
     ],
     defaultModelID: "code",
     defaultsVersion: "pilot-1",
-    guideVersion: "pilot-1",
+    guideVersion: "kernexa-1",
     catalogVersion: "catalog-1",
     allowedOrigins: [
       "https://code.corp.example",

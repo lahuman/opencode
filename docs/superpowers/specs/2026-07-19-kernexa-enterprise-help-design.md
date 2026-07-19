@@ -65,7 +65,7 @@ Every active enterprise surface that currently presents `Company AI Guide` will 
 
 The dialog will render `버전 {guide.version}`. Active enterprise configurations change the guide version identifier from `pilot-1` to `kernexa-1`. Other version identifiers such as defaults or catalog versions are not renamed unless they describe the guide itself.
 
-The bundled Markdown guide heading will be `Kernexa AI 사용 가이드`. Its policy body remains substantively unchanged. Because the guide resource and version change, the enterprise manifest must be regenerated so its guide hash and `guideVersion` remain internally consistent.
+The bundled Markdown guide heading will be `Kernexa AI 사용 가이드`. Its policy body remains substantively unchanged. Because the guide resource and version change, the generated enterprise manifest must be refreshed so its guide hash and `guideVersion` remain internally consistent while preserving the configured model-catalog identity.
 
 ## Component Design
 
@@ -84,7 +84,7 @@ The existing command ID `company.guide.open` and IPC contracts remain unchanged 
 
 ### Configuration and manifest
 
-All active enterprise build examples and executable fixtures will use `OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1`. The checked-in enterprise manifest will be regenerated from the updated guide resource and version. Historical dated specifications and plans remain historical and are not rewritten.
+All active enterprise build examples and executable fixtures will use `OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1`. The ignored, build-generated enterprise manifest will be refreshed from the updated guide resource and version without changing unrelated model, defaults, or catalog identity. Historical dated specifications and plans remain historical and are not rewritten.
 
 ## Error Handling and Offline Behavior
 
@@ -113,4 +113,3 @@ Type checking will run from `packages/app` and `packages/desktop`. Relevant unit
 - Active enterprise UI displays `Kernexa AI 가이드` and `버전 kernexa-1`.
 - The bundled guide, manifest, and build configuration use the same guide version and resource hash.
 - No external asset or internet dependency is added.
-

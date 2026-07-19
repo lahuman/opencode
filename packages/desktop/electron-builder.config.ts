@@ -155,13 +155,13 @@ function getConfig() {
 
 function getEnterpriseConfig() {
   validateEnterpriseBuild(process.env)
-  const appId = "com.company.opencode.pilot"
+  const appId = "com.company.kernexa"
   const base = getBase(appId)
   return {
     ...base,
     appId,
-    productName: "Company OpenCode Pilot",
-    artifactName: "company-opencode-pilot-${version}-${os}-${arch}.${ext}",
+    productName: "Kernexa",
+    artifactName: "kernexa-${version}-${os}-${arch}.${ext}",
     protocols: undefined,
     publish: undefined,
     nsis: undefined,

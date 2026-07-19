@@ -10,7 +10,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
@@ -104,20 +104,20 @@ test("runs validation, build, package, verification, git, and release in order",
     writeArchive(input) {
       steps.push("write-zip")
       expect(input).toEqual({
-        archive: path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"),
+        archive: path.resolve(import.meta.dir, "../dist/kernexa-1.17.18-win-x64.zip"),
         root: path.resolve(import.meta.dir, "../dist/win-unpacked"),
       })
       return Promise.resolve()
     },
     verifyArchive(archive, root) {
       steps.push("verify-zip")
-      expect(archive).toBe(path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"))
+      expect(archive).toBe(path.resolve(import.meta.dir, "../dist/kernexa-1.17.18-win-x64.zip"))
       expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve([])
     },
     authenticode(executable) {
       steps.push("authenticode")
-      expect(executable).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked/Company OpenCode Pilot.exe"))
+      expect(executable).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked/Kernexa.exe"))
       return Promise.resolve("NotSigned")
     },
     supplyChain({ archive }) {
@@ -130,7 +130,7 @@ test("runs validation, build, package, verification, git, and release in order",
     release(input) {
       steps.push("release")
       expect(input).toMatchObject({
-        archive: path.resolve(import.meta.dir, "../dist/company-opencode-pilot-1.17.18-win-x64.zip"),
+        archive: path.resolve(import.meta.dir, "../dist/kernexa-1.17.18-win-x64.zip"),
         version: "1.17.18",
         gitCommit: "0123456789abcdef",
       })

@@ -11,7 +11,7 @@ Object.assign(process.env, {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 })
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })
@@ -100,7 +100,7 @@ const api = {
     clearCredentials: async () => ({ restartRequired: true as const }),
     credentialCatalog: async () => ({ defaultModelID: "company-code", models: [] }),
     credentialStatus: async () => ({ configured: false }),
-    readGuide: async () => ({ version: "pilot-1", markdown: "" }),
+    readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
     setCredentials: async () => ({ restartRequired: true as const }),
   },
   getPinchZoomEnabled: async () => false,

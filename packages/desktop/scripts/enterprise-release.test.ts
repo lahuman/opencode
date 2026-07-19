@@ -15,7 +15,7 @@ const valid = {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
@@ -35,7 +35,7 @@ afterEach(async () => {
 test("writes checksum and non-secret release metadata", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "enterprise-release-"))
   roots.push(root)
-  const archive = path.join(root, "company-opencode-pilot-1.17.18-win-x64.zip")
+  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
   await Bun.write(archive, "portable archive")
   const sbom = archive.replace(/\.zip$/, ".sbom.cdx.json")
   const licenses = archive.replace(/\.zip$/, ".third-party-licenses.txt")
@@ -55,7 +55,7 @@ test("writes checksum and non-secret release metadata", async () => {
 
   expect(result).toMatchObject({
     schemaVersion: 3,
-    artifact: "company-opencode-pilot-1.17.18-win-x64.zip",
+    artifact: "kernexa-1.17.18-win-x64.zip",
     appVersion: "1.17.18",
     gitCommit: "0123456789abcdef",
     target: { os: "win32", arch: "x64" },
@@ -64,9 +64,9 @@ test("writes checksum and non-secret release metadata", async () => {
     modelIDs: ["company-code", "company-fast"],
     modelCatalogSHA256: expect.stringMatching(/^[a-f0-9]{64}$/),
     windowsAcceptance: [],
-    sbom: { file: "company-opencode-pilot-1.17.18-win-x64.sbom.cdx.json", sha256: expect.any(String) },
+    sbom: { file: "kernexa-1.17.18-win-x64.sbom.cdx.json", sha256: expect.any(String) },
     thirdPartyLicenses: {
-      file: "company-opencode-pilot-1.17.18-win-x64.third-party-licenses.txt",
+      file: "kernexa-1.17.18-win-x64.third-party-licenses.txt",
       sha256: expect.any(String),
     },
   })
