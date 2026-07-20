@@ -2075,6 +2075,18 @@ it.effect("loads enterprise defaults below global, project, and managed settings
         OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+        OPENCODE_ENTERPRISE_PROVIDER_CATALOG: JSON.stringify({
+          schemaVersion: 1,
+          default: { providerID: "company", modelID: "default" },
+          providers: [
+            {
+              id: "company",
+              name: "Company",
+              baseURL: "https://llm.corp.example/v1",
+              models: ["default", "global", "project", "managed"].map((id) => ({ id, name: id })),
+            },
+          ],
+        }),
       },
       Effect.gen(function* () {
         yield* withGlobalConfigDir(
@@ -2268,7 +2280,7 @@ it.effect("prepends the bundled guide before project instructions and deduplicat
   }),
 )
 
-it.effect("allows project provider overrides only on packaged internal origins", () =>
+it.effect("enforces the packaged provider catalog over project provider overrides", () =>
   withConfigTree(
     {
       global: {
@@ -2310,14 +2322,29 @@ it.effect("allows project provider overrides only on packaged internal origins",
       {
         OPENCODE_ENTERPRISE_OFFLINE: "1",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example,https://llm-dr.corp.example",
+        OPENCODE_ENTERPRISE_PROVIDER_CATALOG: JSON.stringify({
+          schemaVersion: 1,
+          default: { providerID: "company", modelID: "default" },
+          providers: [
+            {
+              id: "company",
+              name: "Company",
+              baseURL: "https://llm.corp.example/v1",
+              models: [
+                { id: "default", name: "Default" },
+                { id: "project", name: "Project" },
+              ],
+            },
+          ],
+        }),
       },
       Effect.gen(function* () {
         const config = yield* Config.use.get()
         expect(Object.keys(config.provider ?? {})).toEqual(["company"])
-        expect(config.provider?.company?.options?.baseURL).toBe("https://llm-dr.corp.example/v1")
+        expect(config.provider?.company?.options?.baseURL).toBe("https://llm.corp.example/v1")
         expect(config.provider?.company?.options?.apiKey).toBeUndefined()
         expect(config.provider?.company?.options?.headers).toBeUndefined()
-        expect(config.provider?.company?.models?.project?.name).toBe("Project Model")
+        expect(config.provider?.company?.models?.project?.name).toBe("Project")
         expect(config.enabled_providers).toEqual(["company"])
       }),
     ),

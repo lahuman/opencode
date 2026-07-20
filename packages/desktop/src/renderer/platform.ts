@@ -140,6 +140,7 @@ export function createPlatform(
       }
       return window.api.openPath(path, app)
     },
+    revealPath: (path: string) => window.api.revealPath(path),
 
     back() {
       window.history.back()
@@ -159,9 +160,14 @@ export function createPlatform(
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
 
+    setForceFocus: (enabled) => window.api.setForceFocus(enabled),
+
     recordFatalRendererError: (error) => window.api.recordFatalRendererError(error),
 
-    restart: () => window.api.relaunch(),
+    restart: async () => {
+      await window.api.killSidecar().catch(() => undefined)
+      window.api.relaunch()
+    },
 
     notify: async (title, description, href) => {
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())

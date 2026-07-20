@@ -102,7 +102,7 @@ test("New Session stays editable while Enterprise providers load, then disables 
 }) => {
   await page.goto(fixture("composer-enterprise-empty"))
 
-  const loadingEditor = page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })
+  const loadingEditor = page.getByRole("textbox", { name: "Prompt" })
   await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
   await page.getByRole("button", { name: "Refresh providers" }).click()
   await expect(page.getByRole("button", { name: "Resolve providers" })).toBeEnabled()
@@ -125,7 +125,7 @@ test("New Session stays editable while Enterprise providers load, then disables 
 test("New Session preserves the ordinary composer with an empty provider catalog", async ({ page }) => {
   await page.goto(fixture("composer-ordinary-empty"))
 
-  await expect(page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })).toHaveAttribute(
+  await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveAttribute(
     "contenteditable",
     "true",
   )

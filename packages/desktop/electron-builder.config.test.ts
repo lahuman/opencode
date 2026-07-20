@@ -132,7 +132,7 @@ test("does not consume inherited signing values in the enterprise builder config
 })
 
 test("validates enterprise inputs during direct builder loading", () => {
-  const result = evaluateConfig({ ...enterprise, OPENCODE_ENTERPRISE_BASE_URL: undefined })
+  const result = evaluateConfig({ ...enterprise, OPENCODE_ENTERPRISE_BASE_URL: "not-a-url" })
 
   expect(result.exitCode).not.toBe(0)
   expect(result.stderr).toContain("OPENCODE_ENTERPRISE_BASE_URL")
@@ -164,7 +164,7 @@ function evaluateConfig(env: Record<string, string | undefined> = {}) {
 }
 
 function builderEnvironment(env: Record<string, string | undefined>) {
-  return {
+  return Object.fromEntries(Object.entries({
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     TMPDIR: process.env.TMPDIR,
@@ -179,6 +179,8 @@ function builderEnvironment(env: Record<string, string | undefined>) {
     NO_COLOR: "1",
     OPENCODE_CHANNEL: "dev",
     OPENCODE_ENTERPRISE: "0",
+    OPENCODE_ENTERPRISE_MODELS: "",
+    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
     ...env,
-  }
+  }).filter((entry): entry is [string, string] => entry[1] !== undefined))
 }

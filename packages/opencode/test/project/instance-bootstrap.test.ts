@@ -1,4 +1,4 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, beforeEach, expect } from "bun:test"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -18,6 +18,12 @@ const it = testEffect(
   ]),
 )
 
+const enterpriseOffline = process.env.OPENCODE_ENTERPRISE_OFFLINE
+
+beforeEach(() => {
+  process.env.OPENCODE_ENTERPRISE_OFFLINE = "1"
+})
+
 // InstanceBootstrap must run before any code touches the instance —
 // originally tracked by PRs #25389 and #25449, now a permanent
 // invariant. The plugin config hook writes a marker file; the test
@@ -28,6 +34,8 @@ const it = testEffect(
 
 afterEach(async () => {
   await disposeAllInstances()
+  if (enterpriseOffline === undefined) delete process.env.OPENCODE_ENTERPRISE_OFFLINE
+  else process.env.OPENCODE_ENTERPRISE_OFFLINE = enterpriseOffline
 })
 
 const bootstrapFixture = Effect.gen(function* () {

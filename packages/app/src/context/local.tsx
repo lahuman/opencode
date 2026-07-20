@@ -4,8 +4,10 @@ import { useParams } from "@solidjs/router"
 import { batch, createEffect, createMemo, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
+import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { hasCustomAgent, resolveAgent } from "./local-agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { usePlatform } from "./platform"
 import { useSDK } from "./sdk"
@@ -71,9 +73,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const platform = usePlatform()
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
+    const settings = useSettings()
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+    const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved, , savedReady] = persisted(
@@ -114,9 +118,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       )
 
     const pickAgent = (name: string | undefined) => {
-      const items = list()
-      if (items.length === 0) return
-      return items.find((item) => item.name === name) ?? items[0]
+      return resolveAgent(list(), name)
     }
 
     createEffect(() => {
@@ -185,8 +187,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const agent = {
       list,
+      visible: agentsVisible,
       current() {
-        return pickAgent(scope()?.agent ?? store.current)
+        return pickAgent(agentsVisible() ? (scope()?.agent ?? store.current) : "build")
       },
       set(name: string | undefined) {
         const item = pickAgent(name)

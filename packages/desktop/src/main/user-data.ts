@@ -1,4 +1,4 @@
-import { join, win32 } from "node:path"
+import { posix, win32 } from "node:path"
 
 const ENTERPRISE_WINDOWS_USER_DATA_ID = "com.company.kernexa"
 
@@ -16,5 +16,5 @@ export function resolveDesktopUserDataPath(input: {
     return win32.join(input.localAppData, ENTERPRISE_WINDOWS_USER_DATA_ID)
   }
   if (input.platform === "win32") return win32.join(input.appData(), input.appId)
-  return join(input.appData(), input.appId)
+  return posix.join(input.appData(), input.appId)
 }

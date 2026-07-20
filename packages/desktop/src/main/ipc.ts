@@ -15,6 +15,7 @@ import { createEnterpriseURLHandler, type EnterpriseProfile } from "../enterpris
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { readEnterpriseGuide } from "./enterprise-guide"
 import { parseEnterpriseProviderDiagnostic } from "./enterprise-readiness"
+import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
@@ -123,6 +124,9 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("updater-install", () => deps.updater.install())
   registry.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
   registry.handle("export-debug-logs", () => deps.exportDebugLogs())
+  registry.handle("set-force-focus", (event: IpcMainInvokeEvent, enabled: boolean) =>
+    setForceFocus(event.sender, enabled),
+  )
   registry.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
