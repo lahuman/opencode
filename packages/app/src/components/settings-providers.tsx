@@ -43,7 +43,14 @@ function SettingsCompanyProvider() {
   const dialog = useDialog()
   const language = useLanguage()
   const company = useCompanyProviderSettingsState()
-  const model = () => company.defaultModel()?.name ?? "No configured model"
+  const providerCount = () =>
+    `${company.providers().length} ${company.providers().length === 1 ? "provider" : "providers"}`
+  const defaultPair = () => {
+    const provider = company.defaultProvider()
+    const model = company.defaultModel()
+    if (!provider || !model) return "No default provider / model"
+    return `${provider.name} / ${model.name}`
+  }
 
   return (
     <div class="flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10">
@@ -56,9 +63,10 @@ function SettingsCompanyProvider() {
         <SettingsList>
           <div class="flex min-h-16 flex-wrap items-center justify-between gap-4 py-3">
             <div class="flex min-w-0 flex-col gap-1">
-              <span class="text-14-medium text-text-strong">Company LLM</span>
+              <span class="text-14-medium text-text-strong">Enterprise providers</span>
               <div class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-12-regular text-text-weak">
-                <span class="truncate">{model()}</span>
+                <span>{providerCount()}</span>
+                <span class="truncate">{defaultPair()}</span>
                 <span role="status" aria-live="polite" aria-atomic="true">
                   {company.status()}
                 </span>
@@ -70,12 +78,12 @@ function SettingsCompanyProvider() {
                 variant="secondary"
                 onClick={() => dialog.show(() => <DialogCompanyProvider />, company.refreshStatus)}
               >
-                Configure
+                Manage providers
               </Button>
               <Button
                 size="small"
                 variant="secondary"
-                disabled={company.checking() || !company.defaultModel()?.synchronized}
+                disabled={company.checking() || !company.defaultProvider() || !company.defaultModel()}
                 onClick={company.testConnection}
               >
                 {company.checking() ? "Testing..." : "Test connection"}

@@ -18,6 +18,11 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { createDialogFocusManager } from "./dialog-focus"
 
 type DialogElement = () => JSX.Element
+type DialogLayer = {
+  registerCloseGuard(guard: () => boolean): () => void
+}
+
+const LayerContext = createContext<DialogLayer>()
 
 type Active = {
   id: string
@@ -25,6 +30,7 @@ type Active = {
   dispose: () => void
   owner: Owner
   onClose?: () => void
+  canClose: () => boolean
   setClosing: (closing: boolean) => void
 }
 
@@ -48,7 +54,7 @@ function init() {
   const close = (id?: string) => {
     const items = stack()
     const current = id ? items.find((item) => item.id === id) : items.at(-1)
-    if (!current || lock.value) return
+    if (!current || lock.value || !current.canClose()) return
     lock.value = true
     current.onClose?.()
     current.setClosing(true)
@@ -88,6 +94,15 @@ function init() {
     const zIndex = 50 + layer * 10
     let dispose: (() => void) | undefined
     let setClosing: ((closing: boolean) => void) | undefined
+    const guard = { current: undefined as (() => boolean) | undefined }
+    const dialogLayer: DialogLayer = {
+      registerCloseGuard(value) {
+        guard.current = value
+        return () => {
+          if (guard.current === value) guard.current = undefined
+        }
+      },
+    }
 
     const node = runWithOwner(owner, () =>
       createRoot((d: () => void) => {
@@ -95,43 +110,45 @@ function init() {
         const [closing, setClosingSignal] = createSignal(false)
         setClosing = setClosingSignal
         return (
-          <Kobalte
-            modal
-            open={!closing()}
-            onOpenChange={(open: boolean) => {
-              if (open) return
-              close(id)
-            }}
-          >
-            <Kobalte.Portal>
-              <Kobalte.Overlay
-                data-component="dialog-overlay"
-                style={{ "z-index": String(zIndex) }}
-                onClick={() => close(id)}
-              />
-              <div
-                data-dialog-layer={layer}
-                style={{
-                  position: "fixed",
-                  inset: "0",
-                  "z-index": String(zIndex),
-                  display: "flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  "pointer-events": "none",
-                }}
-              >
-                {element()}
-              </div>
-            </Kobalte.Portal>
-          </Kobalte>
+          <LayerContext.Provider value={dialogLayer}>
+            <Kobalte
+              modal
+              open={!closing()}
+              onOpenChange={(open: boolean) => {
+                if (open) return
+                close(id)
+              }}
+            >
+              <Kobalte.Portal>
+                <Kobalte.Overlay
+                  data-component="dialog-overlay"
+                  style={{ "z-index": String(zIndex) }}
+                  onClick={() => close(id)}
+                />
+                <div
+                  data-dialog-layer={layer}
+                  style={{
+                    position: "fixed",
+                    inset: "0",
+                    "z-index": String(zIndex),
+                    display: "flex",
+                    "align-items": "center",
+                    "justify-content": "center",
+                    "pointer-events": "none",
+                  }}
+                >
+                  {element()}
+                </div>
+              </Kobalte.Portal>
+            </Kobalte>
+          </LayerContext.Provider>
         )
       }),
     )
 
     if (!dispose || !setClosing) return
 
-    const active: Active = { id, node, dispose, owner, onClose, setClosing }
+    const active: Active = { id, node, dispose, owner, onClose, setClosing, canClose: () => guard.current?.() ?? true }
     setStack((items) => [...items, active])
   }
 
@@ -202,4 +219,8 @@ export function useDialog() {
       ctx.close()
     },
   }
+}
+
+export function useDialogLayer() {
+  return useContext(LayerContext)
 }

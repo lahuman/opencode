@@ -85,11 +85,11 @@ test("mounted management controller rejects before storage, navigation, probes, 
   await expect(page.getByTestId("controller-close-calls")).toHaveText("0")
 })
 
-test("DialogConnectProvider diverts enterprise mode directly to Company LLM", async ({ page }) => {
+test("DialogConnectProvider diverts enterprise mode directly to provider management", async ({ page }) => {
   await page.goto(fixture("connect"))
 
-  await expect(page.getByRole("dialog")).toContainText("Company LLM")
-  await expect(page.getByLabel("API key")).toBeVisible()
+  await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeVisible()
   await expect(page.locator("[data-component=list]")).toHaveCount(0)
   await expect(page.getByText("Custom provider", { exact: true })).toHaveCount(0)
 
@@ -97,151 +97,305 @@ test("DialogConnectProvider diverts enterprise mode directly to Company LLM", as
   expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
 })
 
-test("DialogCompanyProvider keeps credentials local and drives generated diagnostics accessibly", async ({ page }) => {
+test("New Session stays editable while Enterprise providers load, then disables for an empty catalog", async ({
+  page,
+}) => {
+  await page.goto(fixture("composer-enterprise-empty"))
+
+  const loadingEditor = page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })
+  await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
+  await page.getByRole("button", { name: "Refresh providers" }).click()
+  await expect(page.getByRole("button", { name: "Resolve providers" })).toBeEnabled()
+  await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
+  await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Resolve providers" }).click()
+
+  const emptyEditor = page.getByRole("textbox", { name: "Add a provider and model to start chatting" })
+  await expect(emptyEditor).toHaveAttribute("contenteditable", "false")
+  await expect(emptyEditor).toHaveAttribute("aria-disabled", "true")
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled()
+
+  await page
+    .getByRole("button", { name: "Manage providers" })
+    .evaluate((node: HTMLButtonElement) => node.click())
+  await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
+})
+
+test("New Session preserves the ordinary composer with an empty provider catalog", async ({ page }) => {
+  await page.goto(fixture("composer-ordinary-empty"))
+
+  await expect(page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })).toHaveAttribute(
+    "contenteditable",
+    "true",
+  )
+  await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
+})
+
+test("DialogCompanyProvider manages provider, model, credentials, defaults, diagnostics, and deletion", async ({
+  page,
+}) => {
   await page.goto(fixture("company"))
   const dialog = page.getByRole("dialog")
-  const apiKey = page.getByLabel("API key")
-  const headerName = page.getByPlaceholder("Header name")
-  const headerValue = page.getByPlaceholder("Secret value")
   const status = dialog.locator('[data-slot="company-diagnostic-status"]')
-  const codeModel = page.getByTestId("company-model-company-code")
-  const reasoningModel = page.getByTestId("company-model-company-reasoning")
+  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "Create provider" }).click()
+  await page.getByLabel("Provider ID").fill("gateway")
+  await page.getByLabel("Provider name").fill("Gateway")
+  await page.getByLabel("Base URL").fill("https://gateway.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
 
-  await expect(dialog).toContainText("Credentials not configured")
-  await expect(codeModel).toContainText("Company Code")
-  await expect(codeModel).toContainText("company-code")
-  await expect(codeModel).toContainText("https://llm.company.test/v1")
-  await expect(codeModel).toContainText("Default")
-  await expect(codeModel).toContainText("Credentials not configured")
-  await expect(reasoningModel).toContainText("Company Reasoning")
-  await expect(reasoningModel).toContainText("https://reasoning.company.test/v1")
-  await expect(reasoningModel).toContainText("Credentials not configured")
-  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
-  await expect.poll(() => output<number>(page, "credential-catalog-calls")).toBeGreaterThan(0)
-  await expect(status).toHaveAttribute("role", "status")
-  await expect(status).toHaveAttribute("aria-live", "polite")
-  await expect(status).toHaveText("Ready to test Company LLM connection")
+  const provider = page.getByTestId("enterprise-provider-gateway")
+  await expect(provider).toContainText("Gateway")
+  await expect(provider).toContainText("https://gateway.example/v1")
+  await expect(provider).toContainText("0 models")
+  await expect(provider).toContainText("Credentials not configured")
 
-  await apiKey.fill(" secret ")
-  await headerName.fill(" X-Token ")
-  await headerValue.fill(" value ")
-  await dialog.getByRole("button", { name: "Save" }).click()
-  await expect.poll(() => output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
+  await dialog.getByRole("button", { name: "Add model" }).click()
+  await page.getByLabel("Model ID").fill("chat")
+  await page.getByLabel("Model name").fill("Chat")
+  await dialog.getByRole("button", { name: "Save model" }).click()
+  await dialog.getByRole("button", { name: "Add model" }).click()
+  await page.getByLabel("Model ID").fill("reasoning")
+  await page.getByLabel("Model name").fill("Reasoning")
+  await dialog.getByRole("button", { name: "Save model" }).click()
+
+  const chat = page.getByTestId("enterprise-model-gateway-chat")
+  const reasoning = page.getByTestId("enterprise-model-gateway-reasoning")
+  await expect(chat).toBeVisible()
+  await expect(reasoning).toBeVisible()
+  await dialog.getByRole("button", { name: "Set default" }).click()
+  await expect(reasoning).toContainText("Default")
+
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await expect(page.getByLabel("Provider ID")).toBeDisabled()
+  await page.getByLabel("Credential action").selectOption("replace")
+  await page.getByLabel("API key").fill("top-secret-api-key")
+  await page.getByPlaceholder("Header name").fill("X-Token")
+  await page.getByPlaceholder("Secret value").fill("top-secret-header")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(provider).toContainText("Credentials configured")
+  await expect(dialog).not.toContainText("top-secret-api-key")
+  await expect(dialog).not.toContainText("top-secret-header")
   expect(await output<unknown[]>(page, "credential-inputs")).toEqual([
-    { modelID: "company-code", apiKey: "secret", headers: { "X-Token": "value" } },
+    { providerID: "gateway", hasApiKey: true, headerNames: ["X-Token"] },
   ])
-  expect(await output<unknown[]>(page, "restart-snapshots")).toEqual([["", "", ""]])
 
-  await invokeFixtureControl(page, "Credentials no restart")
-  await apiKey.fill("second")
-  await dialog.getByRole("button", { name: "Save" }).click()
-  await expect.poll(() => output<unknown[]>(page, "credential-inputs")).toHaveLength(2)
-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await expect(page.getByLabel("Provider ID")).toBeDisabled()
+  await page.getByLabel("Credential action").selectOption("replace")
+  await expect(page.getByLabel("API key")).toHaveValue("")
+  await expect(page.getByPlaceholder("Header name")).toHaveValue("")
+  await expect(page.getByPlaceholder("Secret value")).toHaveValue("")
+  await dialog.getByRole("button", { name: "Cancel edit" }).click()
 
   await invokeFixtureControl(page, "Credentials error")
-  await apiKey.fill("keep-local")
-  await dialog.getByRole("button", { name: "Save" }).click()
-  await expect(dialog.getByRole("alert")).toBeVisible()
-  await expect(apiKey).toHaveValue("keep-local")
-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await page.getByLabel("Provider name").fill("Gateway Replace Reconciled")
+  await page.getByLabel("Credential action").selectOption("replace")
+  await page.getByLabel("API key").fill("failed-replacement-secret")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(dialog.getByRole("alert")).toContainText("Request failed")
+  await expect(provider).toContainText("Gateway")
+  await expect(provider).not.toContainText("Gateway Replace Reconciled")
+  await expect(provider).toContainText("Credentials configured")
+  await expect(dialog).not.toContainText("failed-replacement-secret")
+  await dialog.getByRole("button", { name: "Dismiss error" }).click()
 
+  await invokeFixtureControl(page, "Credentials error")
+  await page.getByLabel("Provider name").fill("Gateway Clear Reconciled")
+  await page.getByLabel("Credential action").selectOption("clear")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(dialog.getByRole("alert")).toContainText("Request failed")
+  await expect(provider).not.toContainText("Gateway Clear Reconciled")
+  await dialog.getByRole("button", { name: "Dismiss error" }).click()
+  await invokeFixtureControl(page, "Credentials no restart")
+  await page.getByLabel("Credential action").selectOption("clear")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(provider).toContainText("Gateway Clear Reconciled")
+  await expect(provider).toContainText("Credentials not configured")
+  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
+  expect(await output<unknown[]>(page, "standalone-credential-inputs")).toEqual([])
+  expect(await output<unknown[]>(page, "provider-update-inputs")).toEqual([
+    {
+      providerID: "gateway",
+      name: "Gateway",
+      hasApiKey: true,
+      headerNames: ["X-Token"],
+      clearCredentials: false,
+    },
+    {
+      providerID: "gateway",
+      name: "Gateway Replace Reconciled",
+      hasApiKey: true,
+      headerNames: [],
+      clearCredentials: false,
+    },
+    {
+      providerID: "gateway",
+      name: "Gateway Clear Reconciled",
+      hasApiKey: false,
+      headerNames: [],
+      clearCredentials: true,
+    },
+    {
+      providerID: "gateway",
+      name: "Gateway Clear Reconciled",
+      hasApiKey: false,
+      headerNames: [],
+      clearCredentials: true,
+    },
+  ])
+
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await expect(page.getByLabel("Provider ID")).toBeDisabled()
+  await page.getByLabel("Provider name").fill("Gateway Updated")
+  await page.getByLabel("Base URL").fill("https://gateway-updated.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(provider).toContainText("Gateway Updated")
+  await expect(provider).toContainText("https://gateway-updated.example/v1")
+
+  await reasoning.click()
+  await dialog.getByRole("button", { name: "Edit model" }).click()
+  await expect(page.getByLabel("Model ID")).toBeDisabled()
+  await page.getByLabel("Model name").fill("Reasoning Updated")
+  await dialog.getByRole("button", { name: "Save model" }).click()
   await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(status).toHaveText("Testing Company LLM connection")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+  await expect(status).toHaveText("Testing Gateway Updated / Reasoning Updated connection")
   await invokeFixtureControl(page, "Resolve diagnostic")
-  await expect(status).toHaveText("Company LLM connection test completed successfully")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).not.toHaveAttribute("role")
+  await expect(status).toHaveText("Gateway Updated / Reasoning Updated connection test completed successfully")
 
-  await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(status).toHaveText("Testing Company LLM connection")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
-  await invokeFixtureControl(page, "Resolve diagnostic")
-  await expect(status).toHaveText("Company LLM connection test completed successfully")
-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveCount(1)
+  await dialog.getByRole("button", { name: "Delete model" }).click()
+  await expect(dialog).toContainText("Conversation history remains available")
+  await dialog.getByRole("button", { name: "Confirm delete model" }).click()
+  await expect(reasoning).toHaveCount(0)
+  await expect(chat).toContainText("Default")
 
-  await invokeFixtureControl(page, "Diagnostic failure")
-  await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(status).toHaveText("Testing Company LLM connection")
-  await invokeFixtureControl(page, "Resolve diagnostic")
-  const failure = dialog.locator('[data-slot="company-diagnostic-result"]')
-  await expect(failure).toHaveAttribute("role", "alert")
-  await expect(failure.getByText("Failure (connection)", { exact: true })).toBeVisible()
-  await expect(failure.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
-  await expect(status).toHaveText("")
-
-  await invokeFixtureControl(page, "Diagnostic network error")
-  await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(failure.getByText("Request failed", { exact: true })).toBeVisible()
-  await expect(failure).not.toContainText("transport failure with private detail")
-
-  const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
-    (request) => request.path === "/provider/company-llm/diagnostics",
-  )
-  expect(diagnostics).toEqual(Array.from({ length: 4 }, () => diagnosticRequest))
-  const requests = await output<Array<{ path: string }>>(page, "requests")
-  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
+  await dialog.getByRole("button", { name: "Delete provider" }).click()
+  await expect(dialog).toContainText("All models and credentials for this provider will be removed")
+  await dialog.getByRole("button", { name: "Confirm delete provider" }).click()
+  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
+  await expect(provider).toHaveCount(0)
 })
 
-test("DialogCompanyProvider clears model-scoped secrets and diagnostics when switching models", async ({ page }) => {
+test("provider recovery failure keeps its code and shows restart guidance", async ({ page }) => {
   await page.goto(fixture("company"))
   const dialog = page.getByRole("dialog")
-  const apiKey = page.getByLabel("API key")
-  const headerName = page.getByPlaceholder("Header name")
-  const headerValue = page.getByPlaceholder("Secret value")
+  await dialog.getByRole("button", { name: "Create provider" }).click()
+  await page.getByLabel("Provider ID").fill("recovery")
+  await page.getByLabel("Provider name").fill("Recovery")
+  await page.getByLabel("Base URL").fill("https://recovery.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
 
-  await expect(page.getByLabel("Base URL")).toHaveValue("https://llm.company.test/v1")
-  await apiKey.fill("code-secret")
-  await headerName.fill("X-Code-Token")
-  await headerValue.fill("code-header")
-  await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(page.getByTestId("company-model-company-code")).toBeDisabled()
-  await expect(page.getByTestId("company-model-company-reasoning")).toBeDisabled()
-  await invokeFixtureControl(page, "Resolve diagnostic")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toBeVisible()
+  await invokeFixtureControl(page, "Credentials recovery failure")
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await page.getByLabel("Provider name").fill("Must Roll Back")
+  await page.getByLabel("Credential action").selectOption("replace")
+  await page.getByLabel("API key").fill("recovery-secret")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
 
-  await page.getByTestId("company-model-company-reasoning").click()
-
-  await expect(apiKey).toHaveValue("")
-  await expect(headerName).toHaveValue("")
-  await expect(headerValue).toHaveValue("")
-  await expect(page.getByLabel("Base URL")).toHaveValue("https://reasoning.company.test/v1")
-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveText(
-    "Ready to test Company LLM connection",
+  await expect(dialog.getByRole("alert")).toContainText(
+    "The local server and rollback both failed. Restart the app to recover.",
   )
-
-  await invokeFixtureControl(page, "Credentials no restart")
-  await apiKey.fill("reasoning-secret")
-  await dialog.getByRole("button", { name: "Save" }).click()
-  await expect
-    .poll(() => output<unknown[]>(page, "credential-inputs"))
-    .toContainEqual({
-      modelID: "company-reasoning",
-      apiKey: "reasoning-secret",
-    })
-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials configured")
-  await dialog.getByRole("button", { name: "Clear credentials" }).click()
-  await expect.poll(() => output<string[]>(page, "credential-clear-inputs")).toEqual(["company-reasoning"])
-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials not configured")
+  await expect(page.getByTestId("enterprise-provider-recovery")).not.toContainText("Must Roll Back")
+  await expect(dialog).not.toContainText("recovery-secret")
 })
 
-test("DialogCompanyProvider blocks models until desktop and sidecar catalogs are synchronized", async ({ page }) => {
-  await page.goto(fixture("company-mismatch"))
+test("pending provider mutations lock every dialog close path", async ({ page }) => {
+  await page.goto(fixture("company"))
   const dialog = page.getByRole("dialog")
-  const pending = page.getByTestId("company-model-pending-model")
+  await dialog.getByRole("button", { name: "Create provider" }).click()
+  await page.getByLabel("Provider ID").fill("pending")
+  await page.getByLabel("Provider name").fill("Pending")
+  await page.getByLabel("Base URL").fill("https://pending.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await invokeFixtureControl(page, "Credentials pending")
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await page.getByLabel("Credential action").selectOption("replace")
+  await page.getByLabel("API key").fill("pending-secret")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await expect(
+    page.getByTestId("company-controls").locator("button").filter({ hasText: "Resolve credentials" }),
+  ).toBeEnabled()
 
-  await expect(dialog.getByRole("alert")).toContainText("Restart the desktop app")
-  await expect(pending).toContainText("Pending Model")
-  await expect(pending).toContainText("https://pending.company.test/v1")
-  await expect(pending).toContainText("Restart required")
-  await pending.click()
-  await expect(page.getByLabel("API key")).toBeDisabled()
-  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled()
-  await expect(dialog.getByRole("button", { name: "Test connection" })).toBeDisabled()
-  await expect(dialog.getByRole("button", { name: "Clear credentials" })).toBeDisabled()
-  expect(await output<unknown[]>(page, "credential-inputs")).toEqual([])
-  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
+  const headerClose = dialog.locator('[data-slot="dialog-close-button"]')
+  const footerClose = dialog.locator('[data-slot="dialog-body"]').getByRole("button", { name: "Close" })
+  await expect(headerClose).toBeDisabled()
+  await expect(footerClose).toBeDisabled()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeVisible()
+  await page.locator('[data-component="dialog-overlay"]').click({ force: true })
+  await expect(dialog).toBeVisible()
+
+  await invokeFixtureControl(page, "Resolve credentials")
+  await expect(headerClose).toBeEnabled()
+  await expect(footerClose).toBeEnabled()
+  await expect(dialog).not.toContainText("pending-secret")
 })
+
+test("delete confirmation is an accessible modal interaction within provider management", async ({ page }) => {
+  await page.goto(fixture("company"))
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("button", { name: "Create provider" }).click()
+  await page.getByLabel("Provider ID").fill("confirm")
+  await page.getByLabel("Provider name").fill("Confirm")
+  await page.getByLabel("Base URL").fill("https://confirm.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+  await dialog.getByRole("button", { name: "Add model" }).click()
+  await page.getByLabel("Model ID").fill("code")
+  await page.getByLabel("Model name").fill("Code")
+  await dialog.getByRole("button", { name: "Save model" }).click()
+
+  await dialog.getByRole("button", { name: "Test connection" }).click()
+  await invokeFixtureControl(page, "Resolve diagnostic")
+  const readiness = dialog.getByText(/Offline readiness:/)
+  await expect(readiness).toBeVisible()
+
+  await dialog.getByRole("button", { name: "Edit model" }).click()
+  await page.getByLabel("Model name").fill("")
+  await dialog.getByRole("button", { name: "Save model" }).click()
+  const dismissError = dialog.getByRole("button", { name: "Dismiss error" })
+  await expect(dismissError).toBeVisible()
+  await dialog.getByRole("button", { name: "Cancel edit" }).click()
+
+  const deleteModel = dialog.getByRole("button", { name: "Delete model" })
+  await deleteModel.click()
+  const confirmation = dialog.getByRole("alertdialog", { name: "Delete model Code" })
+  const confirm = confirmation.getByRole("button", { name: "Confirm delete model" })
+  await expect(confirmation).toHaveAttribute("aria-describedby", "enterprise-delete-description")
+  await expect(confirm).toBeFocused()
+  await expect(page.getByTestId("enterprise-provider-confirm")).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "Add model" })).toBeDisabled()
+  await expect(dialog.locator('[data-slot="dialog-close-button"]')).toBeDisabled()
+  await expect(dismissError).toBeDisabled()
+  await expect(readiness).toHaveAttribute("tabindex", "-1")
+  const cancel = confirmation.getByRole("button", { name: "Cancel delete" })
+  await page.keyboard.press("Shift+Tab")
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(confirm).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(dialog).toBeVisible()
+  await expect(confirmation).toBeVisible()
+
+  await cancel.click()
+  await expect(confirmation).toHaveCount(0)
+  await expect(deleteModel).toBeFocused()
+})
+
+for (const scenario of ["settings-layout", "settings-v2-layout"]) {
+  test(`${scenario} summarizes the Enterprise catalog and opens provider management`, async ({ page }) => {
+    await page.goto(fixture(scenario))
+
+    await expect(page.getByText("1 provider", { exact: true })).toBeVisible()
+    await expect(page.getByText("Company LLM / Company Code", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled()
+    await page.getByRole("button", { name: "Manage providers" }).click()
+    await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
+  })
+}
 
 test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
   await page.goto(fixture("settings"))
@@ -270,7 +424,7 @@ test("settings success toast creates its icon inside the Solid render owner", as
   await page.getByRole("button", { name: "Settings test connection" }).click()
   await invokeFixtureControl(page, "Resolve diagnostic")
 
-  await expect(page.getByText("Company LLM connection succeeded", { exact: true })).toBeVisible()
+  await expect(page.getByText("Enterprise provider connection succeeded", { exact: true })).toBeVisible()
   expect(warnings.filter((warning) => warning.includes("cleanups created outside"))).toEqual([])
 })
 
@@ -376,68 +530,17 @@ responsiveViewports.forEach((viewport) => {
     await expect(dialog).toBeHidden()
   })
 
-  test(`Company LLM dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
+  test(`Enterprise provider dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(fixture("company"))
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible()
     await page.getByTestId("company-controls").evaluate((node) => node.setAttribute("hidden", ""))
-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}.png`) })
-    await invokeFixtureControl(page, "Diagnostic failure")
-    await dialog.getByRole("button", { name: "Test connection" }).click()
-    await invokeFixtureControl(page, "Resolve diagnostic")
-    const remediation = dialog.getByText(SAFE_REMEDIATION, { exact: true })
-    const remediationVisible = () =>
-      remediation.evaluate((node) => {
-        const content = node.closest('[role="dialog"]')?.getBoundingClientRect()
-        const value = node.getBoundingClientRect()
-        return Boolean(content && value.top >= content.top && value.bottom <= content.bottom)
-      })
-    if (!(await remediationVisible())) await remediation.scrollIntoViewIfNeeded()
-    expect(await remediationVisible()).toBe(true)
-    const rows = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
-      const children = [...node.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
-      return Array.from({ length: children.length / 2 }, (_, index) => {
-        const label = children[index * 2]
-        const value = children[index * 2 + 1]
-        const textRects = (element: HTMLElement) => {
-          const range = document.createRange()
-          range.selectNodeContents(element)
-          return [...range.getClientRects()].map((rect) => ({
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            left: rect.left,
-          }))
-        }
-        const labelRects = textRects(label)
-        const valueRects = textRects(value)
-        const sharedLines = labelRects.flatMap((labelRect) =>
-          valueRects
-            .filter((valueRect) => labelRect.top < valueRect.bottom && labelRect.bottom > valueRect.top)
-            .map((valueRect) => valueRect.left - labelRect.right),
-        )
-        return {
-          label: label.textContent,
-          value: value.textContent,
-          labelOverflows: label.scrollWidth > label.clientWidth,
-          valueOverflows: value.scrollWidth > value.clientWidth,
-          textIntersects: sharedLines.some((gap) => gap < 0),
-          sharedLineGap: sharedLines.length ? Math.min(...sharedLines) : undefined,
-        }
-      })
-    })
-    expect(rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "Basic response", value: "fail" }),
-        expect.objectContaining({ label: "Streaming", value: "skipped" }),
-        expect.objectContaining({ label: "Tool calling", value: "skipped" }),
-        expect.objectContaining({ label: "Failure (connection)", value: SAFE_REMEDIATION }),
-      ]),
-    )
-    expect(rows.every((row) => !row.labelOverflows && !row.valueOverflows)).toBe(true)
-    expect(rows.every((row) => !row.textIntersects)).toBe(true)
-    expect(rows.every((row) => row.sharedLineGap === undefined || row.sharedLineGap >= 8)).toBe(true)
+    await dialog.getByRole("button", { name: "Create provider" }).click()
+    await page.getByLabel("Provider ID").fill("compact-gateway")
+    await page.getByLabel("Provider name").fill("Compact Gateway")
+    await page.getByLabel("Base URL").fill("https://gateway.example/v1")
+    await expect(dialog.getByRole("button", { name: "Save provider" })).toBeVisible()
 
     const box = await dialog.boundingBox()
     expect(box).not.toBeNull()
@@ -448,10 +551,9 @@ responsiveViewports.forEach((viewport) => {
     expect(
       await dialog.evaluate((node) => ({
         horizontal: node.scrollWidth > node.clientWidth,
-        vertical: node.scrollHeight > node.clientHeight,
       })),
-    ).toEqual({ horizontal: false, vertical: false })
+    ).toEqual({ horizontal: false })
 
-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}-failure.png`) })
+    await page.screenshot({ path: testInfo.outputPath(`enterprise-providers-${viewport.name}.png`) })
   })
 })

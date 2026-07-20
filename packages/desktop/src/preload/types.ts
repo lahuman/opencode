@@ -1,6 +1,19 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { EnterpriseProviderAPI } from "../main/enterprise-provider-runtime"
+export type {
+  CredentialReplacement,
+  EnterpriseProviderAPI,
+  EnterpriseProviderCatalogView,
+  EnterpriseProviderErrorCode,
+} from "../main/enterprise-provider-runtime"
+export type {
+  EnterpriseModelRef,
+  EnterpriseProvider,
+  EnterpriseProviderCatalog,
+  EnterpriseProviderModel,
+} from "../main/enterprise-providers"
 export type {
   WslDistroProbe,
   WslInstalledDistro,
@@ -50,18 +63,6 @@ export type EnterpriseProviderDiagnostic = {
   }
   failure?: { kind: string; message: string }
 }
-export type EnterpriseCredentialCatalog = {
-  defaultModelID: string
-  models: {
-    id: string
-    name: string
-    baseURL: string
-    credentialStatus: {
-      configured: boolean
-      errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
-    }
-  }[]
-}
 export type EnterpriseReadinessReport = {
   schemaVersion: 1
   generatedAt: string
@@ -90,16 +91,8 @@ export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
   awaitInitialization: () => Promise<ServerReadyData>
-  enterprise: {
+  enterprise: EnterpriseProviderAPI & {
     enabled: boolean
-    credentialCatalog: () => Promise<EnterpriseCredentialCatalog>
-    credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: {
-      modelID: string
-      apiKey?: string
-      headers?: Record<string, string>
-    }) => Promise<{ restartRequired: boolean }>
-    clearCredentials: (modelID: string) => Promise<{ restartRequired: boolean }>
     readGuide: () => Promise<{ version: string; markdown: string }>
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<EnterpriseReadinessReport>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
@@ -174,16 +167,47 @@ export function createEnterpriseAPI(
   enabled: boolean,
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
 ): ElectronAPI["enterprise"] {
+  const provider = <T>(channel: string, ...args: unknown[]) =>
+    invoke(channel, ...args).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      const code = (
+        [
+          "restart_failed_rolled_back",
+          "restart_failed_recovery_failed",
+          "credential_decryption_failed",
+          "credential_encryption_unavailable",
+          "credential_provider_not_configured",
+        ] as const
+      ).find((item) => message.includes(item))
+      if (!code) throw error
+      throw Object.assign(new Error(code), { code })
+    }) as Promise<T>
   return {
     enabled,
-    credentialCatalog: () =>
-      invoke("enterprise-credential-catalog") as ReturnType<ElectronAPI["enterprise"]["credentialCatalog"]>,
-    credentialStatus: (modelID) =>
-      invoke("enterprise-credential-status", modelID) as ReturnType<ElectronAPI["enterprise"]["credentialStatus"]>,
-    setCredentials: (input) =>
-      invoke("enterprise-set-credentials", input) as ReturnType<ElectronAPI["enterprise"]["setCredentials"]>,
-    clearCredentials: (modelID) =>
-      invoke("enterprise-clear-credentials", modelID) as ReturnType<ElectronAPI["enterprise"]["clearCredentials"]>,
+    providerCatalog: () =>
+      provider("enterprise-provider-catalog") as ReturnType<ElectronAPI["enterprise"]["providerCatalog"]>,
+    createProvider: (input) =>
+      provider("enterprise-provider-create", input) as ReturnType<ElectronAPI["enterprise"]["createProvider"]>,
+    updateProvider: (input) =>
+      provider("enterprise-provider-update", input) as ReturnType<ElectronAPI["enterprise"]["updateProvider"]>,
+    deleteProvider: (providerID) =>
+      provider("enterprise-provider-delete", providerID) as ReturnType<ElectronAPI["enterprise"]["deleteProvider"]>,
+    createModel: (input) =>
+      provider("enterprise-model-create", input) as ReturnType<ElectronAPI["enterprise"]["createModel"]>,
+    updateModel: (input) =>
+      provider("enterprise-model-update", input) as ReturnType<ElectronAPI["enterprise"]["updateModel"]>,
+    deleteModel: (input) =>
+      provider("enterprise-model-delete", input) as ReturnType<ElectronAPI["enterprise"]["deleteModel"]>,
+    setDefaultModel: (input) =>
+      provider("enterprise-model-default", input) as ReturnType<ElectronAPI["enterprise"]["setDefaultModel"]>,
+    replaceProviderCredentials: (input) =>
+      provider("enterprise-provider-credentials-replace", input) as ReturnType<
+        ElectronAPI["enterprise"]["replaceProviderCredentials"]
+      >,
+    clearProviderCredentials: (providerID) =>
+      provider("enterprise-provider-credentials-clear", providerID) as ReturnType<
+        ElectronAPI["enterprise"]["clearProviderCredentials"]
+      >,
     readGuide: () => invoke("enterprise-guide-read") as ReturnType<ElectronAPI["enterprise"]["readGuide"]>,
     readiness: (provider) =>
       invoke("enterprise-readiness", provider) as ReturnType<ElectronAPI["enterprise"]["readiness"]>,
@@ -202,10 +226,16 @@ export function createEnterpriseAPI(
 
 export function mapEnterpriseAPI(enterprise: ElectronAPI["enterprise"]) {
   return {
-    credentialCatalog: enterprise.credentialCatalog,
-    credentialStatus: enterprise.credentialStatus,
-    setCredentials: enterprise.setCredentials,
-    clearCredentials: enterprise.clearCredentials,
+    providerCatalog: enterprise.providerCatalog,
+    createProvider: enterprise.createProvider,
+    updateProvider: enterprise.updateProvider,
+    deleteProvider: enterprise.deleteProvider,
+    createModel: enterprise.createModel,
+    updateModel: enterprise.updateModel,
+    deleteModel: enterprise.deleteModel,
+    setDefaultModel: enterprise.setDefaultModel,
+    replaceProviderCredentials: enterprise.replaceProviderCredentials,
+    clearProviderCredentials: enterprise.clearProviderCredentials,
     readGuide: enterprise.readGuide,
     readiness: enterprise.readiness,
     stateBackups: enterprise.stateBackups,

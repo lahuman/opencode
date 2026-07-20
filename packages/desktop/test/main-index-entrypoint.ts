@@ -1,9 +1,12 @@
 import { mock } from "bun:test"
+import { mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const mode = process.argv[2] ?? "enterprise"
-const enterprise = mode === "enterprise" || mode === "enterprise-credential-restart"
+const unhealthyCredentials =
+  mode === "enterprise-credentials-corrupt" || mode === "enterprise-credentials-unavailable"
+const enterprise = mode === "enterprise" || mode === "enterprise-provider-restart" || unhealthyCredentials
 Object.assign(process.env, {
   OPENCODE_CHANNEL: "prod",
   OPENCODE_ENTERPRISE: enterprise ? "1" : "0",
@@ -28,10 +31,59 @@ let stateHealthy = 0
 let sidecarStarts = 0
 let sidecarStops = 0
 let relaunches = 0
+const sidecarStates: {
+  default?: { providerID: string; modelID: string }
+  providers: string[]
+  credentialProviders: string[]
+}[] = []
 let appName = "Electron"
 let appUserModelId = ""
 const appData = join(tmpdir(), "opencode-main-index-app-data")
 process.env.LOCALAPPDATA = appData
+const userData = join(
+  appData,
+  enterprise ? "com.company.kernexa" : mode === "ordinary-unpackaged" ? "ai.opencode.desktop.dev" : "ai.opencode.desktop",
+)
+rmSync(userData, {
+  recursive: true,
+  force: true,
+})
+const credentialFile = join(userData, "enterprise-credentials.bin")
+const credentialTimestamp = new Date("2020-01-01T00:00:00.000Z")
+if (unhealthyCredentials) {
+  mkdirSync(userData, { recursive: true })
+  if (mode === "enterprise-credentials-corrupt") {
+    writeFileSync(
+      join(userData, "enterprise-providers.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        default: { providerID: "existing", modelID: "company-code" },
+        providers: [
+          {
+            id: "existing",
+            name: "Existing Provider",
+            baseURL: "https://existing.example/v1",
+            models: [{ id: "company-code", name: "Existing Code" }],
+          },
+        ],
+      }),
+    )
+  }
+  writeFileSync(
+    credentialFile,
+    mode === "enterprise-credentials-corrupt"
+      ? "unreadable-encrypted-main-index-secret"
+      : JSON.stringify({
+          schemaVersion: 3,
+          providers: {
+            "company-llm": { apiKey: "unavailable-main-index-secret", headers: { Authorization: "secret-header" } },
+          },
+        }),
+  )
+  utimesSync(credentialFile, credentialTimestamp, credentialTimestamp)
+}
+const credentialBefore = unhealthyCredentials ? readFileSync(credentialFile) : undefined
+const credentialModifiedBefore = unhealthyCredentials ? statSync(credentialFile).mtimeMs : undefined
 
 const app = {
   commandLine: {
@@ -93,9 +145,12 @@ mock.module("electron", () => ({
   netLog: {},
   protocol: { registerSchemesAsPrivileged() {} },
   safeStorage: {
-    decryptString: () => "{}",
+    decryptString: (value: Buffer) => {
+      if (mode === "enterprise-credentials-corrupt") throw new Error("credential decrypt failed")
+      return value.toString("utf8")
+    },
     encryptString: (value: string) => Buffer.from(value),
-    isEncryptionAvailable: () => true,
+    isEncryptionAvailable: () => mode !== "enterprise-credentials-unavailable",
   },
   session: { fromPartition: () => ({ fetch: () => undefined }) },
   shell: {
@@ -128,8 +183,19 @@ mock.module("../src/main/server", () => ({
   getDefaultServerUrl: () => null,
   preferAppEnv() {},
   setDefaultServerUrl() {},
-  spawnLocalServer: async () => {
+  spawnLocalServer: async (_hostname: string, _port: number, _password: string, options: {
+    catalog?: {
+      default?: { providerID: string; modelID: string }
+      providers: { id: string }[]
+    }
+    credentials?: { providers: Record<string, unknown> }
+  }) => {
     sidecarStarts++
+    sidecarStates.push({
+      ...(options.catalog?.default ? { default: options.catalog.default } : {}),
+      providers: options.catalog?.providers.map((provider) => provider.id) ?? [],
+      credentialProviders: Object.keys(options.credentials?.providers ?? {}),
+    })
     return {
       listener: {
         stop: async () => {
@@ -227,12 +293,41 @@ await import("../src/main/index")
 for (let attempts = 0; attempts < 100 && !listeners.has("open-link"); attempts++) await Bun.sleep(10)
 for (let attempts = 0; attempts < 100 && enterprise && stateHealthy === 0; attempts++) await Bun.sleep(10)
 
-if (mode === "enterprise-credential-restart") {
-  const mutation = await handlers.get("enterprise-set-credentials")?.(
+if (mode === "enterprise-provider-restart") {
+  const mutation = await handlers.get("enterprise-provider-credentials-replace")?.(
     {},
-    { modelID: "company-code", apiKey: "entrypoint-secret" },
+    {
+      providerID: "company-llm",
+      credentials: { apiKey: "entrypoint-secret", headers: { Authorization: "header-secret" } },
+    },
   )
-  console.log(JSON.stringify({ mutation, sidecarStarts, sidecarStops, relaunches }))
+  console.log(JSON.stringify({ mutation, sidecarStarts, sidecarStops, relaunches, sidecarStates }))
+  process.exit(0)
+}
+
+if (unhealthyCredentials) {
+  const providerCatalog = await handlers.get("enterprise-provider-catalog")?.({})
+  const providerID = mode === "enterprise-credentials-corrupt" ? "existing" : "company-llm"
+  const mutationError = await handlers
+    .get("enterprise-provider-credentials-replace")?.(
+      {},
+      { providerID, credentials: { apiKey: "replacement-main-index-secret", headers: {} } },
+    )
+    .then(
+      () => undefined,
+      (error: unknown) =>
+        typeof error === "object" && error !== null && "code" in error ? String(error.code) : "unknown",
+    )
+  console.log(
+    JSON.stringify({
+      providerCatalog,
+      mutationError,
+      sidecarStarts,
+      sidecarStates,
+      credentialUnchanged: credentialBefore?.equals(readFileSync(credentialFile)),
+      credentialTimestampUnchanged: credentialModifiedBefore === statSync(credentialFile).mtimeMs,
+    }),
+  )
   process.exit(0)
 }
 

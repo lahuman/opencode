@@ -28,10 +28,16 @@ async function mountHighlights(enterprise: boolean) {
     ...(enterprise
       ? {
           enterprise: {
-            credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
-            credentialStatus: async () => ({ configured: false }),
-            setCredentials: async () => ({ restartRequired: true }),
-            clearCredentials: async () => ({ restartRequired: true }),
+            providerCatalog: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            createProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
+            clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
             readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
           },
         }

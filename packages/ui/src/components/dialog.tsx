@@ -1,6 +1,7 @@
 import { Dialog as Kobalte } from "@kobalte/core/dialog"
-import { ComponentProps, JSXElement, Match, ParentProps, Show, Switch } from "solid-js"
+import { ComponentProps, JSXElement, Match, onCleanup, ParentProps, Show, Switch } from "solid-js"
 import { useI18n } from "../context/i18n"
+import { useDialogLayer } from "../context/dialog"
 import { IconButton } from "./icon-button"
 
 export interface DialogProps extends ParentProps {
@@ -12,10 +13,13 @@ export interface DialogProps extends ParentProps {
   classList?: ComponentProps<"div">["classList"]
   fit?: boolean
   transition?: boolean
+  preventClose?: boolean
 }
 
 export function Dialog(props: DialogProps) {
   const i18n = useI18n()
+  const unregister = useDialogLayer()?.registerCloseGuard(() => !props.preventClose)
+  onCleanup(() => unregister?.())
   return (
     <div
       data-component="dialog"
@@ -54,6 +58,7 @@ export function Dialog(props: DialogProps) {
                     icon="close"
                     variant="ghost"
                     aria-label={i18n.t("ui.common.close")}
+                    disabled={props.preventClose}
                   />
                 </Match>
               </Switch>

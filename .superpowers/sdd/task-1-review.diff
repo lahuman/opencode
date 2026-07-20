@@ -1,0 +1,683 @@
+# Working-tree review package
+
+## Base
+b6205a113c99853222ee844f2b597d2b77f0c0ab
+
+## Status
+ M packages/desktop/src/main/enterprise-credentials.test.ts
+ M packages/desktop/src/main/enterprise-credentials.ts
+?? packages/desktop/src/main/enterprise-providers.test.ts
+?? packages/desktop/src/main/enterprise-providers.ts
+
+## Tracked diff stat
+ .../src/main/enterprise-credentials.test.ts        | 42 ++++++++++-
+ .../desktop/src/main/enterprise-credentials.ts     | 87 +++++++++++++++++++++-
+ 2 files changed, 124 insertions(+), 5 deletions(-)
+
+## Tracked diff
+diff --git a/packages/desktop/src/main/enterprise-credentials.test.ts b/packages/desktop/src/main/enterprise-credentials.test.ts
+index 38a04c281..5223e8d3f 100644
+--- a/packages/desktop/src/main/enterprise-credentials.test.ts
++++ b/packages/desktop/src/main/enterprise-credentials.test.ts
+@@ -1,24 +1,64 @@
+ import { afterEach, describe, expect, test } from "bun:test"
+ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+ import { tmpdir } from "node:os"
+ import { join } from "node:path"
+ import { createEnterpriseCredentialHandlers, createEnterpriseCredentialStore } from "./enterprise-credentials"
+-import type { EnterpriseCredentials } from "./enterprise-credentials"
++import type { EnterpriseCredentials, EnterpriseProviderCredentials } from "./enterprise-credentials"
+ 
+ const dirs: string[] = []
+ 
+ afterEach(async () => {
+   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+ })
+ 
+ describe("enterprise credential store", () => {
++  test("persists provider credentials as schema v3 and exposes v2 only as legacy data", async () => {
++    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
++    dirs.push(dir)
++    const file = join(dir, "credentials.bin")
++    const store = createEnterpriseCredentialStore({
++      file,
++      encryptionAvailable: () => true,
++      encrypt: (value) => Buffer.from(value.split("").reverse().join(""), "utf8"),
++      decrypt: (value) => value.toString("utf8").split("").reverse().join(""),
++    })
++    const credentials: EnterpriseProviderCredentials = {
++      schemaVersion: 3,
++      providers: { "company-llm": { apiKey: "provider-secret", headers: { Authorization: "provider-header" } } },
++    }
++
++    await store.write(credentials)
++
++    expect(await store.read()).toEqual(credentials)
++    expect(await store.health()).toEqual({ state: "available" })
++    expect(await store.readLegacy()).toBeUndefined()
++    const raw = await readFile(file, "utf8")
++    expect(raw).not.toContain("provider-secret")
++    expect(raw).not.toContain("provider-header")
++
++    await writeFile(
++      file,
++      Buffer.from(
++        JSON.stringify({ schemaVersion: 2, models: { code: { apiKey: "legacy-secret", headers: {} } } })
++          .split("")
++          .reverse()
++          .join(""),
++      ),
++    )
++    expect(await store.read()).toEqual({ schemaVersion: 3, providers: {} })
++    expect(await store.readLegacy()).toEqual({
++      kind: "v2",
++      credentials: { schemaVersion: 2, models: { code: { apiKey: "legacy-secret", headers: {} } } },
++    })
++  })
++
+   test("stores and retrieves isolated credentials for each configured model", async () => {
+     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+     dirs.push(dir)
+     const file = join(dir, "credentials.bin")
+     const store = createEnterpriseCredentialStore({
+       file,
+       modelIDs: ["code", "reasoning"],
+       defaultModelID: "code",
+       encryptionAvailable: () => true,
+       encrypt: (value) => Buffer.from(value.split("").reverse().join(""), "utf8"),
+diff --git a/packages/desktop/src/main/enterprise-credentials.ts b/packages/desktop/src/main/enterprise-credentials.ts
+index 505bf1a82..5993273fb 100644
+--- a/packages/desktop/src/main/enterprise-credentials.ts
++++ b/packages/desktop/src/main/enterprise-credentials.ts
+@@ -4,20 +4,29 @@ import { dirname } from "node:path"
+ export type EnterpriseCredential = {
+   apiKey?: string
+   headers: Record<string, string>
+ }
+ 
+ export type EnterpriseCredentials = {
+   schemaVersion: 2
+   models: Record<string, EnterpriseCredential>
+ }
+ 
++export type EnterpriseProviderCredentials = {
++  schemaVersion: 3
++  providers: Record<string, EnterpriseCredential>
++}
++
++export type EnterpriseLegacyProviderCredentials =
++  | { kind: "v1"; credentials: EnterpriseCredential }
++  | { kind: "v2"; credentials: EnterpriseCredentials }
++
+ export type EnterpriseCredentialCatalog = {
+   defaultModelID: string
+   models: {
+     id: string
+     name: string
+     baseURL: string
+     credentialStatus: {
+       configured: boolean
+       errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
+     }
+@@ -120,21 +129,21 @@ type Input = {
+   encryptionAvailable: () => boolean
+   encrypt: (value: string) => Buffer
+   decrypt: (value: Buffer) => string
+   write?: (file: string, value: Buffer) => Promise<void>
+ }
+ 
+ export function createEnterpriseCredentialStore(input: Input) {
+   const temp = `${input.file}.tmp`
+   const defaultModelID = input.defaultModelID ?? input.modelIDs?.[0] ?? "default"
+   const modelIDs = new Set(input.modelIDs ?? [defaultModelID])
+-  const write =
++  const writeEncrypted =
+     input.write ??
+     (async (file: string, value: Buffer) => {
+       await mkdir(dirname(file), { recursive: true })
+       await writeFile(file, value, { mode: 0o600 })
+     })
+   let mutations = Promise.resolve()
+ 
+   const mutate = (operation: () => Promise<void>) => {
+     const result = mutations.then(operation)
+     mutations = result.catch(() => undefined)
+@@ -148,49 +157,89 @@ export function createEnterpriseCredentialStore(input: Input) {
+     })
+     if (!encrypted) return { schemaVersion: 2, models: {} }
+ 
+     const value: unknown = await Promise.resolve(encrypted)
+       .then(input.decrypt)
+       .then((text) => JSON.parse(text))
+       .catch(() => undefined)
+     return decodeCredentials(value, modelIDs, defaultModelID) ?? { schemaVersion: 2, models: {} }
+   }
+ 
++  const read = async (): Promise<EnterpriseProviderCredentials> => {
++    const encrypted = await readFile(input.file).catch((error: unknown) => {
++      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
++      throw error
++    })
++    if (!encrypted) return { schemaVersion: 3, providers: {} }
++    const value: unknown = await Promise.resolve(encrypted)
++      .then(input.decrypt)
++      .then((text) => JSON.parse(text))
++      .catch(() => undefined)
++    return decodeProviderCredentials(value) ?? { schemaVersion: 3, providers: {} }
++  }
++
++  const readLegacy = async (): Promise<EnterpriseLegacyProviderCredentials | undefined> => {
++    const encrypted = await readFile(input.file).catch((error: unknown) => {
++      if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
++      throw error
++    })
++    if (!encrypted) return
++    const value: unknown = await Promise.resolve(encrypted)
++      .then(input.decrypt)
++      .then((text) => JSON.parse(text))
++      .catch(() => undefined)
++    const v2 = decodeLegacyCredentials(value)
++    if (v2) return { kind: "v2", credentials: v2 }
++    if (isRecord(value) && "schemaVersion" in value) return
++    const v1 = decodeCredential(value)
++    if (v1) return { kind: "v1", credentials: v1 }
++  }
++
+   const get = async () => (await all()).models[defaultModelID] ?? { headers: {} }
+ 
+   const health = async () => {
+     const encrypted = await readFile(input.file).catch((error: unknown) => {
+       if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return
+       throw error
+     })
+     if (!encrypted) return { state: "missing" as const }
+     if (!input.encryptionAvailable()) return { state: "encryption-unavailable" as const }
+     const valid = await Promise.resolve(encrypted)
+       .then(input.decrypt)
+       .then((text) => JSON.parse(text))
+       .then(
+-        (value) => Boolean(decodeCredentials(value, modelIDs, defaultModelID)),
++        (value) => Boolean(decodeProviderCredentials(value) ?? decodeCredentials(value, modelIDs, defaultModelID)),
+         () => false,
+       )
+     return { state: valid ? ("available" as const) : ("corrupt" as const) }
+   }
+ 
+   const persist = async (credentials: EnterpriseCredentials) => {
+     if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
+     const normalized = decodeCredentials(credentials, modelIDs, defaultModelID)
+     if (!normalized) throw new Error("Enterprise credentials are invalid")
+-    await write(temp, input.encrypt(JSON.stringify(normalized)))
++    await writeEncrypted(temp, input.encrypt(JSON.stringify(normalized)))
++      .then(() => rename(temp, input.file))
++      .finally(() => rm(temp, { force: true }))
++  }
++
++  const persistProvider = async (credentials: EnterpriseProviderCredentials) => {
++    if (!input.encryptionAvailable()) throw new Error("Windows secure storage is unavailable")
++    const normalized = decodeProviderCredentials(credentials)
++    if (!normalized) throw new Error("Enterprise provider credentials are invalid")
++    await writeEncrypted(temp, input.encrypt(JSON.stringify(normalized)))
+       .then(() => rename(temp, input.file))
+       .finally(() => rm(temp, { force: true }))
+   }
+ 
+   const setAll = (credentials: EnterpriseCredentials) => mutate(() => persist(credentials))
++  const write = (credentials: EnterpriseProviderCredentials) => mutate(() => persistProvider(credentials))
+   const updateAll = (transform: (current: EnterpriseCredentials) => EnterpriseCredentials) =>
+     mutate(async () => persist(transform(await all())))
+   const set = (credentials: EnterpriseCredential) =>
+     updateAll((current) => ({ schemaVersion: 2, models: { ...current.models, [defaultModelID]: credentials } }))
+   const update = (transform: (current: EnterpriseCredential) => EnterpriseCredential) =>
+     updateAll((current) => ({
+       schemaVersion: 2,
+       models: {
+         ...current.models,
+         [defaultModelID]: transform(current.models[defaultModelID] ?? { headers: {} }),
+@@ -205,21 +254,21 @@ export function createEnterpriseCredentialStore(input: Input) {
+             errors.push(error)
+           }),
+         ),
+       )
+       if (errors.length) throw errors[0]
+     })
+   const requireModel = (modelID: string) => {
+     if (!modelIDs.has(modelID)) throw new Error("Enterprise credential model is not configured")
+   }
+ 
+-  return { all, get, health, setAll, updateAll, set, update, clear, requireModel, defaultModelID }
++  return { all, get, read, readLegacy, write, health, setAll, updateAll, set, update, clear, requireModel, defaultModelID }
+ }
+ 
+ function decodeCredentials(
+   value: unknown,
+   modelIDs: Set<string>,
+   defaultModelID: string,
+ ): EnterpriseCredentials | undefined {
+   if (!isRecord(value)) return
+   if (value.schemaVersion === 2 && isRecord(value.models)) {
+     const models = Object.entries(value.models).flatMap(([modelID, credentials]) => {
+@@ -245,20 +294,50 @@ function decodeCredentials(
+ function decodeV2Credential(value: unknown): EnterpriseCredential | undefined {
+   if (!isRecord(value) || !isRecord(value.headers)) return
+   if (value.apiKey !== undefined && typeof value.apiKey !== "string") return
+   if (Object.values(value.headers).some((header) => typeof header !== "string")) return
+   return {
+     ...(typeof value.apiKey === "string" ? { apiKey: value.apiKey } : {}),
+     headers: value.headers as Record<string, string>,
+   }
+ }
+ 
++function decodeProviderCredentials(value: unknown): EnterpriseProviderCredentials | undefined {
++  if (!isRecord(value) || value.schemaVersion !== 3 || !isRecord(value.providers)) return
++  const providers = Object.entries(value.providers).flatMap(([providerID, credentials]) => {
++    const decoded = decodeV2Credential(credentials)
++    return decoded ? [[providerID, decoded] as const] : [undefined]
++  })
++  if (providers.some((provider) => provider === undefined)) return
++  return {
++    schemaVersion: 3,
++    providers: Object.fromEntries(
++      providers.filter((provider): provider is readonly [string, EnterpriseCredential] => provider !== undefined),
++    ),
++  }
++}
++
++function decodeLegacyCredentials(value: unknown): EnterpriseCredentials | undefined {
++  if (!isRecord(value) || value.schemaVersion !== 2 || !isRecord(value.models)) return
++  const models = Object.entries(value.models).flatMap(([modelID, credentials]) => {
++    const decoded = decodeV2Credential(credentials)
++    return decoded ? [[modelID, decoded] as const] : [undefined]
++  })
++  if (models.some((model) => model === undefined)) return
++  return {
++    schemaVersion: 2,
++    models: Object.fromEntries(
++      models.filter((model): model is readonly [string, EnterpriseCredential] => model !== undefined),
++    ),
++  }
++}
++
+ function decodeCredential(value: unknown): EnterpriseCredential | undefined {
+   if (!isRecord(value)) return
+   if (value.headers !== undefined && !isRecord(value.headers)) return
+   const entries = Object.entries(value.headers ?? {})
+   const headers = Object.fromEntries(entries.filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+   if (
+     typeof value.apiKey !== "string" &&
+     ((value.apiKey !== undefined && !Object.keys(headers).length) ||
+       (entries.some((entry) => typeof entry[1] !== "string") && !Object.keys(headers).length))
+   ) {
+
+## Untracked file: packages/desktop/src/main/enterprise-providers.ts
+diff --git a/packages/desktop/src/main/enterprise-providers.ts b/packages/desktop/src/main/enterprise-providers.ts
+new file mode 100644
+index 000000000..3a97e903d
+--- /dev/null
++++ b/packages/desktop/src/main/enterprise-providers.ts
+@@ -0,0 +1,179 @@
++export type EnterpriseModelRef = { providerID: string; modelID: string }
++
++export type EnterpriseProviderModel = { id: string; name: string }
++
++export type EnterpriseProvider = {
++  id: string
++  name: string
++  baseURL: string
++  models: EnterpriseProviderModel[]
++}
++
++export type EnterpriseProviderCatalog = {
++  schemaVersion: 1
++  default?: EnterpriseModelRef
++  providers: EnterpriseProvider[]
++}
++
++type LegacyCredential = {
++  apiKey?: string
++  headers: Record<string, string>
++}
++
++type LegacyCredentials = {
++  schemaVersion: 2
++  models: Record<string, LegacyCredential>
++}
++
++const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
++
++export function validateEnterpriseProviderCatalog(value: unknown): EnterpriseProviderCatalog {
++  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.providers)) {
++    throw new Error("Enterprise provider catalog is invalid")
++  }
++  const providerIDs = new Set<string>()
++  const providers = value.providers.map((item) => {
++    if (!isRecord(item) || !Array.isArray(item.models)) throw new Error("Enterprise provider is invalid")
++    const id = requireProviderID(item.id)
++    if (providerIDs.has(id)) throw new Error("Enterprise provider ID is duplicated")
++    providerIDs.add(id)
++    const modelIDs = new Set<string>()
++    const models = item.models.map((model) => {
++      if (!isRecord(model)) throw new Error("Enterprise model is invalid")
++      const modelID = requireText(model.id, "Enterprise model ID is required")
++      if (modelIDs.has(modelID)) throw new Error("Enterprise model ID is duplicated")
++      modelIDs.add(modelID)
++      return { id: modelID, name: requireText(model.name, "Enterprise model name is required") }
++    })
++    return {
++      id,
++      name: requireText(item.name, "Enterprise provider name is required"),
++      baseURL: requireBaseURL(item.baseURL),
++      models,
++    }
++  })
++  const defaultModel = decodeDefault(value.default, providers)
++  return { schemaVersion: 1, ...(defaultModel ? { default: defaultModel } : {}), providers }
++}
++
++export function createEnterpriseProviderStore(input: { file: string }) {
++  const temp = `${input.file}.tmp`
++
++  const read = async () => {
++    const value = await readFile(input.file, "utf8").catch((error: unknown) => {
++      if (isMissing(error)) return
++      throw error
++    })
++    if (value === undefined) return
++    try {
++      return validateEnterpriseProviderCatalog(JSON.parse(value))
++    } catch {
++      throw new Error("Enterprise provider catalog is invalid")
++    }
++  }
++
++  const write = async (catalog: EnterpriseProviderCatalog) => {
++    const normalized = validateEnterpriseProviderCatalog(catalog)
++    await mkdir(dirname(input.file), { recursive: true })
++    await writeFile(temp, JSON.stringify(normalized), { mode: 0o600 })
++      .then(() => rename(temp, input.file))
++      .finally(() => rm(temp, { force: true }))
++  }
++
++  const initialize = async (
++    profile: { defaultModelID: string; models: { id: string; name: string; baseURL: string }[] },
++    legacyCredentials?: LegacyCredentials,
++  ) => {
++    const existing = await read()
++    if (existing) {
++      return { catalog: existing }
++    }
++    const providerIDs = new Set<string>()
++    const providers = profile.models.map((model) => {
++      const id = nextProviderID(providerIDs)
++      providerIDs.add(id)
++      return {
++        id,
++        name: model.name,
++        baseURL: model.baseURL,
++        models: [{ id: model.id, name: model.name }],
++      }
++    })
++    const defaultProvider = providers.find((provider) => provider.models[0]?.id === profile.defaultModelID)
++    const catalog = validateEnterpriseProviderCatalog({
++      schemaVersion: 1,
++      ...(defaultProvider ? { default: { providerID: defaultProvider.id, modelID: profile.defaultModelID } } : {}),
++      providers,
++    })
++    const credentials = {
++      schemaVersion: 3 as const,
++      providers: Object.fromEntries(
++        providers.flatMap((provider) => {
++          const credential = legacyCredentials?.models[provider.models[0]!.id]
++          return credential ? [[provider.id, credential] as const] : []
++        }),
++      ),
++    }
++    await write(catalog)
++    return { catalog, credentials }
++  }
++
++  const clear = async () => {
++    await Promise.all([input.file, temp].map((file) => rm(file, { force: true })))
++  }
++
++  return { read, write, initialize, clear }
++}
++
++function decodeDefault(value: unknown, providers: EnterpriseProvider[]) {
++  if (value === undefined) return
++  if (!isRecord(value)) throw new Error("Enterprise provider default is invalid")
++  const providerID = requireProviderID(value.providerID)
++  const modelID = requireText(value.modelID, "Enterprise provider default model is required")
++  if (!providers.some((provider) => provider.id === providerID && provider.models.some((model) => model.id === modelID))) {
++    throw new Error("Enterprise provider default is invalid")
++  }
++  return { providerID, modelID }
++}
++
++function requireProviderID(value: unknown) {
++  if (typeof value !== "string" || !PROVIDER_ID.test(value)) throw new Error("Enterprise provider ID is invalid")
++  return value
++}
++
++function requireText(value: unknown, message: string) {
++  if (typeof value !== "string" || !value.trim()) throw new Error(message)
++  return value
++}
++
++function requireBaseURL(value: unknown) {
++  if (typeof value !== "string" || !value.trim()) throw new Error("Enterprise provider URL is invalid")
++  const url = new URL(value)
++  if (
++    (url.protocol !== "http:" && url.protocol !== "https:") ||
++    url.username ||
++    url.password ||
++    url.search ||
++    url.hash
++  ) {
++    throw new Error("Enterprise provider URL is invalid")
++  }
++  return url.toString()
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value)
++}
++
++function isMissing(error: unknown) {
++  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
++}
++
++function nextProviderID(existing: Set<string>) {
++  if (!existing.has("company-llm")) return "company-llm"
++  let suffix = 2
++  while (existing.has(`company-llm-${suffix}`)) suffix++
++  return `company-llm-${suffix}`
++}
++import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
++import { dirname } from "node:path"
+
+## Untracked file: packages/desktop/src/main/enterprise-providers.test.ts
+diff --git a/packages/desktop/src/main/enterprise-providers.test.ts b/packages/desktop/src/main/enterprise-providers.test.ts
+new file mode 100644
+index 000000000..f6d6d45e6
+--- /dev/null
++++ b/packages/desktop/src/main/enterprise-providers.test.ts
+@@ -0,0 +1,178 @@
++import { expect, test } from "bun:test"
++import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
++import { tmpdir } from "node:os"
++import { join } from "node:path"
++
++import { createEnterpriseProviderStore, validateEnterpriseProviderCatalog } from "./enterprise-providers"
++
++test("rejects invalid URLs and dangling defaults", () => {
++  expect(() =>
++    validateEnterpriseProviderCatalog({
++      schemaVersion: 1,
++      default: { providerID: "missing", modelID: "model" },
++      providers: [
++        {
++          id: "provider",
++          name: "Provider",
++          baseURL: "https://user:pass@example.com/v1",
++          models: [],
++        },
++      ],
++    }),
++  ).toThrow()
++})
++
++test("seeds one provider per packaged legacy model", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
++    const initialized = await store.initialize(
++      {
++        defaultModelID: "code",
++        models: [
++          { id: "code", name: "Code", baseURL: "https://code.example/v1" },
++          { id: "reasoning", name: "Reasoning", baseURL: "https://reasoning.example/v1" },
++        ],
++      },
++      {
++        schemaVersion: 2,
++        models: {
++          code: { apiKey: "code-key", headers: {} },
++          reasoning: { headers: { "X-Token": "reasoning-token" } },
++        },
++      },
++    )
++
++    expect(initialized.catalog).toEqual({
++      schemaVersion: 1,
++      default: { providerID: "company-llm", modelID: "code" },
++      providers: [
++        { id: "company-llm", name: "Code", baseURL: "https://code.example/v1", models: [{ id: "code", name: "Code" }] },
++        {
++          id: "company-llm-2",
++          name: "Reasoning",
++          baseURL: "https://reasoning.example/v1",
++          models: [{ id: "reasoning", name: "Reasoning" }],
++        },
++      ],
++    })
++    expect(initialized.credentials).toEqual({
++      schemaVersion: 3,
++      providers: {
++        "company-llm": { apiKey: "code-key", headers: {} },
++        "company-llm-2": { headers: { "X-Token": "reasoning-token" } },
++      },
++    })
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
++test("rejects duplicate IDs and incomplete provider metadata", () => {
++  const invalid = [
++    {
++      schemaVersion: 1,
++      providers: [
++        { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
++        { id: "provider", name: "Duplicate", baseURL: "https://duplicate.example/v1", models: [] },
++      ],
++    },
++    {
++      schemaVersion: 1,
++      providers: [
++        {
++          id: "provider",
++          name: "",
++          baseURL: "https://provider.example/v1",
++          models: [
++            { id: "model", name: "Model" },
++            { id: "model", name: "Duplicate" },
++          ],
++        },
++      ],
++    },
++    {
++      schemaVersion: 1,
++      providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1#fragment", models: [] }],
++    },
++  ]
++
++  invalid.forEach((catalog) => expect(() => validateEnterpriseProviderCatalog(catalog)).toThrow())
++})
++
++test("allows empty catalogs and normalizes provider URLs", () => {
++  expect(
++    validateEnterpriseProviderCatalog({
++      schemaVersion: 1,
++      providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
++    }),
++  ).toEqual({
++    schemaVersion: 1,
++    providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
++  })
++  expect(validateEnterpriseProviderCatalog({ schemaVersion: 1, providers: [] })).toEqual({ schemaVersion: 1, providers: [] })
++})
++
++test("preserves an existing catalog and cleans up temp files after failed writes", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const file = join(dir, "providers.json")
++    const store = createEnterpriseProviderStore({ file })
++    const catalog = {
++      schemaVersion: 1 as const,
++      default: { providerID: "existing", modelID: "model" },
++      providers: [
++        {
++          id: "existing",
++          name: "Existing",
++          baseURL: "https://existing.example/v1",
++          models: [{ id: "model", name: "Model" }],
++        },
++      ],
++    }
++    await store.write(catalog)
++
++    expect(
++      await store.initialize(
++        { defaultModelID: "new", models: [{ id: "new", name: "New", baseURL: "https://new.example/v1" }] },
++        { schemaVersion: 2, models: { new: { apiKey: "new-secret", headers: {} } } },
++      ),
++    ).toEqual({ catalog })
++    expect(await store.read()).toEqual(catalog)
++
++    await rm(file)
++    await mkdir(file)
++    await expect(store.write(catalog)).rejects.toThrow()
++    expect(await Bun.file(`${file}.tmp`).exists()).toBe(false)
++    await rm(file, { recursive: true })
++    await writeFile(file, "{ invalid json")
++    await expect(store.read()).rejects.toThrow("catalog is invalid")
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
++test("uses stable provider ID suffixes during migration", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const initialized = await createEnterpriseProviderStore({ file: join(dir, "providers.json") }).initialize(
++      {
++        defaultModelID: "first",
++        models: [
++          { id: "first", name: "First", baseURL: "https://first.example/v1" },
++          { id: "second", name: "Second", baseURL: "https://second.example/v1" },
++          { id: "third", name: "Third", baseURL: "https://third.example/v1" },
++        ],
++      },
++      { schemaVersion: 2, models: {} },
++    )
++
++    expect(initialized.catalog.providers.map((provider) => provider.id)).toEqual([
++      "company-llm",
++      "company-llm-2",
++      "company-llm-3",
++    ])
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})

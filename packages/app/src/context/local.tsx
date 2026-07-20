@@ -7,10 +7,18 @@ import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import { usePlatform } from "./platform"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import {
+  modelRecoveryNoticeOwner,
+  parseModelSelection,
+  promptModelRecoveryNotice,
+  resolveModelCandidate,
+  resolveModelRecovery,
+} from "@/context/model-selection"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -60,6 +68,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const sdk = useSDK()
     const sync = useSync()
     const serverSDK = useServerSDK()
+    const platform = usePlatform()
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
 
@@ -98,13 +107,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID] && connected().has(model.providerID)
     }
 
-    const firstModel = (...items: Array<() => ModelKey | undefined>) => {
-      for (const item of items) {
-        const model = item()
-        if (!model) continue
-        if (validModel(model)) return model
-      }
-    }
+    const firstModel = (...items: Array<() => ModelKey | undefined>) =>
+      resolveModelCandidate(
+        items.map((item) => item()),
+        validModel,
+      )
 
     const pickAgent = (name: string | undefined) => {
       const items = list()
@@ -147,10 +154,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     })
 
     const configuredModel = () => {
-      const configured = sync().data.config.model
-      if (!configured) return
-      const [providerID, modelID] = configured.split("/")
-      const model = { providerID, modelID }
+      const model = parseModelSelection(sync().data.config.model)
+      if (!model) return
       if (validModel(model)) return model
     }
 
@@ -369,6 +374,23 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
       },
     }
+
+    createEffect(() => {
+      if (!platform.enterprise) return
+      const sessionID = id()
+      const previous = scope()?.model
+      const recovery = resolveModelRecovery({
+        ready: savedReady() && models.ready() && sync().status === "complete" && sync().data.provider_ready,
+        previous,
+        candidates: [previous, agent.current()?.model, configuredModel(), recentModel(), defaultModel()],
+        valid: validModel,
+      })
+      if (!recovery) return
+
+      model.set(recovery.next)
+      if (modelRecoveryNoticeOwner(sessionID) !== "local") return
+      void import("@/utils/toast").then(({ showToast }) => showToast(promptModelRecoveryNotice(recovery)))
+    })
 
     const result = {
       slug: createMemo(() => base64Encode(sdk().directory)),

@@ -1,0 +1,3291 @@
+# Working-tree review package
+
+## Base
+b6205a113c99853222ee844f2b597d2b77f0c0ab
+
+## Status
+ M packages/app/e2e/company-llm-enterprise.spec.ts
+ M packages/app/e2e/fixtures/company-llm-enterprise.tsx
+ M packages/app/src/components/prompt-input.tsx
+ M packages/app/src/components/prompt-input/submit.test.ts
+ M packages/app/src/components/prompt-input/submit.ts
+ M packages/app/src/context/global-sync/bootstrap.test.ts
+ M packages/app/src/context/global-sync/bootstrap.ts
+ M packages/app/src/context/global-sync/child-store.test.ts
+ M packages/app/src/context/global-sync/child-store.ts
+ M packages/app/src/context/local.tsx
+ M packages/app/src/context/server-sync.tsx
+ M packages/app/src/pages/session/composer/prompt-model-selection.ts
+ M packages/app/src/pages/session/composer/session-composer-controls.ts
+ M packages/app/test-browser/company-llm-enterprise.test.ts
+ M packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts
+?? .superpowers/sdd/task-5-report.md
+?? docs/superpowers/plans/2026-07-20-task-5-remediation.md
+?? packages/app/src/context/model-selection.ts
+?? packages/app/src/pages/session/composer/prompt-model-selection.test.ts
+
+## Tracked diff stat
+ packages/app/e2e/company-llm-enterprise.spec.ts    | 422 +++++++++++---------
+ .../app/e2e/fixtures/company-llm-enterprise.tsx    | 437 ++++++++++++++++++---
+ packages/app/src/components/prompt-input.tsx       |  61 ++-
+ .../app/src/components/prompt-input/submit.test.ts |  45 ++-
+ packages/app/src/components/prompt-input/submit.ts |   9 +
+ .../app/src/context/global-sync/bootstrap.test.ts  | 172 +++++++-
+ packages/app/src/context/global-sync/bootstrap.ts  |  19 +-
+ .../src/context/global-sync/child-store.test.ts    |  86 +++-
+ .../app/src/context/global-sync/child-store.ts     |   7 +-
+ packages/app/src/context/local.tsx                 |  44 ++-
+ packages/app/src/context/server-sync.tsx           |   2 +-
+ .../session/composer/prompt-model-selection.ts     |  54 ++-
+ .../session/composer/session-composer-controls.ts  |   2 +-
+ .../test-browser/company-llm-enterprise.test.ts    |   6 +-
+ .../fixtures/highlights-provider-entrypoint.ts     |  14 +-
+ 15 files changed, 1076 insertions(+), 304 deletions(-)
+
+## Tracked diff
+diff --git a/packages/app/e2e/company-llm-enterprise.spec.ts b/packages/app/e2e/company-llm-enterprise.spec.ts
+index 06a7a559d..b8914e27c 100644
+--- a/packages/app/e2e/company-llm-enterprise.spec.ts
++++ b/packages/app/e2e/company-llm-enterprise.spec.ts
+@@ -78,177 +78,275 @@ test("mounted management controller rejects before storage, navigation, probes,
+   expect(
+     (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health"),
+   ).toHaveLength(probes)
+   expect(await output<unknown[]>(page, "storage-writes")).toHaveLength(writes)
+   expect(await output<unknown[]>(page, "default-writes")).toEqual([])
+   await expect(page.getByTestId("controller-location")).toHaveText("/")
+   await expect(page.getByTestId("controller-active")).toHaveText("sidecar")
+   await expect(page.getByTestId("controller-close-calls")).toHaveText("0")
+ })
+ 
+-test("DialogConnectProvider diverts enterprise mode directly to Company LLM", async ({ page }) => {
++test("DialogConnectProvider diverts enterprise mode directly to provider management", async ({ page }) => {
+   await page.goto(fixture("connect"))
+ 
+-  await expect(page.getByRole("dialog")).toContainText("Company LLM")
+-  await expect(page.getByLabel("API key")).toBeVisible()
++  await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
++  await expect(page.getByRole("button", { name: "Create provider" })).toBeVisible()
+   await expect(page.locator("[data-component=list]")).toHaveCount(0)
+   await expect(page.getByText("Custom provider", { exact: true })).toHaveCount(0)
+ 
+   const requests = await output<Array<{ path: string }>>(page, "requests")
+   expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
+ })
+ 
+-test("DialogCompanyProvider keeps credentials local and drives generated diagnostics accessibly", async ({ page }) => {
++test("New Session stays editable while Enterprise providers load, then disables for an empty catalog", async ({
++  page,
++}) => {
++  await page.goto(fixture("composer-enterprise-empty"))
++
++  const loadingEditor = page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })
++  await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
++  await page.getByRole("button", { name: "Refresh providers" }).click()
++  await expect(page.getByRole("button", { name: "Resolve providers" })).toBeEnabled()
++  await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
++  await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
++
++  await page.getByRole("button", { name: "Resolve providers" }).click()
++
++  const emptyEditor = page.getByRole("textbox", { name: "Add a provider and model to start chatting" })
++  await expect(emptyEditor).toHaveAttribute("contenteditable", "false")
++  await expect(emptyEditor).toHaveAttribute("aria-disabled", "true")
++  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled()
++
++  await page
++    .getByRole("button", { name: "Manage providers" })
++    .evaluate((node: HTMLButtonElement) => node.click())
++  await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
++})
++
++test("New Session preserves the ordinary composer with an empty provider catalog", async ({ page }) => {
++  await page.goto(fixture("composer-ordinary-empty"))
++
++  await expect(page.getByRole("textbox", { name: "Ask anything, / for commands, @ for context..." })).toHaveAttribute(
++    "contenteditable",
++    "true",
++  )
++  await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
++})
++
++test("DialogCompanyProvider manages provider, model, credentials, defaults, diagnostics, and deletion", async ({
++  page,
++}) => {
+   await page.goto(fixture("company"))
+   const dialog = page.getByRole("dialog")
+-  const apiKey = page.getByLabel("API key")
+-  const headerName = page.getByPlaceholder("Header name")
+-  const headerValue = page.getByPlaceholder("Secret value")
+   const status = dialog.locator('[data-slot="company-diagnostic-status"]')
+-  const codeModel = page.getByTestId("company-model-company-code")
+-  const reasoningModel = page.getByTestId("company-model-company-reasoning")
+-
+-  await expect(dialog).toContainText("Credentials not configured")
+-  await expect(codeModel).toContainText("Company Code")
+-  await expect(codeModel).toContainText("company-code")
+-  await expect(codeModel).toContainText("https://llm.company.test/v1")
+-  await expect(codeModel).toContainText("Default")
+-  await expect(codeModel).toContainText("Credentials not configured")
+-  await expect(reasoningModel).toContainText("Company Reasoning")
+-  await expect(reasoningModel).toContainText("https://reasoning.company.test/v1")
+-  await expect(reasoningModel).toContainText("Credentials not configured")
+-  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
+-  await expect.poll(() => output<number>(page, "credential-catalog-calls")).toBeGreaterThan(0)
+-  await expect(status).toHaveAttribute("role", "status")
+-  await expect(status).toHaveAttribute("aria-live", "polite")
+-  await expect(status).toHaveText("Ready to test Company LLM connection")
+-
+-  await apiKey.fill(" secret ")
+-  await headerName.fill(" X-Token ")
+-  await headerValue.fill(" value ")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect.poll(() => output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
++  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("gateway")
++  await page.getByLabel("Provider name").fill("Gateway")
++  await page.getByLabel("Base URL").fill("https://gateway.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++
++  const provider = page.getByTestId("enterprise-provider-gateway")
++  await expect(provider).toContainText("Gateway")
++  await expect(provider).toContainText("https://gateway.example/v1")
++  await expect(provider).toContainText("0 models")
++  await expect(provider).toContainText("Credentials not configured")
++
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("chat")
++  await page.getByLabel("Model name").fill("Chat")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("reasoning")
++  await page.getByLabel("Model name").fill("Reasoning")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++
++  const chat = page.getByTestId("enterprise-model-gateway-chat")
++  const reasoning = page.getByTestId("enterprise-model-gateway-reasoning")
++  await expect(chat).toBeVisible()
++  await expect(reasoning).toBeVisible()
++  await dialog.getByRole("button", { name: "Set default" }).click()
++  await expect(reasoning).toContainText("Default")
++
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("top-secret-api-key")
++  await page.getByPlaceholder("Header name").fill("X-Token")
++  await page.getByPlaceholder("Secret value").fill("top-secret-header")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Credentials configured")
++  await expect(dialog).not.toContainText("top-secret-api-key")
++  await expect(dialog).not.toContainText("top-secret-header")
+   expect(await output<unknown[]>(page, "credential-inputs")).toEqual([
+-    { modelID: "company-code", apiKey: "secret", headers: { "X-Token": "value" } },
++    { providerID: "gateway", hasApiKey: true, headerNames: ["X-Token"] },
+   ])
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toEqual([["", "", ""]])
+ 
+-  await invokeFixtureControl(page, "Credentials no restart")
+-  await apiKey.fill("second")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect.poll(() => output<unknown[]>(page, "credential-inputs")).toHaveLength(2)
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await expect(page.getByLabel("API key")).toHaveValue("")
++  await expect(page.getByPlaceholder("Header name")).toHaveValue("")
++  await expect(page.getByPlaceholder("Secret value")).toHaveValue("")
++  await dialog.getByRole("button", { name: "Cancel edit" }).click()
+ 
+   await invokeFixtureControl(page, "Credentials error")
+-  await apiKey.fill("keep-local")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect(dialog.getByRole("alert")).toBeVisible()
+-  await expect(apiKey).toHaveValue("keep-local")
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
+-
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(status).toHaveText("Company LLM connection test completed successfully")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).not.toHaveAttribute("role")
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await page.getByLabel("Provider name").fill("Gateway Replace Reconciled")
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("failed-replacement-secret")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(dialog.getByRole("alert")).toContainText("Request failed")
++  await expect(provider).toContainText("Gateway Replace Reconciled")
++  await expect(provider).toContainText("Credentials configured")
++  await expect(dialog).not.toContainText("failed-replacement-secret")
++  await dialog.getByRole("button", { name: "Dismiss error" }).click()
+ 
++  await invokeFixtureControl(page, "Credentials error")
++  await page.getByLabel("Provider name").fill("Gateway Clear Reconciled")
++  await page.getByLabel("Credential action").selectOption("clear")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(dialog.getByRole("alert")).toContainText("Request failed")
++  await expect(provider).toContainText("Gateway Clear Reconciled")
++  await dialog.getByRole("button", { name: "Dismiss error" }).click()
++  await invokeFixtureControl(page, "Credentials no restart")
++  await page.getByLabel("Credential action").selectOption("clear")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Credentials not configured")
++  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual(["gateway", "gateway"])
++
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Provider name").fill("Gateway Updated")
++  await page.getByLabel("Base URL").fill("https://gateway-updated.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Gateway Updated")
++  await expect(provider).toContainText("https://gateway-updated.example/v1")
++
++  await reasoning.click()
++  await dialog.getByRole("button", { name: "Edit model" }).click()
++  await expect(page.getByLabel("Model ID")).toBeDisabled()
++  await page.getByLabel("Model name").fill("Reasoning Updated")
++  await dialog.getByRole("button", { name: "Save model" }).click()
+   await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(status).toHaveText("Company LLM connection test completed successfully")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveCount(1)
+-
+-  await invokeFixtureControl(page, "Diagnostic failure")
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
++  await expect(status).toHaveText("Testing Gateway Updated / Reasoning Updated connection")
+   await invokeFixtureControl(page, "Resolve diagnostic")
+-  const failure = dialog.locator('[data-slot="company-diagnostic-result"]')
+-  await expect(failure).toHaveAttribute("role", "alert")
+-  await expect(failure.getByText("Failure (connection)", { exact: true })).toBeVisible()
+-  await expect(failure.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
+-  await expect(status).toHaveText("")
+-
+-  await invokeFixtureControl(page, "Diagnostic network error")
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(failure.getByText("Request failed", { exact: true })).toBeVisible()
+-  await expect(failure).not.toContainText("transport failure with private detail")
++  await expect(status).toHaveText("Gateway Updated / Reasoning Updated connection test completed successfully")
++
++  await dialog.getByRole("button", { name: "Delete model" }).click()
++  await expect(dialog).toContainText("Conversation history remains available")
++  await dialog.getByRole("button", { name: "Confirm delete model" }).click()
++  await expect(reasoning).toHaveCount(0)
++  await expect(chat).toContainText("Default")
++
++  await dialog.getByRole("button", { name: "Delete provider" }).click()
++  await expect(dialog).toContainText("All models and credentials for this provider will be removed")
++  await dialog.getByRole("button", { name: "Confirm delete provider" }).click()
++  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
++  await expect(provider).toHaveCount(0)
++})
+ 
+-  const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
+-    (request) => request.path === "/provider/company-llm/diagnostics",
+-  )
+-  expect(diagnostics).toEqual(Array.from({ length: 4 }, () => diagnosticRequest))
+-  const requests = await output<Array<{ path: string }>>(page, "requests")
+-  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
++test("pending provider mutations lock every dialog close path", async ({ page }) => {
++  await page.goto(fixture("company"))
++  const dialog = page.getByRole("dialog")
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("pending")
++  await page.getByLabel("Provider name").fill("Pending")
++  await page.getByLabel("Base URL").fill("https://pending.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await invokeFixtureControl(page, "Credentials pending")
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("pending-secret")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(
++    page.getByTestId("company-controls").locator("button").filter({ hasText: "Resolve credentials" }),
++  ).toBeEnabled()
++
++  const headerClose = dialog.locator('[data-slot="dialog-close-button"]')
++  const footerClose = dialog.locator('[data-slot="dialog-body"]').getByRole("button", { name: "Close" })
++  await expect(headerClose).toBeDisabled()
++  await expect(footerClose).toBeDisabled()
++  await page.keyboard.press("Escape")
++  await expect(dialog).toBeVisible()
++  await page.locator('[data-component="dialog-overlay"]').click({ force: true })
++  await expect(dialog).toBeVisible()
++
++  await invokeFixtureControl(page, "Resolve credentials")
++  await expect(headerClose).toBeEnabled()
++  await expect(footerClose).toBeEnabled()
++  await expect(dialog).not.toContainText("pending-secret")
+ })
+ 
+-test("DialogCompanyProvider clears model-scoped secrets and diagnostics when switching models", async ({ page }) => {
++test("delete confirmation is an accessible modal interaction within provider management", async ({ page }) => {
+   await page.goto(fixture("company"))
+   const dialog = page.getByRole("dialog")
+-  const apiKey = page.getByLabel("API key")
+-  const headerName = page.getByPlaceholder("Header name")
+-  const headerValue = page.getByPlaceholder("Secret value")
+-
+-  await expect(page.getByLabel("Base URL")).toHaveValue("https://llm.company.test/v1")
+-  await apiKey.fill("code-secret")
+-  await headerName.fill("X-Code-Token")
+-  await headerValue.fill("code-header")
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("confirm")
++  await page.getByLabel("Provider name").fill("Confirm")
++  await page.getByLabel("Base URL").fill("https://confirm.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("code")
++  await page.getByLabel("Model name").fill("Code")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++
+   await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(page.getByTestId("company-model-company-code")).toBeDisabled()
+-  await expect(page.getByTestId("company-model-company-reasoning")).toBeDisabled()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toBeVisible()
+-
+-  await page.getByTestId("company-model-company-reasoning").click()
+-
+-  await expect(apiKey).toHaveValue("")
+-  await expect(headerName).toHaveValue("")
+-  await expect(headerValue).toHaveValue("")
+-  await expect(page.getByLabel("Base URL")).toHaveValue("https://reasoning.company.test/v1")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveText(
+-    "Ready to test Company LLM connection",
+-  )
++  const readiness = dialog.getByText(/Offline readiness:/)
++  await expect(readiness).toBeVisible()
++
++  await dialog.getByRole("button", { name: "Edit model" }).click()
++  await page.getByLabel("Model name").fill("")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++  const dismissError = dialog.getByRole("button", { name: "Dismiss error" })
++  await expect(dismissError).toBeVisible()
++  await dialog.getByRole("button", { name: "Cancel edit" }).click()
++
++  const deleteModel = dialog.getByRole("button", { name: "Delete model" })
++  await deleteModel.click()
++  const confirmation = dialog.getByRole("alertdialog", { name: "Delete model Code" })
++  const confirm = confirmation.getByRole("button", { name: "Confirm delete model" })
++  await expect(confirmation).toHaveAttribute("aria-describedby", "enterprise-delete-description")
++  await expect(confirm).toBeFocused()
++  await expect(page.getByTestId("enterprise-provider-confirm")).toBeDisabled()
++  await expect(dialog.getByRole("button", { name: "Add model" })).toBeDisabled()
++  await expect(dialog.locator('[data-slot="dialog-close-button"]')).toBeDisabled()
++  await expect(dismissError).toBeDisabled()
++  await expect(readiness).toHaveAttribute("tabindex", "-1")
++  const cancel = confirmation.getByRole("button", { name: "Cancel delete" })
++  await page.keyboard.press("Shift+Tab")
++  await expect(cancel).toBeFocused()
++  await page.keyboard.press("Tab")
++  await expect(confirm).toBeFocused()
++  await page.keyboard.press("Tab")
++  await expect(cancel).toBeFocused()
++  await page.keyboard.press("Escape")
++  await expect(dialog).toBeVisible()
++  await expect(confirmation).toBeVisible()
+ 
+-  await invokeFixtureControl(page, "Credentials no restart")
+-  await apiKey.fill("reasoning-secret")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect
+-    .poll(() => output<unknown[]>(page, "credential-inputs"))
+-    .toContainEqual({
+-      modelID: "company-reasoning",
+-      apiKey: "reasoning-secret",
+-    })
+-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials configured")
+-  await dialog.getByRole("button", { name: "Clear credentials" }).click()
+-  await expect.poll(() => output<string[]>(page, "credential-clear-inputs")).toEqual(["company-reasoning"])
+-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials not configured")
++  await cancel.click()
++  await expect(confirmation).toHaveCount(0)
++  await expect(deleteModel).toBeFocused()
+ })
+ 
+-test("DialogCompanyProvider blocks models until desktop and sidecar catalogs are synchronized", async ({ page }) => {
+-  await page.goto(fixture("company-mismatch"))
+-  const dialog = page.getByRole("dialog")
+-  const pending = page.getByTestId("company-model-pending-model")
+-
+-  await expect(dialog.getByRole("alert")).toContainText("Restart the desktop app")
+-  await expect(pending).toContainText("Pending Model")
+-  await expect(pending).toContainText("https://pending.company.test/v1")
+-  await expect(pending).toContainText("Restart required")
+-  await pending.click()
+-  await expect(page.getByLabel("API key")).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Test connection" })).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Clear credentials" })).toBeDisabled()
+-  expect(await output<unknown[]>(page, "credential-inputs")).toEqual([])
+-  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
+-})
++for (const scenario of ["settings-layout", "settings-v2-layout"]) {
++  test(`${scenario} summarizes the Enterprise catalog and opens provider management`, async ({ page }) => {
++    await page.goto(fixture(scenario))
++
++    await expect(page.getByText("1 provider", { exact: true })).toBeVisible()
++    await expect(page.getByText("Company LLM / Company Code", { exact: true })).toBeVisible()
++    await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled()
++    await page.getByRole("button", { name: "Manage providers" }).click()
++    await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
++  })
++}
+ 
+ test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
+   await page.goto(fixture("settings"))
+   await expect(page.getByTestId("settings-credential-status")).toHaveText("Credentials not configured")
+   await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
+   await invokeFixtureControl(page, "Diagnostic failure")
+ 
+   await page.getByRole("button", { name: "Settings test connection" }).click()
+   await expect(page.getByRole("button", { name: "Testing settings connection" })).toBeDisabled()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+@@ -263,21 +361,21 @@ test("settings diagnostics display the authenticated server remediation", async
+ test("settings success toast creates its icon inside the Solid render owner", async ({ page }) => {
+   const warnings: string[] = []
+   page.on("console", (message) => {
+     if (message.type() === "warning") warnings.push(message.text())
+   })
+   await page.goto(fixture("settings"))
+ 
+   await page.getByRole("button", { name: "Settings test connection" }).click()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+ 
+-  await expect(page.getByText("Company LLM connection succeeded", { exact: true })).toBeVisible()
++  await expect(page.getByText("Enterprise provider connection succeeded", { exact: true })).toBeVisible()
+   expect(warnings.filter((warning) => warning.includes("cleanups created outside"))).toEqual([])
+ })
+ 
+ test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
+   await page.goto(fixture("error-enterprise"))
+ 
+   const guide = page.getByRole("button", { name: "Kernexa AI 가이드 열기" })
+   await expect(guide).toBeVisible()
+   await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
+   await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
+@@ -369,89 +467,37 @@ responsiveViewports.forEach((viewport) => {
+     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(arrowStart)
+     await page.keyboard.press("Shift+Tab")
+     await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused()
+     await page.keyboard.press("Tab")
+     await expect(body).toBeFocused()
+     await page.screenshot({ path: testInfo.outputPath(`company-guide-${viewport.name}.png`) })
+     await page.keyboard.press("Escape")
+     await expect(dialog).toBeHidden()
+   })
+ 
+-  test(`Company LLM dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
++  test(`Enterprise provider dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
+     await page.setViewportSize({ width: viewport.width, height: viewport.height })
+     await page.goto(fixture("company"))
+     const dialog = page.getByRole("dialog")
+     await expect(dialog).toBeVisible()
+     await page.getByTestId("company-controls").evaluate((node) => node.setAttribute("hidden", ""))
+-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}.png`) })
+-    await invokeFixtureControl(page, "Diagnostic failure")
+-    await dialog.getByRole("button", { name: "Test connection" }).click()
+-    await invokeFixtureControl(page, "Resolve diagnostic")
+-    const remediation = dialog.getByText(SAFE_REMEDIATION, { exact: true })
+-    const remediationVisible = () =>
+-      remediation.evaluate((node) => {
+-        const content = node.closest('[role="dialog"]')?.getBoundingClientRect()
+-        const value = node.getBoundingClientRect()
+-        return Boolean(content && value.top >= content.top && value.bottom <= content.bottom)
+-      })
+-    if (!(await remediationVisible())) await remediation.scrollIntoViewIfNeeded()
+-    expect(await remediationVisible()).toBe(true)
+-    const rows = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
+-      const children = [...node.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
+-      return Array.from({ length: children.length / 2 }, (_, index) => {
+-        const label = children[index * 2]
+-        const value = children[index * 2 + 1]
+-        const textRects = (element: HTMLElement) => {
+-          const range = document.createRange()
+-          range.selectNodeContents(element)
+-          return [...range.getClientRects()].map((rect) => ({
+-            top: rect.top,
+-            right: rect.right,
+-            bottom: rect.bottom,
+-            left: rect.left,
+-          }))
+-        }
+-        const labelRects = textRects(label)
+-        const valueRects = textRects(value)
+-        const sharedLines = labelRects.flatMap((labelRect) =>
+-          valueRects
+-            .filter((valueRect) => labelRect.top < valueRect.bottom && labelRect.bottom > valueRect.top)
+-            .map((valueRect) => valueRect.left - labelRect.right),
+-        )
+-        return {
+-          label: label.textContent,
+-          value: value.textContent,
+-          labelOverflows: label.scrollWidth > label.clientWidth,
+-          valueOverflows: value.scrollWidth > value.clientWidth,
+-          textIntersects: sharedLines.some((gap) => gap < 0),
+-          sharedLineGap: sharedLines.length ? Math.min(...sharedLines) : undefined,
+-        }
+-      })
+-    })
+-    expect(rows).toEqual(
+-      expect.arrayContaining([
+-        expect.objectContaining({ label: "Basic response", value: "fail" }),
+-        expect.objectContaining({ label: "Streaming", value: "skipped" }),
+-        expect.objectContaining({ label: "Tool calling", value: "skipped" }),
+-        expect.objectContaining({ label: "Failure (connection)", value: SAFE_REMEDIATION }),
+-      ]),
+-    )
+-    expect(rows.every((row) => !row.labelOverflows && !row.valueOverflows)).toBe(true)
+-    expect(rows.every((row) => !row.textIntersects)).toBe(true)
+-    expect(rows.every((row) => row.sharedLineGap === undefined || row.sharedLineGap >= 8)).toBe(true)
++    await dialog.getByRole("button", { name: "Create provider" }).click()
++    await page.getByLabel("Provider ID").fill("compact-gateway")
++    await page.getByLabel("Provider name").fill("Compact Gateway")
++    await page.getByLabel("Base URL").fill("https://gateway.example/v1")
++    await expect(dialog.getByRole("button", { name: "Save provider" })).toBeVisible()
+ 
+     const box = await dialog.boundingBox()
+     expect(box).not.toBeNull()
+     expect(box?.x).toBeGreaterThanOrEqual(0)
+     expect(box?.y).toBeGreaterThanOrEqual(0)
+     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width)
+     expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(viewport.height)
+     expect(
+       await dialog.evaluate((node) => ({
+         horizontal: node.scrollWidth > node.clientWidth,
+-        vertical: node.scrollHeight > node.clientHeight,
+       })),
+-    ).toEqual({ horizontal: false, vertical: false })
++    ).toEqual({ horizontal: false })
+ 
+-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}-failure.png`) })
++    await page.screenshot({ path: testInfo.outputPath(`enterprise-providers-${viewport.name}.png`) })
+   })
+ })
+diff --git a/packages/app/e2e/fixtures/company-llm-enterprise.tsx b/packages/app/e2e/fixtures/company-llm-enterprise.tsx
+index 80e6fd564..77241c57b 100644
+--- a/packages/app/e2e/fixtures/company-llm-enterprise.tsx
++++ b/packages/app/e2e/fixtures/company-llm-enterprise.tsx
+@@ -1,28 +1,41 @@
+ import "@/index.css"
+-import { MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
+-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
++import { type BaseRouterProps, MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
++import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/solid-query"
+ import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
+ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
+-import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
++import {
++  type Component,
++  createSignal,
++  ErrorBoundary,
++  type JSX,
++  Match,
++  onMount,
++  type ParentProps,
++  Show,
++  Switch,
++  untrack,
++} from "solid-js"
+ import { render } from "solid-js/web"
+ import { createStore } from "solid-js/store"
+-import { AppBaseProviders } from "@/app-base-providers"
++import { AppBaseProviders, AppInterface } from "@/app"
+ import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
+ import { DialogConnectProvider } from "@/components/dialog-connect-provider"
+ import { useServerManagementController } from "@/components/dialog-select-server"
++import { SettingsProviders } from "@/components/settings-providers"
++import { SettingsProvidersV2 } from "@/components/settings-v2/providers"
+ import { WindowsAppMenu } from "@/components/windows-app-menu"
+ import { CommandProvider, useCommand } from "@/context/command"
+ import { DesktopCommands } from "@/desktop-commands"
+ import { GlobalProvider } from "@/context/global"
+ import { LanguageProvider } from "@/context/language"
+-import { type Platform, PlatformProvider, usePlatform } from "@/context/platform"
++import { type EnterpriseProviderCatalogView, type Platform, PlatformProvider, usePlatform } from "@/context/platform"
+ import { ServerConnection, ServerProvider, useServer } from "@/context/server"
+ import { ServerSDKProvider } from "@/context/server-sdk"
+ import { ServerSyncProvider } from "@/context/server-sync"
+ import { SettingsProvider, useSettings } from "@/context/settings"
+ import { TabsProvider, useTabs } from "@/context/tabs"
+ import { setV2Toast, ToastRegion } from "@/utils/toast"
+ import { useServerHealth } from "@/utils/server-health"
+ 
+ const DIAGNOSTIC_SUCCESS = {
+   ok: true,
+@@ -46,22 +59,26 @@ const GUIDE_MARKDOWN = [
+ ].join("\n")
+ 
+ type RequestRecord = {
+   origin: string
+   host: string
+   method: string
+   path: string
+   query: string
+   body?: unknown
+ }
+-type CredentialInput = { modelID: string; apiKey?: string; headers?: Record<string, string> }
+-type CredentialMode = "restart" | "no-restart" | "error"
++type CredentialInput = {
++  providerID: string
++  hasApiKey: boolean
++  headerNames: string[]
++}
++type CredentialMode = "restart" | "no-restart" | "error" | "pending"
+ type DiagnosticOutcome = "success" | "failure" | "network-error"
+ 
+ function createHarness(scenario?: string | null) {
+   const sidecar: ServerConnection.Sidecar = {
+     type: "sidecar",
+     variant: "base",
+     displayName: "Company sidecar",
+     http: { url: "http://127.0.0.1:5199" },
+   }
+   const remote: ServerConnection.Http = {
+@@ -80,47 +97,124 @@ function createHarness(scenario?: string | null) {
+     storageWrites: [] as Array<{ name: string; key: string; value: string | null }>,
+     credentialInputs: [] as CredentialInput[],
+     credentialStatusInputs: [] as string[],
+     credentialClearInputs: [] as string[],
+     credentialCatalogCalls: 0,
+     defaultWrites: [] as Array<ServerConnection.Key | null>,
+     restartSnapshots: [] as string[][],
+     externalLinks: [] as string[],
+   })
+   const [diagnosticPending, setDiagnosticPending] = createSignal(false)
++  const [credentialPending, setCredentialPending] = createSignal(false)
++  const [providerPending, setProviderPending] = createSignal(0)
++  const providerResponses = {
++    deferred: false,
++    empty: false,
++    pending: [] as Array<(response: Response) => void>,
++  }
+   const behavior = {
+-    configured: { "company-code": false, "company-reasoning": false } as Record<string, boolean>,
+     credentialMode: "restart" as CredentialMode,
+     diagnosticOutcome: "success" as DiagnosticOutcome,
+   }
++  const catalogState: { value: EnterpriseProviderCatalogView } = {
++    value: scenario?.startsWith("settings")
++      ? {
++          schemaVersion: 1,
++          default: { providerID: "company-llm", modelID: "company-code" },
++          providers: [
++            {
++              id: "company-llm",
++              name: "Company LLM",
++              baseURL: "https://llm.company.test/v1",
++              models: [{ id: "company-code", name: "Company Code" }],
++              credentials: { configured: false, headerNames: [] },
++            },
++          ],
++        }
++      : { schemaVersion: 1, providers: [] },
++  }
+   const diagnostic = { resolve: undefined as ((value: unknown) => void) | undefined }
++  const credential = { resolve: undefined as (() => void) | undefined }
++  const globalEvent = {
++    resolve: undefined as ((response: Response) => void) | undefined,
++    connected: false,
++  }
+   const history = createMemoryHistory()
+-  history.set({ value: "/", scroll: false, replace: true })
++  history.set({
++    value: scenario?.startsWith("composer") ? "/new-session?draftId=company-composer" : "/",
++    scroll: false,
++    replace: true,
++  })
++  if (scenario?.startsWith("composer")) {
++    stores.set(
++      "opencode.window.company-llm-enterprise-fixture.dat",
++      new Map([
++        [
++          "tabs",
++          JSON.stringify([
++            {
++              type: "draft",
++              draftID: "company-composer",
++              server: ServerConnection.key(sidecar),
++              directory: "/repo",
++            },
++          ]),
++        ],
++      ]),
++    )
++  }
+ 
+   const storage = (name = "default.dat") => {
+     const values = stores.get(name) ?? new Map<string, string>()
+     stores.set(name, values)
+     return {
+       getItem: async (key: string) => values.get(key) ?? null,
+       setItem: async (key: string, value: string) => {
+-        setObservations("storageWrites", observations.storageWrites.length, { name, key, value })
++        setObservations(
++          "storageWrites",
++          untrack(() => observations.storageWrites.length),
++          { name, key, value },
++        )
+         values.set(key, value)
+       },
+       removeItem: async (key: string) => {
+-        setObservations("storageWrites", observations.storageWrites.length, { name, key, value: null })
++        setObservations(
++          "storageWrites",
++          untrack(() => observations.storageWrites.length),
++          { name, key, value: null },
++        )
+         values.delete(key)
+       },
+     }
+   }
+ 
++  const credentialTransition = async () => {
++    if (behavior.credentialMode === "error") throw new Error("secure storage failed")
++    if (behavior.credentialMode !== "pending") return
++    await new Promise<void>((resolve) => {
++      credential.resolve = resolve
++      setCredentialPending(true)
++    })
++    credential.resolve = undefined
++    setCredentialPending(false)
++  }
++
+   const json = (value: unknown) =>
+     new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } })
++  const connectedEvent = () =>
++    new Response(
++      `data: ${JSON.stringify({
++        directory: "global",
++        payload: { id: "fixture-connected", type: "server.connected", properties: {} },
++      })}\n\n`,
++      { status: 200, headers: { "content-type": "text/event-stream" } },
++    )
+   const fetch = (async (source: RequestInfo | URL, init?: RequestInit) => {
+     const request = source instanceof Request ? source : new Request(source, init)
+     const url = new URL(request.url)
+     const body =
+       request.method === "GET"
+         ? undefined
+         : await request
+             .clone()
+             .json()
+             .then(
+@@ -134,91 +228,149 @@ function createHarness(scenario?: string | null) {
+       path: url.pathname,
+       query: url.search,
+       body,
+     })
+ 
+     if (url.pathname === "/global/health") return json({ healthy: true, version: "test" })
+     if (url.pathname === "/global/config") {
+       return json({ $schema: "https://opencode.ai/config.json" })
+     }
+     if (url.pathname === "/provider") {
+-      if (!scenario?.startsWith("company") && scenario !== "connect" && scenario !== "settings") {
++      if (scenario === "composer-enterprise-empty" && providerResponses.empty) {
+         return json({ all: [], connected: [], default: {} })
+       }
+-      const model = (id: string, name: string, url: string) => ({
++      if (scenario === "composer-enterprise-empty" && providerResponses.deferred) {
++        return new Promise<Response>((resolve) => {
++          providerResponses.pending.push(resolve)
++          setProviderPending(providerResponses.pending.length)
++        })
++      }
++      if (
++        !scenario?.startsWith("company") &&
++        scenario !== "connect" &&
++        scenario !== "settings" &&
++        scenario !== "composer-enterprise-empty"
++      ) {
++        return json({ all: [], connected: [], default: {} })
++      }
++      const model = (providerID: string, id: string, name: string, url: string) => ({
+         id,
+-        providerID: "company-llm",
++        providerID,
+         name,
+         api: { id, url, npm: "@ai-sdk/openai-compatible" },
+         status: "active",
+       })
+       return json({
+         all: [
+           {
+             id: "company-llm",
+             name: "Company LLM",
+             source: "config",
+             env: [],
+             options: {},
+             models: {
+-              "company-code": model("company-code", "Company Code", "https://llm.company.test/v1"),
++              "company-code": model("company-llm", "company-code", "Company Code", "https://llm.company.test/v1"),
++              ...(scenario === "company-mismatch"
++                ? {
++                    "pending-model": model(
++                      "company-llm",
++                      "pending-model",
++                      "Pending Model",
++                      "https://pending.company.test/v1",
++                    ),
++                  }
++                : {}),
++            },
++          },
++          {
++            id: "company-llm-2",
++            name: "Company Reasoning",
++            source: "config",
++            env: [],
++            options: {},
++            models: {
+               "company-reasoning": model(
++                "company-llm-2",
+                 "company-reasoning",
+                 "Company Reasoning",
+                 "https://reasoning.company.test/v1",
+               ),
+-              ...(scenario === "company-mismatch"
+-                ? {
+-                    "pending-model": model("pending-model", "Pending Model", "https://pending.company.test/v1"),
+-                  }
+-                : {}),
+             },
+           },
+         ],
+-        connected: [],
+-        default: { "company-llm": "company-code" },
++        connected: scenario === "composer-enterprise-empty" ? ["company-llm"] : [],
++        default: { "company-llm": "company-code", "company-llm-2": "company-reasoning" },
+       })
+     }
+     if (url.pathname === "/path") {
+       return json({
+         home: "/home",
+         state: "/state",
+         config: "/config",
+         worktree: "/repo",
+         directory: "/repo",
+       })
+     }
++    if (url.pathname === "/session") return json([])
++    if (url.pathname === "/agent") {
++      return json([
++        {
++          name: "build",
++          mode: "primary",
++          model:
++            scenario === "composer-enterprise-empty"
++              ? { providerID: "company-llm", modelID: "company-code" }
++              : undefined,
++        },
++      ])
++    }
++    if (url.pathname === "/config") return json({})
++    if (url.pathname === "/session/status") return json({})
++    if (url.pathname === "/project/current") return json({ id: "project", worktree: "/repo" })
++    if (url.pathname === "/vcs") return json(null)
++    if (url.pathname === "/api/reference") return json({ data: [] })
++    if (url.pathname === "/permission" || url.pathname === "/question" || url.pathname === "/command") {
++      return json([])
++    }
++    if (url.pathname === "/mcp") return json({})
++    if (url.pathname === "/experimental/resource" || url.pathname === "/lsp") return json([])
+     if (url.pathname === "/project") return json([])
+-    if (url.pathname === "/provider/company-llm/diagnostics") {
++    if (/^\/provider\/[^/]+\/diagnostics$/.test(url.pathname)) {
+       if (behavior.diagnosticOutcome === "network-error") {
+         throw new Error("transport failure with private detail")
+       }
+       const value = await new Promise<unknown>((resolve) => {
+         diagnostic.resolve = resolve
+         setDiagnosticPending(true)
+       })
+       diagnostic.resolve = undefined
+       setDiagnosticPending(false)
+       return json(value)
+     }
+     if (url.pathname === "/global/event") {
+-      return new Promise<Response>((_resolve, reject) => {
++      if (globalEvent.connected) {
++        globalEvent.connected = false
++        return connectedEvent()
++      }
++      return new Promise<Response>((resolve, reject) => {
++        globalEvent.resolve = resolve
+         const abort = () => reject(new DOMException("Aborted", "AbortError"))
+         if (request.signal.aborted) {
+           abort()
+           return
+         }
+         request.signal.addEventListener("abort", abort, { once: true })
+       })
+     }
+     return json({})
+   }) as typeof globalThis.fetch
++  globalThis.fetch = fetch
+ 
+   const inputValue = (label: string) =>
+     [...document.querySelectorAll<HTMLElement>("[data-component=input]")]
+       .find((field) => field.querySelector("[data-slot=input-label]")?.textContent === label)
+       ?.querySelector<HTMLInputElement>("[data-slot=input-input]")?.value ?? ""
+ 
+   const platform: Platform = {
+     platform: "desktop",
+     os: "macos",
+     windowID: "company-llm-enterprise-fixture",
+@@ -240,80 +392,185 @@ function createHarness(scenario?: string | null) {
+     async openDirectoryPickerDialog() {
+       return null
+     },
+     async getDefaultServer() {
+       return ServerConnection.key(remote)
+     },
+     async setDefaultServer(key) {
+       setObservations("defaultWrites", observations.defaultWrites.length, key)
+     },
+     enterprise: {
+-      async credentialCatalog() {
++      async providerCatalog() {
+         setObservations("credentialCatalogCalls", (value) => value + 1)
+-        return {
+-          defaultModelID: "company-code",
+-          models: [
+-            {
+-              id: "company-code",
+-              name: "Company Code",
+-              baseURL: "https://llm.company.test/v1",
+-              credentialStatus: { configured: behavior.configured["company-code"] },
+-            },
+-            {
+-              id: "company-reasoning",
+-              name: "Company Reasoning",
+-              baseURL: "https://reasoning.company.test/v1",
+-              credentialStatus: { configured: behavior.configured["company-reasoning"] },
+-            },
+-          ],
++        return structuredClone(catalogState.value)
++      },
++      async createProvider(input) {
++        catalogState.value.providers.push({
++          ...input.provider,
++          models: input.provider.models.map((model) => ({ ...model })),
++          credentials: {
++            configured: Boolean(input.credentials?.apiKey || Object.keys(input.credentials?.headers ?? {}).length),
++            headerNames: Object.keys(input.credentials?.headers ?? {}),
++          },
++        })
++        return this.providerCatalog()
++      },
++      async updateProvider(input) {
++        if (input.credentials) {
++          setObservations("credentialInputs", observations.credentialInputs.length, {
++            providerID: input.providerID,
++            hasApiKey: Boolean(input.credentials.apiKey),
++            headerNames: Object.keys(input.credentials.headers),
++          })
++          await credentialTransition()
++        }
++        catalogState.value.providers = catalogState.value.providers.map((provider) =>
++          provider.id === input.providerID
++            ? {
++                ...provider,
++                name: input.name,
++                baseURL: input.baseURL,
++                ...(input.credentials
++                  ? {
++                      credentials: {
++                        configured: Boolean(input.credentials.apiKey || Object.keys(input.credentials.headers).length),
++                        headerNames: Object.keys(input.credentials.headers),
++                      },
++                    }
++                  : {}),
++              }
++            : provider,
++        )
++        return this.providerCatalog()
++      },
++      async deleteProvider(providerID) {
++        catalogState.value.providers = catalogState.value.providers.filter((provider) => provider.id !== providerID)
++        if (catalogState.value.default?.providerID === providerID) {
++          const provider = catalogState.value.providers.find((item) => item.models.length)
++          catalogState.value.default = provider
++            ? { providerID: provider.id, modelID: provider.models[0].id }
++            : undefined
+         }
++        return this.providerCatalog()
+       },
+-      async credentialStatus(modelID) {
+-        setObservations("credentialStatusInputs", observations.credentialStatusInputs.length, modelID)
+-        return { configured: behavior.configured[modelID] ?? false }
++      async createModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        provider?.models.push({ ...input.model })
++        return this.providerCatalog()
+       },
+-      async setCredentials(input) {
+-        setObservations("credentialInputs", observations.credentialInputs.length, input)
+-        if (behavior.credentialMode === "error") throw new Error("secure storage failed")
+-        behavior.configured[input.modelID] = true
+-        return { restartRequired: behavior.credentialMode === "restart" }
++      async updateModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider)
++          provider.models = provider.models.map((model) =>
++            model.id === input.modelID ? { ...model, name: input.name } : model,
++          )
++        return this.providerCatalog()
+       },
+-      async clearCredentials(modelID) {
+-        setObservations("credentialClearInputs", observations.credentialClearInputs.length, modelID)
+-        behavior.configured[modelID] = false
+-        return { restartRequired: behavior.credentialMode === "restart" }
++      async deleteModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider) provider.models = provider.models.filter((model) => model.id !== input.modelID)
++        if (
++          catalogState.value.default?.providerID === input.providerID &&
++          catalogState.value.default.modelID === input.modelID
++        ) {
++          const fallback = provider?.models[0]
++          const other = catalogState.value.providers.find((item) => item.models.length)
++          catalogState.value.default = fallback
++            ? { providerID: input.providerID, modelID: fallback.id }
++            : other
++              ? { providerID: other.id, modelID: other.models[0].id }
++              : undefined
++        }
++        return this.providerCatalog()
++      },
++      async setDefaultModel(input) {
++        catalogState.value.default = { ...input }
++        return this.providerCatalog()
++      },
++      async replaceProviderCredentials(input) {
++        setObservations("credentialInputs", observations.credentialInputs.length, {
++          providerID: input.providerID,
++          hasApiKey: Boolean(input.credentials.apiKey),
++          headerNames: Object.keys(input.credentials.headers),
++        })
++        await credentialTransition()
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider)
++          provider.credentials = {
++            configured: Boolean(input.credentials.apiKey || Object.keys(input.credentials.headers).length),
++            headerNames: Object.keys(input.credentials.headers),
++          }
++        return this.providerCatalog()
++      },
++      async clearProviderCredentials(providerID) {
++        setObservations("credentialClearInputs", observations.credentialClearInputs.length, providerID)
++        await credentialTransition()
++        const provider = catalogState.value.providers.find((item) => item.id === providerID)
++        if (provider) provider.credentials = { configured: false, headerNames: [] }
++        return this.providerCatalog()
+       },
+       async readGuide() {
+         return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
+       },
+       async readiness() {
+         return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }
+       },
+       async stateBackups() {
+         return []
+       },
+       async restoreStateBackup() {
+         return { restartRequired: true as const }
+       },
++      async skillPacks() {
++        return []
++      },
++      async setSkillPackEnabled() {
++        return []
++      },
++      async openSkillPackSource() {},
+     },
+   }
+ 
+   return {
+     behavior,
++    credentialPending,
++    providerPending,
+     diagnosticPending,
+     history,
+     observations,
+     platform,
+     remote,
+     resolveDiagnostic() {
+       diagnostic.resolve?.(behavior.diagnosticOutcome === "success" ? DIAGNOSTIC_SUCCESS : DIAGNOSTIC_FAILURE)
+     },
++    resolveCredential() {
++      credential.resolve?.()
++    },
++    resolveProviders() {
++      providerResponses.deferred = false
++      providerResponses.empty = true
++      const response = json({ all: [], connected: [], default: {} })
++      providerResponses.pending.splice(0).forEach((resolve) => resolve(response.clone()))
++      setProviderPending(0)
++    },
++    refreshProviders() {
++      providerResponses.deferred = true
++      setTimeout(() => {
++        const resolve = globalEvent.resolve
++        globalEvent.resolve = undefined
++        if (resolve) {
++          resolve(connectedEvent())
++          return
++        }
++        globalEvent.connected = true
++      }, 1_600)
++    },
+     sidecar,
+     persistedServers() {
+       observations.storageWrites.length
+       const value = stores.get("opencode.global.dat")?.get("server")
+       if (!value) return []
+       return (JSON.parse(value) as { list?: unknown[] }).list ?? []
+     },
+   }
+ }
+ 
+@@ -514,20 +771,26 @@ function CompanyControls(props: { harness: Harness }) {
+       <div class="fixed bottom-2 left-2 z-50 flex gap-1" data-testid="company-controls">
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "restart")}>
+           Credentials restart
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "no-restart")}>
+           Credentials no restart
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "error")}>
+           Credentials error
+         </button>
++        <button type="button" onClick={() => (props.harness.behavior.credentialMode = "pending")}>
++          Credentials pending
++        </button>
++        <button type="button" disabled={!props.harness.credentialPending()} onClick={props.harness.resolveCredential}>
++          Resolve credentials
++        </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "success")}>
+           Diagnostic success
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "failure")}>
+           Diagnostic failure
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "network-error")}>
+           Diagnostic network error
+         </button>
+         <button type="button" disabled={!props.harness.diagnosticPending()} onClick={props.harness.resolveDiagnostic}>
+@@ -628,20 +891,76 @@ function SettingsScenario(props: { harness: Harness }) {
+   return (
+     <>
+       <DialogTree harness={props.harness}>
+         <SettingsDiagnosticConsumer />
+       </DialogTree>
+       <CompanyControls harness={props.harness} />
+     </>
+   )
+ }
+ 
++function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
++  return (
++    <DialogTree harness={props.harness}>
++      <Show when={props.v2} fallback={<SettingsProviders />}>
++        <SettingsProvidersV2 />
++      </Show>
++    </DialogTree>
++  )
++}
++
++function ComposerScenario(props: { harness: Harness; enterprise: boolean }) {
++  const Router: Component<BaseRouterProps> = (routerProps) => (
++    <MemoryRouter history={props.harness.history} root={routerProps.root} base={routerProps.base}>
++      {routerProps.children}
++    </MemoryRouter>
++  )
++  const platform = props.enterprise ? props.harness.platform : { ...props.harness.platform, enterprise: undefined }
++  return (
++    <PlatformProvider value={platform}>
++      <AppBaseProviders locale="en">
++        <AppInterface
++          router={Router}
++          defaultServer={ServerConnection.key(props.harness.sidecar)}
++          canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
++          servers={[props.harness.sidecar]}
++          disableHealthCheck
++          serverScoped={<ComposerControls harness={props.harness} />}
++        />
++        <Observations harness={props.harness} />
++      </AppBaseProviders>
++    </PlatformProvider>
++  )
++}
++
++function ComposerControls(props: { harness: Harness }) {
++  const queryClient = useQueryClient()
++  return (
++    <div class="fixed left-2 top-2 z-[10000]">
++      <button
++        type="button"
++        onClick={() => {
++          props.harness.refreshProviders()
++          void queryClient.invalidateQueries({
++            predicate: (query) => query.queryKey[2] === "providers",
++          })
++        }}
++      >
++        Refresh providers
++      </button>
++      <button type="button" disabled={props.harness.providerPending() < 2} onClick={props.harness.resolveProviders}>
++        Resolve providers
++      </button>
++    </div>
++  )
++}
++
+ function Fixture() {
+   const scenario = new URLSearchParams(window.location.search).get("scenario")
+   const harness = createHarness(scenario)
+   return (
+     <Switch fallback={<p>Unknown scenario</p>}>
+       <Match when={scenario === "server"}>
+         <ServerScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "controller"}>
+         <ControllerScenario harness={harness} />
+@@ -651,20 +970,32 @@ function Fixture() {
+       </Match>
+       <Match when={scenario === "company"}>
+         <CompanyScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "company-mismatch"}>
+         <CompanyScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "settings"}>
+         <SettingsScenario harness={harness} />
+       </Match>
++      <Match when={scenario === "settings-layout"}>
++        <SettingsLayoutScenario harness={harness} />
++      </Match>
++      <Match when={scenario === "settings-v2-layout"}>
++        <SettingsLayoutScenario harness={harness} v2 />
++      </Match>
++      <Match when={scenario === "composer-enterprise-empty"}>
++        <ComposerScenario harness={harness} enterprise />
++      </Match>
++      <Match when={scenario === "composer-ordinary-empty"}>
++        <ComposerScenario harness={harness} enterprise={false} />
++      </Match>
+       <Match when={scenario === "guide"}>
+         <GuideScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "error-enterprise"}>
+         <ErrorScenario harness={harness} enterprise />
+       </Match>
+       <Match when={scenario === "error-public"}>
+         <ErrorScenario harness={harness} enterprise={false} />
+       </Match>
+     </Switch>
+diff --git a/packages/app/src/components/prompt-input.tsx b/packages/app/src/components/prompt-input.tsx
+index a820067a4..d99cb6cec 100644
+--- a/packages/app/src/components/prompt-input.tsx
++++ b/packages/app/src/components/prompt-input.tsx
+@@ -69,20 +69,22 @@ import {
+ import { createPromptSubmit, type FollowupDraft } from "./prompt-input/submit"
+ import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
+ import { PromptContextItems } from "./prompt-input/context-items"
+ import { PromptImageAttachments } from "./prompt-input/image-attachments"
+ import { PromptDragOverlay } from "./prompt-input/drag-overlay"
+ import { promptPlaceholder } from "./prompt-input/placeholder"
+ import { createPromptInputTransientState } from "./prompt-input/transient-state"
+ import { showToast } from "@/utils/toast"
+ import { ImagePreview } from "@opencode-ai/ui/image-preview"
+ import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
++import { useSettingsDialog } from "./settings-dialog"
++import { enterpriseModelState } from "@/context/model-selection"
+ 
+ export type PromptInputState = ReturnType<typeof usePrompt>
+ 
+ export type PromptInputHistory = {
+   entries: (mode: "normal" | "shell") => PromptHistoryStoredEntry[]
+   add: (prompt: Prompt, mode: "normal" | "shell", comments: PromptHistoryComment[]) => void
+ }
+ 
+ export type PromptInputSubmission = {
+   abort: () => Promise<void> | void
+@@ -169,20 +171,64 @@ export interface PromptInputProps {
+   onNewSessionWorktreeReset?: () => void
+   edit?: { id: string; prompt: Prompt; context: FollowupDraft["context"] }
+   onEditLoaded?: () => void
+   shouldQueue?: () => boolean
+   onQueue?: (draft: FollowupDraft) => void
+   onAbort?: () => void
+   onSubmit?: () => void
+   toolbar?: JSX.Element
+ }
+ 
++export const ENTERPRISE_EMPTY_MODEL_MESSAGE = "Add a provider and model to start chatting"
++
++export const EnterpriseEmptyComposer: Component<{
++  newLayoutDesigns: boolean
++}> = (props) => {
++  const openProviders = useSettingsDialog("providers")
++  return (
++    <div
++      data-component="enterprise-empty-composer"
++      class="flex min-h-[96px] w-full flex-col justify-between gap-3 rounded-xl bg-v2-background-bg-base p-3 shadow-[var(--v2-elevation-raised)]"
++    >
++      <div
++        role="textbox"
++        aria-disabled="true"
++        aria-label={ENTERPRISE_EMPTY_MODEL_MESSAGE}
++        contenteditable={false}
++        class="select-none text-13-regular text-text-weak"
++      >
++        {ENTERPRISE_EMPTY_MODEL_MESSAGE}
++      </div>
++      <div class="flex items-center justify-between gap-2">
++        <button
++          type="button"
++          class="rounded-md px-2.5 py-1.5 text-12-medium text-text-base hover:bg-background-stronger"
++          classList={{
++            "bg-background-strong": props.newLayoutDesigns,
++            "border border-border-weak-base": !props.newLayoutDesigns,
++          }}
++          onClick={openProviders}
++        >
++          Manage providers
++        </button>
++        <button
++          data-action="prompt-submit"
++          type="submit"
++          disabled
++          aria-label="Send"
++          class="size-8 cursor-not-allowed rounded-md bg-background-stronger opacity-50"
++        />
++      </div>
++    </div>
++  )
++}
++
+ const EXAMPLES = [
+   "prompt.example.1",
+   "prompt.example.2",
+   "prompt.example.3",
+   "prompt.example.4",
+   "prompt.example.5",
+   "prompt.example.6",
+   "prompt.example.7",
+   "prompt.example.8",
+   "prompt.example.9",
+@@ -1526,20 +1572,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
+     if (!nav && !ctrlNav) return
+     slashOnKeyDown(event)
+     if (event.key === "ArrowUp" || event.key === "ArrowDown" || ctrlNav) scrollSlashActiveIntoView()
+     event.preventDefault()
+   }
+ 
+   const agentsLoading = () => props.controls.agents.loading
+   const agentsShouldFadeIn = createMemo<boolean>((prev) => prev ?? agentsLoading())
+   const providersLoading = () => props.controls.model.loading
+   const providersShouldFadeIn = createMemo<boolean>((prev) => prev ?? providersLoading())
++  const modelState = createMemo(() =>
++    enterpriseModelState({
++      enterprise: !!platform.enterprise,
++      loading: providersLoading(),
++      model: props.controls.model.selection.current(),
++    }),
++  )
+ 
+   const [promptReady] = createResource(
+     () => prompt.ready.promise,
+     (p) => p,
+   )
+ 
+   const designPlaceholder = () => {
+     if (store.mode === "shell") return placeholder()
+     return "Ask anything, / for commands, @ for context..."
+   }
+@@ -1579,22 +1632,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
+     current: props.controls.agents.current,
+     style: control(),
+     onSelect: (value) => {
+       props.controls.agents.select(value)
+       restoreFocus()
+     },
+   }))
+   return (
+     <div class="relative size-full flex flex-col gap-0">
+       {(promptReady(), null)}
++      <Show when={modelState() === "empty"}>
++        <EnterpriseEmptyComposer newLayoutDesigns={props.controls.newLayoutDesigns} />
++      </Show>
+       <PromptPopover
+-        popover={store.popover}
++        popover={modelState() === "empty" ? null : store.popover}
+         setSlashPopoverRef={(el) => (slashPopoverRef = el)}
+         atFlat={atFlat()}
+         atActive={atActive() ?? undefined}
+         atKey={atKey}
+         setAtActive={setAtActive}
+         onAtSelect={handleAtSelect}
+         slashFlat={slashFlat()}
+         slashActive={slashActive() ?? undefined}
+         setSlashActive={setSlashActive}
+         onSlashSelect={handleSlashSelect}
+@@ -1605,21 +1661,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
+           slashOnInput(value)
+         }}
+         onSlashMenuKeyDown={handleSlashMenuKeyDown}
+         commandKeybind={command.keybind}
+         commandKeybindParts={command.keybindParts}
+         newLayoutDesigns={props.controls.newLayoutDesigns}
+         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
+       />
+       <Switch>
+         <Match when={props.controls.newLayoutDesigns}>
+-          <div class="flex flex-col gap-3">
++          <div class="flex flex-col gap-3" classList={{ hidden: modelState() === "empty" }}>
+             <DockShellForm
+               data-component={newSession() ? "session-new-composer" : "session-composer"}
+               onSubmit={handleSubmit}
+               classList={{
+                 "group/prompt-input min-h-[96px] w-full rounded-xl bg-v2-background-bg-base shadow-[var(--v2-elevation-raised)]": true,
+                 "border-icon-info-active border-dashed": store.draggingType !== null,
+                 [props.class ?? ""]: !!props.class,
+               }}
+             >
+               <PromptDragOverlay
+@@ -1839,20 +1895,21 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
+               </div>
+             </DockShellForm>
+           </div>
+         </Match>
+         <Match when>
+           <DockShellForm
+             onSubmit={handleSubmit}
+             classList={{
+               "group/prompt-input": true,
+               "focus-within:shadow-xs-border": true,
++              hidden: modelState() === "empty",
+               "border-icon-info-active border-dashed": store.draggingType !== null,
+               [props.class ?? ""]: !!props.class,
+             }}
+           >
+             <PromptDragOverlay
+               type={store.draggingType}
+               label={language.t(
+                 store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label",
+               )}
+             />
+diff --git a/packages/app/src/components/prompt-input/submit.test.ts b/packages/app/src/components/prompt-input/submit.test.ts
+index bce06b434..b90775649 100644
+--- a/packages/app/src/components/prompt-input/submit.test.ts
++++ b/packages/app/src/components/prompt-input/submit.test.ts
+@@ -15,27 +15,29 @@ const optimistic: Array<{
+     model: { providerID: string; modelID: string }
+     variant?: string
+   }
+ }> = []
+ const optimisticSeeded: boolean[] = []
+ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
+ const promoted: Array<{ directory: string; sessionID: string }> = []
+ const sentShell: string[] = []
+ const syncedDirectories: string[] = []
+ const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
++const toasts: Array<{ title?: string; description?: string }> = []
+ 
+ let params: { id?: string } = {}
+ let search: { draftId?: string } = {}
+ let selected = "/repo/worktree-a"
+ let variant: string | undefined
+ let permissionServer = "server-a"
+ let createSessionGate: Promise<void> | undefined
++let enterprise = false
+ 
+ const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
+ const prompt = {
+   ready: Object.assign(() => true, { promise: Promise.resolve(true) }),
+   current: () => promptValue,
+   cursor: () => 0,
+   dirty: () => true,
+   model: {
+     current: () => undefined,
+     set: () => undefined,
+@@ -94,21 +96,24 @@ beforeAll(async () => {
+ 
+   mock.module("@opencode-ai/sdk/v2/client", () => ({
+     createOpencodeClient: (input: { directory: string }) => {
+       createdClients.push(input.directory)
+       return clientFor(input.directory)
+     },
+   }))
+ 
+   mock.module("@opencode-ai/ui/toast", () => ({
+     Toast: { Region: () => null },
+-    showToast: () => 0,
++    showToast: (options: { title?: string; description?: string }) => {
++      toasts.push(options)
++      return 0
++    },
+   }))
+ 
+   mock.module("@opencode-ai/core/util/encode", () => ({
+     base64Encode: (value: string) => value,
+   }))
+ 
+   mock.module("@/context/local", () => ({
+     useLocal: () => ({
+       model: {
+         current: () => ({ id: "model", provider: { id: "provider" } }),
+@@ -221,20 +226,23 @@ beforeAll(async () => {
+             }
+           },
+         ]
+       },
+     }),
+   }))
+ 
+   mock.module("@/context/platform", () => ({
+     usePlatform: () => ({
+       fetch: fetch,
++      get enterprise() {
++        return enterprise ? {} : undefined
++      },
+     }),
+   }))
+ 
+   mock.module("@/context/language", () => ({
+     useLanguage: () => ({
+       t: (key: string) => key,
+     }),
+   }))
+ 
+   const mod = await import("./submit")
+@@ -250,20 +258,22 @@ beforeEach(() => {
+   promoted.length = 0
+   promotedDrafts.length = 0
+   params = {}
+   search = {}
+   sentShell.length = 0
+   syncedDirectories.length = 0
+   selected = "/repo/worktree-a"
+   variant = undefined
+   permissionServer = "server-a"
+   createSessionGate = undefined
++  enterprise = false
++  toasts.length = 0
+   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
+ })
+ 
+ describe("prompt submit worktree selection", () => {
+   test("reads the latest worktree accessor value per submit", async () => {
+     const submit = createPromptSubmit({
+       prompt,
+       info: () => undefined,
+       imageAttachments: () => [],
+       commentCount: () => 0,
+@@ -448,20 +458,53 @@ describe("prompt submit worktree selection", () => {
+ 
+     await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+ 
+     expect(optimistic[0]).toMatchObject({
+       message: {
+         model: { providerID: "draft-provider", modelID: "draft-model", variant: "draft-variant" },
+       },
+     })
+   })
+ 
++  test("blocks Enterprise submission before creating a session when no model exists", async () => {
++    enterprise = true
++    const model = {
++      current: () => undefined,
++      variant: { current: () => undefined },
++    } as unknown as ModelSelection
++    const submit = createPromptSubmit({
++      prompt,
++      info: () => undefined,
++      imageAttachments: () => [],
++      commentCount: () => 0,
++      autoAccept: () => false,
++      mode: () => "normal",
++      working: () => false,
++      editor: () => undefined,
++      queueScroll: () => undefined,
++      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
++      addToHistory: () => undefined,
++      resetHistoryNavigation: () => undefined,
++      setMode: () => undefined,
++      setPopover: () => undefined,
++      model,
++    })
++
++    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
++
++    expect(createdSessions).toEqual([])
++    expect(toasts).toContainEqual({
++      title: "Add a provider and model to start chatting",
++      description: "Open Settings → Providers to manage Enterprise providers.",
++    })
++  })
++
+   test("seeds new sessions before optimistic prompts are added", async () => {
+     const submit = createPromptSubmit({
+       prompt,
+       info: () => undefined,
+       imageAttachments: () => [],
+       commentCount: () => 0,
+       autoAccept: () => false,
+       mode: () => "normal",
+       working: () => false,
+       editor: () => undefined,
+diff --git a/packages/app/src/components/prompt-input/submit.ts b/packages/app/src/components/prompt-input/submit.ts
+index 203722fc6..a72f16ee3 100644
+--- a/packages/app/src/components/prompt-input/submit.ts
++++ b/packages/app/src/components/prompt-input/submit.ts
+@@ -2,20 +2,21 @@ import type { Message, Session } from "@opencode-ai/sdk/v2/client"
+ import { showToast } from "@/utils/toast"
+ import { base64Encode } from "@opencode-ai/core/util/encode"
+ import { Binary } from "@opencode-ai/core/util/binary"
+ import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
+ import { batch, startTransition, type Accessor } from "solid-js"
+ import { useTabs } from "@/context/tabs"
+ import { useServerSync, type ServerSync } from "@/context/server-sync"
+ import { useLanguage } from "@/context/language"
+ import { useLayout } from "@/context/layout"
+ import { useLocal, type ModelSelection } from "@/context/local"
++import { usePlatform } from "@/context/platform"
+ import { usePermission } from "@/context/permission"
+ import { type ContextItem, type ImageAttachmentPart, type Prompt, type usePrompt } from "@/context/prompt"
+ import { useSDK, type DirectorySDK } from "@/context/sdk"
+ import { useSync, type DirectorySync } from "@/context/sync"
+ import { Identifier } from "@/utils/id"
+ import { Worktree as WorktreeState } from "@/utils/worktree"
+ import { buildRequestParts } from "./build-request-parts"
+ import { setCursorPosition } from "./editor-dom"
+ import { formatServerError } from "@/utils/server-errors"
+ import { ScopedKey } from "@/utils/server-scope"
+@@ -194,20 +195,21 @@ type PromptSubmitInput = {
+   model?: ModelSelection
+ }
+ 
+ export function createPromptSubmit(input: PromptSubmitInput) {
+   const navigate = useNavigate()
+   const sdk = useSDK()
+   const sync = useSync()
+   const serverSync = useServerSync()
+   const local = useLocal()
+   const permission = usePermission()
++  const platform = usePlatform()
+   const prompt = input.prompt
+   const layout = useLayout()
+   const language = useLanguage()
+   const params = useParams()
+   const [search] = useSearchParams<{ draftId?: string }>()
+   const tabs = useTabs()
+   const pendingKey = (sessionID: string) => ScopedKey.from(sdk().scope, sessionID)
+ 
+   const errorMessage = (err: unknown) => {
+     if (err && typeof err === "object" && "data" in err) {
+@@ -296,20 +298,27 @@ export function createPromptSubmit(input: PromptSubmitInput) {
+ 
+     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
+       if (input.working()) void abort()
+       return
+     }
+ 
+     const modelSelection = input.model ?? local.model
+     const currentModel = modelSelection.current()
+     const currentAgent = local.agent.current()
+     const variant = modelSelection.variant.current()
++    if (platform.enterprise && !currentModel) {
++      showToast({
++        title: "Add a provider and model to start chatting",
++        description: "Open Settings → Providers to manage Enterprise providers.",
++      })
++      return
++    }
+     if (!currentModel || !currentAgent) {
+       showToast({
+         title: language.t("prompt.toast.modelAgentRequired.title"),
+         description: language.t("prompt.toast.modelAgentRequired.description"),
+       })
+       return
+     }
+ 
+     input.addToHistory(currentPrompt, mode)
+     input.resetHistoryNavigation()
+diff --git a/packages/app/src/context/global-sync/bootstrap.test.ts b/packages/app/src/context/global-sync/bootstrap.test.ts
+index 40735fb82..1442f5f10 100644
+--- a/packages/app/src/context/global-sync/bootstrap.test.ts
++++ b/packages/app/src/context/global-sync/bootstrap.test.ts
+@@ -1,19 +1,20 @@
+ import { describe, expect, test } from "bun:test"
+ import { createStore } from "solid-js/store"
+ import { QueryClient } from "@tanstack/solid-query"
+-import type { Config, OpencodeClient, Project, Session } from "@opencode-ai/sdk/v2/client"
++import type { Agent, Config, OpencodeClient, Project, Session } from "@opencode-ai/sdk/v2/client"
+ import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
+-import { bootstrapDirectory, loadPathQuery, loadProvidersQuery } from "./bootstrap"
++import { bootstrapDirectory, loadAgentsQuery, loadPathQuery, loadProvidersQuery } from "./bootstrap"
+ import type { State, VcsCache } from "./types"
+ import { createServerSession } from "../server-session"
+ import { ServerScope } from "@/utils/server-scope"
++import { parseModelSelection, resolveModelRecovery } from "../model-selection"
+ 
+ const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
+ 
+ function directoryState() {
+   return createStore<State>({
+     status: "loading",
+     agent: [],
+     command: [],
+     reference: [],
+     project: "",
+@@ -43,22 +44,25 @@ function directoryState() {
+     message: {},
+     part: {},
+     part_text_accum_delta: {},
+   })
+ }
+ 
+ describe("bootstrapDirectory", () => {
+   test("marks a loading directory partial during bootstrap and complete after success", async () => {
+     const mcpReads: string[] = []
+     const [store, setStore] = directoryState()
++    const providers = Promise.withResolvers<{
++      data: { all: []; connected: string[]; default: Record<string, string> }
++    }>()
+ 
+-    await bootstrapDirectory({
++    const refreshing = bootstrapDirectory({
+       directory: "/project",
+       scope: ServerScope.local,
+       mcp: false,
+       global: {
+         config: {} satisfies Config,
+         path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+         project: [{ id: "project", worktree: "/project" } as Project],
+         provider,
+       },
+       sdk: {
+@@ -74,38 +78,181 @@ describe("bootstrapDirectory", () => {
+         },
+         permission: { list: async () => ({ data: [] }) },
+         question: { list: async () => ({ data: [] }) },
+         v2: { reference: { list: async () => ({ data: { data: [] } }) } },
+         mcp: {
+           status: async () => {
+             mcpReads.push("status")
+             return { data: {} }
+           },
+         },
+-        provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
++        provider: { list: () => providers.promise },
+       } as unknown as OpencodeClient,
+       store,
+       setStore,
+       vcsCache: { setStore() {} } as unknown as VcsCache,
+       loadSessions() {},
+       translate: (key) => key,
+       queryClient: new QueryClient(),
+     })
++    let settled = false
++    void refreshing.then(() => {
++      settled = true
++    })
+ 
+     expect(store.status).toBe("partial")
++    await Promise.resolve()
++    await Promise.resolve()
++    expect(settled).toBe(false)
+ 
+-    await new Promise((resolve) => setTimeout(resolve, 80))
++    providers.resolve({ data: { all: [], connected: [], default: {} } })
++    await refreshing
+ 
+     expect(store.status).toBe("complete")
+     expect(mcpReads).toEqual([])
+   })
+ 
++  test("finishes one directory refresh before a sequential refresh can write", async () => {
++    const [store, setStore] = directoryState()
++    const firstConfig = Promise.withResolvers<{ data: Config }>()
++    let configReads = 0
++    const sdk = {
++      app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
++      config: {
++        get: () => {
++          configReads++
++          if (configReads === 1) return firstConfig.promise
++          return Promise.resolve({ data: { model: "company/second" } })
++        },
++      },
++      session: { status: async () => ({ data: {} }) },
++      vcs: { get: async () => ({ data: undefined }) },
++      permission: { list: async () => ({ data: [] }) },
++      question: { list: async () => ({ data: [] }) },
++      v2: { reference: { list: async () => ({ data: { data: [] } }) } },
++      provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
++    } as unknown as OpencodeClient
++    const input = {
++      directory: "/project",
++      scope: ServerScope.local,
++      mcp: false,
++      global: {
++        config: {} satisfies Config,
++        path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
++        project: [{ id: "project", worktree: "/project" } as Project],
++        provider,
++      },
++      sdk,
++      store,
++      setStore,
++      vcsCache: { setStore() {} } as unknown as VcsCache,
++      loadSessions() {},
++      translate: (key: string) => key,
++      queryClient: new QueryClient(),
++    }
++
++    const first = bootstrapDirectory(input)
++    const sequential = first.then(() => bootstrapDirectory(input))
++    await waitFor(() => configReads > 0)
++
++    expect(configReads).toBe(1)
++
++    firstConfig.resolve({ data: { model: "company/first" } })
++    await sequential
++
++    expect(configReads).toBe(2)
++    expect(store.config.model).toBe("company/second")
++    expect(store.status).toBe("complete")
++  })
++
++  test("keeps a cached directory partial until refreshed agents, config, and providers all arrive", async () => {
++    const [store, setStore] = directoryState()
++    setStore("status", "complete")
++    setStore("agent", [{ name: "stale", mode: "primary", permission: [], options: {} }])
++    setStore("config", { model: "stale/model" })
++    const agents = Promise.withResolvers<{ data: Agent[] }>()
++    const config = Promise.withResolvers<{ data: Config }>()
++    const providers = Promise.withResolvers<{
++      data: { all: []; connected: string[]; default: Record<string, string> }
++    }>()
++    const queryClient = new QueryClient()
++    queryClient.setQueryData(loadAgentsQuery(ServerScope.local, "/project", {} as OpencodeClient).queryKey, [
++      { name: "stale", mode: "primary", permission: [], options: {} },
++    ])
++
++    const refreshing = bootstrapDirectory({
++      directory: "/project",
++      scope: ServerScope.local,
++      mcp: false,
++      global: {
++        config: {} satisfies Config,
++        path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
++        project: [{ id: "project", worktree: "/project" } as Project],
++        provider,
++      },
++      sdk: {
++        app: { agents: () => agents.promise },
++        config: { get: () => config.promise },
++        session: { status: async () => ({ data: {} }) },
++        vcs: { get: async () => ({ data: undefined }) },
++        permission: { list: async () => ({ data: [] }) },
++        question: { list: async () => ({ data: [] }) },
++        v2: { reference: { list: async () => ({ data: { data: [] } }) } },
++        provider: { list: () => providers.promise },
++      } as unknown as OpencodeClient,
++      store,
++      setStore,
++      vcsCache: { setStore() {} } as unknown as VcsCache,
++      loadSessions() {},
++      translate: (key) => key,
++      queryClient,
++    })
++    const recover = () =>
++      resolveModelRecovery({
++        ready: store.status === "complete",
++        previous: { providerID: "deleted", modelID: "old" },
++        candidates: [store.agent[0]?.model, parseModelSelection(store.config.model)],
++        valid: (model) => model.providerID === "company",
++      })
++
++    expect(store.status).toBe("partial")
++    expect(recover()).toBeUndefined()
++    await waitFor(() => queryClient.isFetching() === 2)
++    expect(store.agent[0]?.name).toBe("stale")
++    expect(store.config.model).toBe("stale/model")
++
++    agents.resolve({
++      data: [
++        {
++          name: "fresh",
++          mode: "primary",
++          model: { providerID: "company", modelID: "agent" },
++          permission: [],
++          options: {},
++        },
++      ],
++    })
++    config.resolve({ data: { model: "company/config" } })
++    await Promise.resolve()
++    expect(store.status).toBe("partial")
++    expect(recover()).toBeUndefined()
++
++    providers.resolve({ data: { all: [], connected: [], default: {} } })
++    await refreshing
++    await waitFor(() => store.status === "complete")
++
++    expect(store.status).toBe("complete")
++    expect(store.agent[0]?.name).toBe("fresh")
++    expect(store.config.model).toBe("company/config")
++    expect(recover()?.next).toEqual({ providerID: "company", modelID: "agent" })
++  })
++
+   test("seeds session status even while warming session info stalls", async () => {
+     const [store, setStore] = directoryState()
+     const stalled = Promise.withResolvers<never>()
+     const client = {
+       app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
+       config: { get: async () => ({ data: {} }) },
+       session: {
+         status: async () => ({ data: { ses_busy: { type: "busy" } } }),
+         get: () => stalled.promise,
+       },
+@@ -123,50 +270,63 @@ describe("bootstrapDirectory", () => {
+       slug: "ses_stale",
+       projectID: "project",
+       directory: "/project",
+       title: "stale",
+       version: "1",
+       time: { created: 1, updated: 1 },
+     }
+     session.remember(stale)
+     session.set("session_status", stale.id, { type: "busy" })
+ 
+-    await bootstrapDirectory({
++    const refreshing = bootstrapDirectory({
+       directory: "/project",
+       scope: ServerScope.local,
+       mcp: false,
+       global: {
+         config: {} satisfies Config,
+         path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+         project: [{ id: "project", worktree: "/project" } as Project],
+         provider,
+       },
+       sdk: client,
+       store,
+       setStore,
+       vcsCache: { setStore() {} } as unknown as VcsCache,
+       loadSessions() {},
+       translate: (key) => key,
+       queryClient: new QueryClient(),
+       session,
+     })
++    let settled = false
++    void refreshing.then(() => {
++      settled = true
++    })
+ 
+     const deadline = Date.now() + 500
+     while (!session.data.session_working("ses_busy") && Date.now() < deadline) {
+       await new Promise((resolve) => setTimeout(resolve, 10))
+     }
+ 
+     expect(session.data.session_status["ses_busy"]?.type).toBe("busy")
+     expect(session.data.session_status[stale.id]).toBeUndefined()
++    expect(settled).toBe(false)
+   })
+ })
+ 
++async function waitFor(condition: () => boolean) {
++  const deadline = Date.now() + 1_000
++  while (!condition()) {
++    if (Date.now() > deadline) throw new Error("Timed out waiting for bootstrap queries")
++    await new Promise((resolve) => setTimeout(resolve, 5))
++  }
++}
++
+ describe("query keys", () => {
+   test("partitions identical directories by server scope", () => {
+     const client = {} as OpencodeClient
+     const remote = "https://debian.example" as typeof ServerScope.local
+ 
+     expect([...loadPathQuery(ServerScope.local, "/repo", client).queryKey]).toEqual(["local", "/repo", "path"])
+     expect([...loadPathQuery(remote, "/repo", client).queryKey]).toEqual(["https://debian.example", "/repo", "path"])
+     expect([...loadProvidersQuery(remote, null, client).queryKey]).toEqual([
+       "https://debian.example",
+       null,
+diff --git a/packages/app/src/context/global-sync/bootstrap.ts b/packages/app/src/context/global-sync/bootstrap.ts
+index c63b70252..3d6ecd56d 100644
+--- a/packages/app/src/context/global-sync/bootstrap.ts
++++ b/packages/app/src/context/global-sync/bootstrap.ts
+@@ -215,39 +215,38 @@ export async function bootstrapDirectory(input: {
+   translate: (key: string, vars?: Record<string, string | number>) => string
+   global: {
+     config: Config
+     path: Path
+     project: Project[]
+     provider: NormalizedProviderListResponse
+   }
+   queryClient: QueryClient
+   session?: ServerSession
+ }) {
+-  const loading = input.store.status !== "complete"
+   const seededProject = projectID(input.directory, input.global.project)
+   const seededPath = input.global.path.directory === input.directory ? input.global.path : undefined
+   if (seededProject) input.setStore("project", seededProject)
+   if (seededPath) input.setStore("path", seededPath)
+   if (Object.keys(input.store.config).length === 0 && Object.keys(input.global.config).length > 0) {
+     input.setStore("config", reconcile(input.global.config, { merge: false }))
+   }
+-  if (loading) input.setStore("status", "partial")
++  input.setStore("status", "partial")
+ 
+   const revKey = ScopedKey.from(input.scope, input.directory)
+   const rev = (providerRev.get(revKey) ?? 0) + 1
+   providerRev.set(revKey, rev)
+-  ;(async () => {
++  return (async () => {
+     const slow = [
+       () => Promise.resolve(input.loadSessions(input.directory)),
+       () =>
+         input.queryClient
+-          .ensureQueryData(loadAgentsQuery(input.scope, input.directory, input.sdk))
++          .fetchQuery(loadAgentsQuery(input.scope, input.directory, input.sdk))
+           .then((data) => input.setStore("agent", data)),
+       () =>
+         retry(() => input.sdk.config.get().then((x) => input.setStore("config", reconcile(x.data!, { merge: false })))),
+       () =>
+         retry(() =>
+           input.sdk.session.status().then(async (x) => {
+             if (!input.session) {
+               input.setStore("session_status", x.data!)
+               return
+             }
+@@ -346,36 +345,28 @@ export async function bootstrapDirectory(input: {
+                   if (input.session) input.session.set("question", sessionID, value)
+                   if (!input.session) input.setStore("question", sessionID, value)
+                 }
+               }),
+             )
+           }),
+         ),
+       () => Promise.resolve(input.loadSessions(input.directory)),
+       input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.scope, input.directory, input.sdk))),
+       input.mcp && (() => input.queryClient.fetchQuery(loadMcpResourcesQuery(input.scope, input.directory, input.sdk))),
+-      () =>
+-        input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)).catch((err) => {
+-          const project = getFilename(input.directory)
+-          showToast({
+-            variant: "error",
+-            title: input.translate("toast.project.reloadFailed.title", { project }),
+-            description: formatServerError(err, input.translate),
+-          })
+-        }),
++      () => input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)),
+     ].filter(Boolean) as (() => Promise<any>)[]
+ 
+     await waitForPaint()
+     const slowErrs = errors(await runAll(slow))
+     if (slowErrs.length > 0) {
+       console.error("Failed to finish bootstrap instance", slowErrs[0])
+       const project = getFilename(input.directory)
+       showToast({
+         variant: "error",
+         title: input.translate("toast.project.reloadFailed.title", { project }),
+         description: formatServerError(slowErrs[0], input.translate),
+       })
+     }
+ 
+-    if (loading && slowErrs.length === 0) input.setStore("status", "complete")
++    if (providerRev.get(revKey) === rev && slowErrs.length === 0) input.setStore("status", "complete")
+   })()
+ }
+diff --git a/packages/app/src/context/global-sync/child-store.test.ts b/packages/app/src/context/global-sync/child-store.test.ts
+index e05b7c39a..e470a7f6e 100644
+--- a/packages/app/src/context/global-sync/child-store.test.ts
++++ b/packages/app/src/context/global-sync/child-store.test.ts
+@@ -1,20 +1,21 @@
+ import { beforeAll, describe, expect, mock, test } from "bun:test"
+-import { createRoot, getOwner, type Owner } from "solid-js"
++import { createRoot, createSignal, getOwner, type Owner } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
+ import type { State } from "./types"
+ import type { QueryOptionsApi } from "../server-sync"
+ import { ServerScope } from "@/utils/server-scope"
+ 
+ let createChildStoreManager: typeof import("./child-store").createChildStoreManager
+ const querySingles: Array<() => { queryKey?: unknown[]; enabled?: boolean }> = []
++let providerFetching = false
+ const persist: typeof import("@/utils/persist").persisted = (_target, store) => [
+   store[0],
+   store[1],
+   null,
+   Object.assign(() => true, { promise: undefined }),
+ ]
+ 
+ const child = () => createStore({} as State)
+ const provider = { all: new Map(), connected: [], default: {} } satisfies NormalizedProviderListResponse
+ 
+@@ -58,20 +59,23 @@ beforeAll(async () => {
+         get isLoading() {
+           return options().queryKey?.[1] === "path"
+         },
+         get data() {
+           if (options().queryKey?.[1] === "path") throw new Error("pending path data read")
+           if (options().queryKey?.[1] === "mcp") return options().enabled ? { demo: { status: "disabled" } } : undefined
+           if (options().queryKey?.[1] === "lsp") return []
+           if (options().queryKey?.[1] === "providers") return provider
+           return undefined
+         },
++        get isFetching() {
++          return options().queryKey?.[1] === "providers" && providerFetching
++        },
+       }
+     },
+   }))
+ 
+   createChildStoreManager = (await import("./child-store")).createChildStoreManager
+ })
+ 
+ describe("createChildStoreManager", () => {
+   test("does not evict the active directory during mark", () => {
+     const owner = createRoot((dispose) => {
+@@ -85,21 +89,21 @@ describe("createChildStoreManager", () => {
+       owner,
+       scope: ServerScope.local,
+       persist,
+       isBooting: () => false,
+       isLoadingSessions: () => false,
+       onBootstrap() {},
+       onMcp() {},
+       onDispose() {},
+       translate: (key) => key,
+       queryOptions: queryOptionsApi,
+-      global: { provider },
++      global: { provider: () => provider },
+     })
+ 
+     Array.from({ length: 30 }, (_, index) => `/pinned-${index}`).forEach((directory) => {
+       manager.children[directory] = child()
+       manager.pin(directory)
+     })
+ 
+     const directory = "/active"
+     manager.children[directory] = child()
+     manager.mark(directory)
+@@ -118,21 +122,21 @@ describe("createChildStoreManager", () => {
+         persist,
+         isBooting: () => false,
+         isLoadingSessions: () => false,
+         onBootstrap(directory) {
+           bootstraps.push(directory)
+         },
+         onMcp() {},
+         onDispose() {},
+         translate: (key) => key,
+         queryOptions: queryOptionsApi,
+-        global: { provider },
++        global: { provider: () => provider },
+       })
+     })
+ 
+     try {
+       if (!manager) throw new Error("manager required")
+ 
+       const [store] = manager.child("/project")
+ 
+       expect(store.status).toBe("loading")
+       expect(store.limit).toBe(5)
+@@ -150,21 +154,21 @@ describe("createChildStoreManager", () => {
+         owner,
+         scope: ServerScope.local,
+         persist,
+         isBooting: () => false,
+         isLoadingSessions: () => false,
+         onBootstrap() {},
+         onMcp() {},
+         onDispose() {},
+         translate: (key) => key,
+         queryOptions: queryOptionsApi,
+-        global: { provider },
++        global: { provider: () => provider },
+       })
+     })
+ 
+     try {
+       if (!manager) throw new Error("manager required")
+ 
+       const [store] = manager.child("/project", { bootstrap: false })
+ 
+       expect(store.path.directory).toBe("/project")
+       expect(store.path.worktree).toBe("")
+@@ -185,21 +189,21 @@ describe("createChildStoreManager", () => {
+         persist,
+         isBooting: () => false,
+         isLoadingSessions: () => false,
+         onBootstrap() {},
+         onMcp(directory) {
+           mcpLoads.push(directory)
+         },
+         onDispose() {},
+         translate: (key) => key,
+         queryOptions: queryOptionsApi,
+-        global: { provider },
++        global: { provider: () => provider },
+       })
+     })
+ 
+     try {
+       if (!manager) throw new Error("manager required")
+       const [store, setStore] = manager.child("/project", { bootstrap: false })
+       expect(querySingles.length - offset).toBe(6)
+       const query = querySingles[offset + 1]
+       const resourceQuery = querySingles[offset + 2]
+       if (!query) throw new Error("query required")
+@@ -234,21 +238,21 @@ describe("createChildStoreManager", () => {
+         persist,
+         isBooting: () => false,
+         isLoadingSessions: () => false,
+         onBootstrap(directory) {
+           bootstraps.push(directory)
+         },
+         onMcp() {},
+         onDispose() {},
+         translate: (key) => key,
+         queryOptions: queryOptionsApi,
+-        global: { provider },
++        global: { provider: () => provider },
+       })
+     })
+ 
+     try {
+       if (!manager) throw new Error("manager required")
+       const [store] = manager.child("/project", { bootstrap: false })
+       const queries = querySingles.slice(offset)
+ 
+       expect(queries).toHaveLength(6)
+       expect(queries[0]?.().enabled).toBe(false)
+@@ -266,11 +270,81 @@ describe("createChildStoreManager", () => {
+       expect(queries[4]?.().enabled).toBe(true)
+       expect(queries[5]?.().enabled).toBe(true)
+       expect(bootstraps).toEqual(["/project"])
+ 
+       manager.child("/project", { bootstrap: false })
+       expect(queries[0]?.().enabled).toBe(true)
+     } finally {
+       dispose()
+     }
+   })
++
++  test("marks cached providers unready while their query refetches", () => {
++    let manager: ReturnType<typeof createChildStoreManager> | undefined
++    const dispose = createOwner((owner) => {
++      manager = createChildStoreManager({
++        owner,
++        scope: ServerScope.local,
++        persist,
++        isBooting: () => false,
++        isLoadingSessions: () => false,
++        onBootstrap() {},
++        onMcp() {},
++        onDispose() {},
++        translate: (key) => key,
++        queryOptions: queryOptionsApi,
++        global: { provider: () => provider },
++      })
++    })
++
++    try {
++      if (!manager) throw new Error("manager required")
++      const [store] = manager.child("/project")
++      expect(store.provider_ready).toBe(true)
++
++      providerFetching = true
++      expect(store.provider_ready).toBe(false)
++
++      providerFetching = false
++      expect(store.provider_ready).toBe(true)
++    } finally {
++      providerFetching = false
++      dispose()
++    }
++  })
++
++  test("stops falling back to a stale global provider after the global catalog changes", () => {
++    const full = {
++      all: new Map([["company", { id: "company", models: {} }]]),
++      connected: ["company"],
++      default: {},
++    } as unknown as NormalizedProviderListResponse
++    const [globalProvider, setGlobalProvider] = createSignal(full)
++    let manager: ReturnType<typeof createChildStoreManager> | undefined
++    const dispose = createOwner((owner) => {
++      manager = createChildStoreManager({
++        owner,
++        scope: ServerScope.local,
++        persist,
++        isBooting: () => false,
++        isLoadingSessions: () => false,
++        onBootstrap() {},
++        onMcp() {},
++        onDispose() {},
++        translate: (key) => key,
++        queryOptions: queryOptionsApi,
++        global: { provider: globalProvider },
++      })
++    })
++
++    try {
++      if (!manager) throw new Error("manager required")
++      const [store] = manager.child("/project")
++      expect(store.provider).toBe(full)
++
++      setGlobalProvider(provider)
++      expect(store.provider).toBe(provider)
++    } finally {
++      dispose()
++    }
++  })
+ })
+diff --git a/packages/app/src/context/global-sync/child-store.ts b/packages/app/src/context/global-sync/child-store.ts
+index b36973e7f..cb77ddb24 100644
+--- a/packages/app/src/context/global-sync/child-store.ts
++++ b/packages/app/src/context/global-sync/child-store.ts
+@@ -25,21 +25,21 @@ export function createChildStoreManager(input: {
+   scope: ServerScope
+   persist: typeof persisted
+   isBooting: (directory: string) => boolean
+   isLoadingSessions: (directory: string) => boolean
+   onBootstrap: (directory: string) => void
+   onMcp: (directory: string, setStore: SetStoreFunction<State>) => void
+   onDispose: (directory: string) => void
+   translate: (key: string, vars?: Record<string, string | number>) => string
+   queryOptions: QueryOptionsApi
+   global: {
+-    provider: NormalizedProviderListResponse
++    provider: () => NormalizedProviderListResponse
+   }
+ }) {
+   const children: Record<string, [Store<State>, SetStoreFunction<State>]> = {}
+   const vcsCache = new Map<string, VcsCache>()
+   const metaCache = new Map<string, MetaCache>()
+   const iconCache = new Map<string, IconCache>()
+   const lifecycle = new Map<string, DirState>()
+   const pins = new Map<string, number>()
+   const ownerPins = new WeakMap<object, Set<string>>()
+   const disposers = new Map<string, () => void>()
+@@ -199,26 +199,27 @@ export function createChildStoreManager(input: {
+           const referenceQuery = useQuery(() => ({
+             ...input.queryOptions.references(key),
+             enabled: instanceQueriesEnabled(),
+           }))
+ 
+           const child = createStore<State>({
+             project: "",
+             projectMeta: initialMeta,
+             icon: initialIcon,
+             get provider_ready() {
+-              return instanceQueriesEnabled() && !providerQuery.isLoading
++              return instanceQueriesEnabled() && !providerQuery.isFetching
+             },
+             get provider() {
+               const EMPTY = { all: new Map(), connected: [], default: {} }
+               if (providerQuery.isLoading) return EMPTY
+-              if (providerQuery.data?.all.size === 0 && input.global.provider.all.size > 0) return input.global.provider
++              const global = input.global.provider()
++              if (providerQuery.data?.all.size === 0 && global.all.size > 0) return global
+               return providerQuery.data ?? EMPTY
+             },
+             config: {},
+             get path() {
+               const EMPTY = { state: "", config: "", worktree: "", directory, home: "" }
+               if (pathQuery.isLoading) return EMPTY
+               return pathQuery.data ?? EMPTY
+             },
+             status: "loading" as const,
+             agent: [],
+diff --git a/packages/app/src/context/local.tsx b/packages/app/src/context/local.tsx
+index a12fd832f..e107786fd 100644
+--- a/packages/app/src/context/local.tsx
++++ b/packages/app/src/context/local.tsx
+@@ -1,23 +1,31 @@
+ import { createSimpleContext } from "@opencode-ai/ui/context"
+ import { base64Encode } from "@opencode-ai/core/util/encode"
+ import { useParams } from "@solidjs/router"
+ import { batch, createEffect, createMemo, startTransition } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import { useModels } from "@/context/models"
+ import { useProviders } from "@/hooks/use-providers"
+ import { Persist, persisted } from "@/utils/persist"
+ import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
++import { usePlatform } from "./platform"
+ import { useSDK } from "./sdk"
+ import { useSync } from "./sync"
+ import { useServerSDK } from "./server-sdk"
+ import { ScopedKey, type ServerScope } from "@/utils/server-scope"
++import {
++  modelRecoveryNoticeOwner,
++  parseModelSelection,
++  promptModelRecoveryNotice,
++  resolveModelCandidate,
++  resolveModelRecovery,
++} from "@/context/model-selection"
+ 
+ export type ModelKey = { providerID: string; modelID: string; variant?: string }
+ 
+ type State = {
+   agent?: string
+   model?: ModelKey
+   variant?: string | null
+ }
+ 
+ type Saved = {
+@@ -53,20 +61,21 @@ const clone = (value: State | undefined) => {
+   } satisfies State
+ }
+ 
+ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+   name: "Local",
+   init: () => {
+     const params = useParams()
+     const sdk = useSDK()
+     const sync = useSync()
+     const serverSDK = useServerSDK()
++    const platform = usePlatform()
+     const providers = useProviders(() => sdk().directory)
+     const models = useModels()
+ 
+     const id = createMemo(() => params.id || undefined)
+     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
+ 
+     const [saved, setSaved, , savedReady] = persisted(
+       {
+         ...Persist.serverWorkspace(serverSDK().scope, sdk().directory, "model-selection", ["model-selection.v1"]),
+@@ -91,27 +100,25 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+       current: list()[0]?.name,
+       draft: undefined,
+       last: undefined,
+     })
+ 
+     const validModel = (model: ModelKey) => {
+       const provider = providers.all().get(model.providerID)
+       return !!provider?.models[model.modelID] && connected().has(model.providerID)
+     }
+ 
+-    const firstModel = (...items: Array<() => ModelKey | undefined>) => {
+-      for (const item of items) {
+-        const model = item()
+-        if (!model) continue
+-        if (validModel(model)) return model
+-      }
+-    }
++    const firstModel = (...items: Array<() => ModelKey | undefined>) =>
++      resolveModelCandidate(
++        items.map((item) => item()),
++        validModel,
++      )
+ 
+     const pickAgent = (name: string | undefined) => {
+       const items = list()
+       if (items.length === 0) return
+       return items.find((item) => item.name === name) ?? items[0]
+     }
+ 
+     createEffect(() => {
+       const items = list()
+       if (items.length === 0) {
+@@ -140,24 +147,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+         setStore("promoting", undefined)
+         return
+       }
+ 
+       setSaved("session", session, clone(next))
+       handoff.delete(key)
+       setStore("promoting", undefined)
+     })
+ 
+     const configuredModel = () => {
+-      const configured = sync().data.config.model
+-      if (!configured) return
+-      const [providerID, modelID] = configured.split("/")
+-      const model = { providerID, modelID }
++      const model = parseModelSelection(sync().data.config.model)
++      if (!model) return
+       if (validModel(model)) return model
+     }
+ 
+     const recentModel = () => {
+       for (const item of models.recent.list()) {
+         if (validModel(item)) return item
+       }
+     }
+ 
+     const defaultModel = () => {
+@@ -363,20 +368,37 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
+             cycleModelVariant({
+               variants: items,
+               selected: this.selected(),
+               configured: this.configured(),
+             }),
+           )
+         },
+       },
+     }
+ 
++    createEffect(() => {
++      if (!platform.enterprise) return
++      const sessionID = id()
++      const previous = scope()?.model
++      const recovery = resolveModelRecovery({
++        ready: savedReady() && models.ready() && sync().status === "complete" && sync().data.provider_ready,
++        previous,
++        candidates: [previous, agent.current()?.model, configuredModel(), recentModel(), defaultModel()],
++        valid: validModel,
++      })
++      if (!recovery) return
++
++      model.set(recovery.next)
++      if (modelRecoveryNoticeOwner(sessionID) !== "local") return
++      void import("@/utils/toast").then(({ showToast }) => showToast(promptModelRecoveryNotice(recovery)))
++    })
++
+     const result = {
+       slug: createMemo(() => base64Encode(sdk().directory)),
+       model,
+       agent,
+       session: {
+         ready: savedReady,
+         reset() {
+           setStore({ draft: undefined, promoting: undefined })
+         },
+         promote(dir: string, session: string, state?: State) {
+diff --git a/packages/app/src/context/server-sync.tsx b/packages/app/src/context/server-sync.tsx
+index 05806fba5..27878945f 100644
+--- a/packages/app/src/context/server-sync.tsx
++++ b/packages/app/src/context/server-sync.tsx
+@@ -239,21 +239,21 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
+     onDispose: (directory) => {
+       const key = directoryKey(directory)
+       queue.clear(key)
+       sessionMeta.delete(key)
+       sdkCache.delete(key)
+       clearProviderRev(serverSDK.scope, key)
+     },
+     translate: language.t,
+     queryOptions: queryOptionsApi,
+     global: {
+-      provider: globalStore.provider,
++      provider: () => globalStore.provider,
+     },
+   })
+ 
+   async function loadSessions(directory: string, options?: { limit?: number }) {
+     const key = directoryKey(directory)
+     const pending = sessionLoads.get(key)
+     if (pending) {
+       await pending
+       return loadSessions(directory, options)
+     }
+diff --git a/packages/app/src/pages/session/composer/prompt-model-selection.ts b/packages/app/src/pages/session/composer/prompt-model-selection.ts
+index 3f5bb0f47..e6e896034 100644
+--- a/packages/app/src/pages/session/composer/prompt-model-selection.ts
++++ b/packages/app/src/pages/session/composer/prompt-model-selection.ts
+@@ -1,52 +1,68 @@
+-import { batch, createMemo, startTransition } from "solid-js"
++import { batch, createEffect, createMemo, startTransition } from "solid-js"
+ import { useModels } from "@/context/models"
+ import type { ModelKey, ModelSelection } from "@/context/local"
+ import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "@/context/model-variant"
++import { usePlatform } from "@/context/platform"
+ import { usePrompt } from "@/context/prompt"
+ import { useSDK } from "@/context/sdk"
+ import { useSync } from "@/context/sync"
+ import { useProviders } from "@/hooks/use-providers"
++import {
++  parseModelSelection,
++  promptModelRecoveryNotice,
++  resolveModelCandidate,
++  resolveModelRecovery,
++} from "@/context/model-selection"
++
++export { enterpriseModelState, resolveModelCandidate } from "@/context/model-selection"
+ 
+ export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
+   const sdk = useSDK()
+   const sync = useSync()
+   const models = useModels()
++  const platform = usePlatform()
+   const prompt = usePrompt()
+   const providers = useProviders(() => sdk().directory)
+   const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
+ 
+   const valid = (model: ModelKey) => {
+     const provider = providers.all().get(model.providerID)
+     return !!provider?.models[model.modelID] && connected().has(model.providerID)
+   }
+ 
+   const configured = () => {
+-    const value = sync().data.config.model
+-    if (!value) return
+-    const [providerID, modelID] = value.split("/")
+-    const model = { providerID, modelID }
++    const model = parseModelSelection(sync().data.config.model)
++    if (!model) return
+     if (valid(model)) return model
+   }
+ 
+   const recent = () => models.recent.list().find(valid)
+   const fallback = () => {
+     const defaults = providers.default()
+-    return providers.connected().flatMap((provider) => {
+-      const modelID = defaults[provider.id] ?? Object.values(provider.models)[0]?.id
+-      return modelID ? [{ providerID: provider.id, modelID }] : []
+-    })[0]
++    return resolveModelCandidate(
++      providers.connected().flatMap((provider) => {
++        const configured = defaults[provider.id]
++        const first = Object.values(provider.models)[0]?.id
++        return [
++          configured ? { providerID: provider.id, modelID: configured } : undefined,
++          first ? { providerID: provider.id, modelID: first } : undefined,
++        ]
++      }),
++      valid,
++    )
+   }
+ 
+   const current = () => {
+-    const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
+-      (item): item is ModelKey => !!item && valid(item),
++    const key = resolveModelCandidate(
++      [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()],
++      valid,
+     )
+     if (!key) return
+     return models.find(key)
+   }
+   const recentModels = createMemo(() =>
+     models.recent
+       .list()
+       .map(models.find)
+       .filter((item): item is NonNullable<typeof item> => !!item),
+   )
+@@ -122,12 +138,28 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
+           cycleModelVariant({
+             variants,
+             selected: this.selected(),
+             configured: this.configured(),
+           }),
+         )
+       },
+     },
+   } satisfies ModelSelection
+ 
++  createEffect(() => {
++    if (!platform.enterprise) return
++    const selected = prompt.model.current()
++    const previous = selected ? { providerID: selected.providerID, modelID: selected.modelID } : undefined
++    const recovery = resolveModelRecovery({
++      ready: models.ready() && sync().status === "complete" && sync().data.provider_ready,
++      previous,
++      candidates: [previous, input.agent()?.model, configured(), recent(), fallback()],
++      valid,
++    })
++    if (!recovery) return
++
++    selection.set(recovery.next)
++    void import("@/utils/toast").then(({ showToast }) => showToast(promptModelRecoveryNotice(recovery)))
++  })
++
+   return selection
+ }
+diff --git a/packages/app/src/pages/session/composer/session-composer-controls.ts b/packages/app/src/pages/session/composer/session-composer-controls.ts
+index 8d5d96719..c74aba366 100644
+--- a/packages/app/src/pages/session/composer/session-composer-controls.ts
++++ b/packages/app/src/pages/session/composer/session-composer-controls.ts
+@@ -40,21 +40,21 @@ export function createPromptInputController(input: {
+       available: sync().data.agent,
+       options: local.agent.list().map((agent) => agent.name),
+       current: local.agent.current()?.name ?? "",
+       loading: agentsQuery.isLoading,
+       visible: settings.visibility.customAgents(),
+       select: local.agent.set,
+     },
+     model: {
+       selection: input.model ?? local.model,
+       paid: providers.paid().length > 0,
+-      loading: agentsQuery.isLoading || providersQuery.isLoading || globalProvidersQuery.isLoading,
++      loading: agentsQuery.isFetching || providersQuery.isFetching || globalProvidersQuery.isFetching,
+     },
+     session: {
+       id: input.sessionID(),
+       tabs: layout.tabs(input.sessionKey),
+       reviewPanel: view.reviewPanel,
+     },
+     newLayoutDesigns: settings.general.newLayoutDesigns(),
+   }))
+ }
+ 
+diff --git a/packages/app/test-browser/company-llm-enterprise.test.ts b/packages/app/test-browser/company-llm-enterprise.test.ts
+index 3ab059171..416837b9c 100644
+--- a/packages/app/test-browser/company-llm-enterprise.test.ts
++++ b/packages/app/test-browser/company-llm-enterprise.test.ts
+@@ -21,23 +21,23 @@ describe("enterprise provider diversion", () => {
+         calls.push("auth.set")
+         return "ordinary"
+       },
+     })
+ 
+     expect(result).toBe("company")
+     expect(calls).toEqual(["company"])
+   })
+ 
+   test("preserves the ordinary provider connection path", () => {
+-    expect(
+-      providerConnectionForMode({ enterprise: false, company: () => "company", ordinary: () => "ordinary" }),
+-    ).toBe("ordinary")
++    expect(providerConnectionForMode({ enterprise: false, company: () => "company", ordinary: () => "ordinary" })).toBe(
++      "ordinary",
++    )
+   })
+ })
+ 
+ describe("enterprise default server policy", () => {
+   test("rejects before platform default-server storage", async () => {
+     const writes: Array<string | null> = []
+     const result = setDefaultServerForMode({
+       enterprise: true,
+       key: ServerConnection.Key.make("https://remote.example.test"),
+       setDefault: async (key) => {
+diff --git a/packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts b/packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts
+index 1ce166b2c..98f417b26 100644
+--- a/packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts
++++ b/packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts
+@@ -21,24 +21,30 @@ async function mountHighlights(enterprise: boolean) {
+     removeItem: async (key) => {
+       values.delete(key)
+     },
+   }
+   const platform: Platform = {
+     platform: "desktop",
+     version: "2.0.0",
+     ...(enterprise
+       ? {
+           enterprise: {
+-            credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
+-            credentialStatus: async () => ({ configured: false }),
+-            setCredentials: async () => ({ restartRequired: true }),
+-            clearCredentials: async () => ({ restartRequired: true }),
++            providerCatalog: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            createProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
++            clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
+             readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+           },
+         }
+       : {}),
+     get fetch() {
+       calls.push("select fetcher")
+       return ((_input: RequestInfo | URL) => {
+         calls.push("network")
+         return Promise.resolve(
+           new Response(JSON.stringify({ releases: [] }), {
+
+## Untracked file: packages/app/src/context/model-selection.ts
+diff --git a/packages/app/src/context/model-selection.ts b/packages/app/src/context/model-selection.ts
+new file mode 100644
+index 000000000..fdf3dd090
+--- /dev/null
++++ b/packages/app/src/context/model-selection.ts
+@@ -0,0 +1,44 @@
++export type ModelCandidate = { providerID: string; modelID: string }
++
++export function resolveModelCandidate<T extends ModelCandidate>(
++  candidates: Array<T | undefined>,
++  valid: (model: T) => boolean,
++) {
++  return candidates.find((model): model is T => !!model && valid(model))
++}
++
++export function parseModelSelection(value: string | undefined) {
++  if (!value) return
++  const separator = value.indexOf("/")
++  if (separator <= 0 || separator === value.length - 1) return
++  return { providerID: value.slice(0, separator), modelID: value.slice(separator + 1) }
++}
++
++export function resolveModelRecovery<T extends ModelCandidate>(input: {
++  ready: boolean
++  previous: T | undefined
++  candidates: Array<T | undefined>
++  valid: (model: T) => boolean
++}) {
++  if (!input.ready || !input.previous || input.valid(input.previous)) return
++  const next = resolveModelCandidate(input.candidates, input.valid)
++  if (!next || (next.providerID === input.previous.providerID && next.modelID === input.previous.modelID)) return
++  return { previous: input.previous, next }
++}
++
++export function promptModelRecoveryNotice(input: { previous: ModelCandidate; next: ModelCandidate }) {
++  return {
++    title: "Model selection updated",
++    description: `${input.previous.providerID}/${input.previous.modelID} is no longer available. Switched to ${input.next.providerID}/${input.next.modelID}.`,
++  }
++}
++
++export function modelRecoveryNoticeOwner(sessionID: string | undefined) {
++  return sessionID ? "local" : "prompt"
++}
++
++export function enterpriseModelState(input: { enterprise: boolean; loading: boolean; model?: unknown }) {
++  if (input.loading) return "loading"
++  if (input.enterprise && !input.model) return "empty"
++  return "available"
++}
+
+## Untracked file: packages/app/src/pages/session/composer/prompt-model-selection.test.ts
+diff --git a/packages/app/src/pages/session/composer/prompt-model-selection.test.ts b/packages/app/src/pages/session/composer/prompt-model-selection.test.ts
+new file mode 100644
+index 000000000..5725f552c
+--- /dev/null
++++ b/packages/app/src/pages/session/composer/prompt-model-selection.test.ts
+@@ -0,0 +1,115 @@
++import { expect, test } from "bun:test"
++import type { ModelKey } from "@/context/local"
++import {
++  enterpriseModelState,
++  modelRecoveryNoticeOwner,
++  parseModelSelection,
++  promptModelRecoveryNotice,
++  resolveModelCandidate,
++  resolveModelRecovery,
++} from "@/context/model-selection"
++
++test("falls back when the current enterprise model was deleted", () => {
++  const valid = (model: ModelKey) => model.providerID === "remaining" && model.modelID === "code"
++
++  expect(
++    resolveModelCandidate(
++      [
++        { providerID: "deleted", modelID: "old" },
++        { providerID: "remaining", modelID: "code" },
++      ],
++      valid,
++    ),
++  ).toEqual({ providerID: "remaining", modelID: "code" })
++})
++
++test("reports enterprise empty state when no model exists", () => {
++  expect(enterpriseModelState({ enterprise: true, loading: false, model: undefined })).toBe("empty")
++})
++
++test("waits for agent, config, and providers before recovering a deleted selection", () => {
++  const deleted = { providerID: "deleted", modelID: "old" }
++  const recent = { providerID: "recent", modelID: "recent" }
++  const fallback = { providerID: "fallback", modelID: "first" }
++  const valid = (model: ModelKey) => model.providerID !== "deleted"
++
++  expect(
++    resolveModelRecovery({
++      ready: false,
++      previous: deleted,
++      candidates: [deleted, undefined, undefined, recent, fallback],
++      valid,
++    }),
++  ).toBeUndefined()
++
++  const agent = { providerID: "agent", modelID: "preferred" }
++  const configured = { providerID: "configured", modelID: "default" }
++  expect(
++    resolveModelRecovery({
++      ready: true,
++      previous: deleted,
++      candidates: [deleted, agent, configured, recent, fallback],
++      valid,
++    }),
++  ).toEqual({ previous: deleted, next: agent })
++})
++
++test("resolves all five model priorities after readiness", () => {
++  const deleted = { providerID: "deleted", modelID: "old" }
++  const agent = { providerID: "agent", modelID: "preferred" }
++  const configured = { providerID: "configured", modelID: "default" }
++  const recent = { providerID: "recent", modelID: "recent" }
++  const fallback = { providerID: "fallback", modelID: "first" }
++  const valid = (model: ModelKey) => model.providerID !== "deleted"
++  const recover = (candidates: Array<ModelKey | undefined>) =>
++    resolveModelRecovery({ ready: true, previous: deleted, candidates, valid })?.next
++
++  expect(recover([deleted, agent, configured, recent, fallback])).toEqual(agent)
++  expect(recover([deleted, undefined, configured, recent, fallback])).toEqual(configured)
++  expect(recover([deleted, undefined, undefined, recent, fallback])).toEqual(recent)
++  expect(recover([deleted, undefined, undefined, undefined, fallback])).toEqual(fallback)
++  expect(recover([deleted, undefined, undefined, undefined, undefined])).toBeUndefined()
++})
++
++test("preserves slash-containing model IDs in configured selections", () => {
++  expect(parseModelSelection("provider/family/code/latest")).toEqual({
++    providerID: "provider",
++    modelID: "family/code/latest",
++  })
++})
++
++test("emits exactly one New Session notice across prompt recovery and later local hydration", () => {
++  const previous = { providerID: "deleted", modelID: "old" }
++  const next = { providerID: "remaining", modelID: "code" }
++  const valid = (model: ModelKey) => model.providerID === "remaining"
++  const recovery = resolveModelRecovery({ ready: true, previous, candidates: [previous, next], valid })
++  const notices = [
++    recovery && modelRecoveryNoticeOwner(undefined) === "prompt",
++    recovery && modelRecoveryNoticeOwner(undefined) === "local",
++    resolveModelRecovery({ ready: true, previous: recovery?.next, candidates: [recovery?.next], valid }) &&
++      modelRecoveryNoticeOwner("ses_hydrated") === "local",
++  ].filter(Boolean)
++
++  expect(notices).toHaveLength(1)
++  expect(promptModelRecoveryNotice(recovery!)).toEqual({
++    title: "Model selection updated",
++    description: "deleted/old is no longer available. Switched to remaining/code.",
++  })
++})
++
++test("assigns exactly one existing-session recovery notice to Local", () => {
++  const previous = { providerID: "deleted", modelID: "old" }
++  const next = { providerID: "remaining", modelID: "code" }
++  const recovery = resolveModelRecovery({
++    ready: true,
++    previous,
++    candidates: [previous, next],
++    valid: (model) => model.providerID === "remaining",
++  })
++  const notices = [
++    recovery && modelRecoveryNoticeOwner("ses_existing") === "local",
++    recovery && modelRecoveryNoticeOwner("ses_existing") === "prompt",
++  ].filter(Boolean)
++
++  expect(notices).toHaveLength(1)
++})
+
+## Untracked file: docs/superpowers/plans/2026-07-20-task-5-remediation.md
+diff --git a/docs/superpowers/plans/2026-07-20-task-5-remediation.md b/docs/superpowers/plans/2026-07-20-task-5-remediation.md
+new file mode 100644
+index 000000000..e0f59e63d
+--- /dev/null
++++ b/docs/superpowers/plans/2026-07-20-task-5-remediation.md
+@@ -0,0 +1,98 @@
++# Task 5 Remediation Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Make model recovery wait for real directory refresh completion, assign replacement-toast ownership to the active prompt selection, and verify the Enterprise empty composer through the existing Playwright application fixture.
++
++**Architecture:** Directory bootstrap status is the authoritative lifecycle boundary: every initial load or cached refresh enters `partial`, and only the latest completed refresh returns to `complete`; provider readiness additionally treats cached refetches as unavailable. Local selection silently persists recovery, while prompt selection owns user notification. Browser coverage uses the existing company-LLM E2E platform and provider tree with a deferred catalog response instead of Bun direct-run mocks.
++
++**Tech Stack:** TypeScript, SolidJS, TanStack Solid Query, Bun test, Playwright.
++
++## Global Constraints
++
++- Preserve shared Task 1-4 changes and existing initial bootstrap behavior.
++- Use strict RED-GREEN TDD for every production change.
++- Do not add direct-run mocks, commit, or push.
++- Run tests from `packages/app`; run `bun typecheck`, never `tsc`.
++
++---
++
++### Task 1: Directory refresh lifecycle
++
++**Files:**
++
++- Modify: `packages/app/src/context/global-sync/bootstrap.ts`
++- Modify: `packages/app/src/context/global-sync/bootstrap.test.ts`
++- Modify: `packages/app/src/context/global-sync/child-store.ts`
++- Modify: `packages/app/src/context/global-sync/child-store.test.ts`
++
++**Interfaces:**
++
++- Consumes: existing `State.status`, TanStack query `isFetching`, directory bootstrap revision.
++- Produces: authoritative `partial` during refresh and `complete` after the latest successful refresh.
++
++- [ ] Add a cached-refresh test that starts from `complete`, defers agent/config/provider responses, asserts `partial` and stale data during the refresh, then asserts fresh data and `complete` only after all responses resolve.
++- [ ] Run the focused bootstrap test and verify it fails because cached refresh remains `complete`.
++- [ ] Make `bootstrapDirectory` enter `partial` for every lifecycle, await its refresh work, and guard completion with the latest directory revision.
++- [ ] Run the focused bootstrap tests and verify they pass.
++- [ ] Add a child-store test proving cached provider refetch makes `provider_ready` false.
++- [ ] Run it RED, switch readiness from `isLoading` to `isFetching`, and run it GREEN.
++
++### Task 2: Model recovery notification ownership
++
++**Files:**
++
++- Modify: `packages/app/src/context/model-selection.ts`
++- Modify: `packages/app/src/context/local.tsx`
++- Modify: `packages/app/src/pages/session/composer/prompt-model-selection.ts`
++- Modify: `packages/app/src/pages/session/composer/prompt-model-selection.test.ts`
++
++**Interfaces:**
++
++- Consumes: `resolveModelRecovery` and real sync readiness.
++- Produces: silent Local persistence and prompt-owned replacement notification on each independent recovery.
++
++- [ ] Replace the coalescer test with tests that document prompt ownership and two later independent recovery plans.
++- [ ] Run focused selection tests RED against the timer coalescer API.
++- [ ] Remove the timer scheduler and Local toast; invoke toast directly from prompt recovery.
++- [ ] Run focused selection tests GREEN and verify slash parsing/priority behavior remains intact.
++
++### Task 3: Truthful Enterprise composer E2E
++
++**Files:**
++
++- Modify: `packages/app/e2e/fixtures/company-llm-enterprise.tsx`
++- Modify: `packages/app/e2e/company-llm-enterprise.spec.ts`
++- Modify: `packages/app/test-browser/company-llm-enterprise.test.ts`
++- Modify: `packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts`
++- Modify: `packages/app/test-browser/solid-jsx.ts`
++- Delete: `packages/app/test-browser/fixtures/company-llm-composer-entrypoint.tsx`
++
++**Interfaces:**
++
++- Consumes: existing Enterprise platform fixture, actual application provider tree, actual New Session composer and Settings dialog.
++- Produces: deferred catalog control and Playwright assertions for loading to empty, disabled input/submit, provider settings navigation, and ordinary isolation.
++
++- [ ] Add the Playwright assertions and fixture scenario first; run the focused spec RED because the scenario/control is absent.
++- [ ] Add the minimal deferred catalog lifecycle to the existing E2E harness and mount the actual New Session route/provider tree.
++- [ ] Run the focused Playwright spec GREEN.
++- [ ] Remove the Task 5 direct-run composer branch, proxy entrypoint, fragment shim, and added context mocks; restore Highlights fixture behavior.
++- [ ] Run affected browser and Highlights tests GREEN.
++
++### Task 4: Verification and handoff
++
++**Files:**
++
++- Modify: `.superpowers/sdd/task-5-report.md`
++- Regenerate: `.superpowers/sdd/task-5-review.diff`
++
++**Interfaces:**
++
++- Consumes: final working tree and test results.
++- Produces: evidence-backed uncommitted handoff.
++
++- [ ] Format changed Task 5 files.
++- [ ] Run focused lifecycle, selection, submit, browser, Playwright, and App typecheck commands.
++- [ ] Run `git diff --check`.
++- [ ] Append exact RED/GREEN evidence and cleanup details to the report.
++- [ ] Regenerate the review diff without committing or pushing.
+
+## Untracked file: .superpowers/sdd/task-5-report.md
+diff --git a/.superpowers/sdd/task-5-report.md b/.superpowers/sdd/task-5-report.md
+new file mode 100644
+index 000000000..13f8116fa
+--- /dev/null
++++ b/.superpowers/sdd/task-5-report.md
+@@ -0,0 +1,189 @@
++# Task 5 report: deleted model recovery and Enterprise empty composer
++
++## Status
++
++Task 5 production lifecycle and toast corrections are implemented and remain uncommitted. The focused Playwright composer transition is still red; details are recorded below. Existing shared Task 1-4 changes were preserved.
++
++## Files changed
++
++- `packages/app/src/context/model-selection.ts` (new dependency-free selection helpers)
++- `packages/app/src/context/local.tsx`
++- `packages/app/src/pages/session/composer/prompt-model-selection.ts`
++- `packages/app/src/pages/session/composer/prompt-model-selection.test.ts` (new)
++- `packages/app/src/components/prompt-input.tsx`
++- `packages/app/src/components/prompt-input/submit.ts`
++- `packages/app/src/components/prompt-input/submit.test.ts`
++- `packages/app/test-browser/fixtures/highlights-provider-entrypoint.ts`
++- `packages/app/test-browser/company-llm-enterprise.test.ts`
++
++## Implementation
++
++- Added pure `resolveModelCandidate` and `enterpriseModelState` helpers and re-exported them from the prompt selection surface.
++- Both local persisted selection and prompt selection now validate every candidate in the required order: current, agent, enforced config default, recent, then connected provider default/first model.
++- Enterprise-only recovery writes an invalid persisted/current pair to the replacement once, compares IDs before writing, and emits one informational replacement toast naming both pairs.
++- Added a reactive Enterprise empty composer with the provider-setup placeholder, a non-editable textbox, disabled submit control, and `Manage providers` targeting Settings → Providers. Ordinary mode continues through the existing composer.
++- Added a final Enterprise no-model guard in `createPromptSubmit`; it reports provider setup and returns before session creation. The ordinary missing model/agent toast remains unchanged.
++
++## TDD evidence
++
++### RED: selection and composer
++
++From `packages/app` using `bun.cmd` because the `bun.ps1` shim is blocked by local PowerShell execution policy:
++
++```powershell
++bun.cmd run test:unit -- ./src/pages/session/composer/prompt-model-selection.test.ts
++bun.cmd run test:browser -- ./test-browser/company-llm-enterprise.test.ts
++```
++
++- Unit RED: missing `enterpriseModelState` export (`657 pass`, Task test module error; one unrelated timeline failure also occurred because this script always includes all `./src`).
++- Browser RED: expected disabled composer state but the fixture returned its normal Highlights payload. The Task browser assertion failed as intended.
++
++### RED: final submit guard
++
++With the guard removed and the regression present:
++
++```powershell
++bun.cmd test --preload ./happydom.ts ./src/components/prompt-input/submit.test.ts -t "blocks Enterprise submission"
++```
++
++Result: `1 fail`; it received the ordinary model-required toast instead of the Enterprise provider-setup toast.
++
++### GREEN
++
++Fresh final targeted commands:
++
++```powershell
++bun.cmd test --preload ./happydom.ts ./src/components/prompt-input ./src/pages/session/composer/prompt-model-selection.test.ts
++bun.cmd test --conditions=browser --preload ./happydom.ts ./test-browser/company-llm-enterprise.test.ts ./test-browser/highlights-enterprise.test.ts
++bun.cmd typecheck
++```
++
++Results:
++
++- Prompt/selection units: `51 pass`, `0 fail`, `148 expect()` calls.
++- Enterprise browser targets: `11 pass`, `0 fail`, `19 expect()` calls.
++- App typecheck: exit 0.
++- Prettier completed on all Task 5 source/test files.
++
++## Broader script results and concerns
++
++The exact package scripts from the brief prepend their entire suite roots even when focused paths are supplied:
++
++- `bun.cmd run test:unit -- ...`: Task tests passed, but the overall run ended `660 pass`, `1 fail` in pre-existing `src/pages/session/timeline/observe-element-offset.test.ts` (expected one offset callback, received none).
++- `bun.cmd run test:browser -- ...`: both Task browser files passed, but the overall run ended `38 pass`, `2 fail` in pre-existing `test-browser/solid-virtual.test.ts` resize/clamping assertions.
++- `packages/app/src/context/local.test.ts` named by the brief does not exist in this checkout.
++
++These broader failures are outside Task 5 files and also reproduced during RED. No Task 5 targeted test or typecheck failure remains.
++
++## Commit status
++
++No commit or push was created, per instruction.
++
++## Rereview correction status (2026-07-20)
++
++Implemented the four requested corrections:
++
++- Recovery now waits for saved/model readiness, completed sync bootstrap, and `sync().data.provider_ready` before selecting or persisting a replacement.
++- Configured model parsing splits only at the first `/`, preserving slash-containing model IDs.
++- Local and prompt recovery notifications share a coalescing scheduler, preventing duplicate toasts for the same replacement while allowing a later independent recovery.
++- The browser fixture now mounts the real `PromptInput` under the real `PlatformProvider`, `LanguageProvider`, `DialogProvider`, and `SettingsProvider`; it exercises catalog loading/empty states and the actual Manage providers action. Direct-run-only non-target contexts are test doubles.
++
++Fresh focused verification:
++
++```powershell
++bun.cmd test --preload ./happydom.ts ./src/pages/session/composer/prompt-model-selection.test.ts ./src/components/prompt-input/submit.test.ts
++bun.cmd typecheck
++bun.cmd test --conditions=browser --preload ./happydom.ts ./test-browser/company-llm-enterprise.test.ts
++```
++
++Results:
++
++- Selection/submit units: `14 pass`, `0 fail`, `28 expect()` calls.
++- App typecheck: exit 0.
++- Enterprise browser file: `9 pass`, `1 fail`, `14 expect()` calls.
++
++The remaining browser failure is fixture-only: Bun's direct-run module validation reports `Export named 'formatKeybind' not found` because the narrow `@/context/command` test double does not yet expose that named export. The spawned fixture then times out waiting for the empty composer. Per coordinator direction, work stopped rather than expanding the fixture's dependency doubles further. Production unit coverage and typecheck remain green; the real-composer browser assertion is not yet green.
++
++## Final remediation status (2026-07-20)
++
++- Cached directory bootstrap now sets `status` to `partial` for every refresh, uses a real agent refetch, includes provider failures in completion, and returns to `complete` only after agent, config, and provider work settles for the latest revision.
++- Directory `provider_ready` now follows `!providerQuery.isFetching`, and the New Session composer model-loading state follows cached agent/provider `isFetching` activity.
++- The new lifecycle regression primes a stale agent cache, defers fresh agent/config/provider responses, and proves recovery remains blocked until all three finish; it then proves the fresh agent wins over config.
++- Local recovery persists silently. Only the active prompt emits the replacement toast, synchronously and once per independent recovery; the timer-based coalescer is gone.
++- The direct-run composer fixture branch/proxy, generated Fragment shim, environment flag, and mocks were removed. The remaining composer coverage lives in the existing Playwright company fixture and mounts the actual `AppInterface`/New Session tree.
++
++Fresh focused results:
++
++```powershell
++bun.cmd test --preload ./happydom.ts ./src/context/global-sync/bootstrap.test.ts ./src/context/global-sync/child-store.test.ts ./src/pages/session/composer/prompt-model-selection.test.ts ./src/components/prompt-input/submit.test.ts
++bun.cmd test --conditions=browser --preload ./happydom.ts ./test-browser/company-llm-enterprise.test.ts ./test-browser/highlights-enterprise.test.ts
++bun.cmd typecheck
++```
++
++- Lifecycle/selection/submit units: `24 pass`, `0 fail`, `79 expect()` calls.
++- Remaining direct-run browser targets: `10 pass`, `0 fail`, `16 expect()` calls.
++- App typecheck: exit 0 after correcting the new Agent fixtures (`permission: []`, `options: {}`). The subsequent fixture-only removal of the unsuccessful SSE experiment was not followed by another run, per coordinator direction.
++- Cleanup grep found no `OPENCODE_TEST_EMPTY_ENTERPRISE_COMPOSER`, `ComposerHarness`, `company-llm-composer-entrypoint`, or `Fragment_8vg9x3sq` artifact.
++
++Focused Playwright remains red:
++
++```powershell
++bun.cmd run test:e2e -- company-llm-enterprise.spec.ts -g "New Session stays editable while Enterprise providers load"
++```
++
++The latest run timed out at `page.goto` while experimenting with a real finite `server.connected` SSE refresh, so the composer assertions did not execute. That unsuccessful SSE experiment was removed rather than left in the fixture. The existing actual-App Playwright test still uses deferred global/directory provider requests and contains the loading/editor/submit/Manage providers assertions, but a fresh green run was not obtained. No full Playwright spec was run, per coordinator direction.
++
++No commit or push was created.
++
++## Final narrow reviewer fixes (2026-07-20)
++
++### Awaited directory lifecycle
++
++`bootstrapDirectory` now returns its existing slow refresh closure. Server-sync's `booting` ownership and refresh queue therefore span agent, config, provider, and the rest of the slow directory refresh.
++
++TDD RED:
++
++- The bootstrap promise settled while a deferred provider response was unresolved (`expected false`, received `true`).
++- A refresh chained from the first promise started its config read before the first refresh completed (`expected 1`, received `2`).
++
++GREEN: the focused bootstrap file passed `5 pass`, `0 fail`, including promise ownership, sequential ordering, cached readiness, and early status seeding while session warming remains pending.
++
++### Session-aware toast ownership
++
++`modelRecoveryNoticeOwner(sessionID)` assigns New Session recovery to the prompt and existing-session recovery to Local. Local persists silently when `id()` is absent; when an existing session ID is present it persists and emits the shared replacement notice. Hydrating an already-recovered selection does not produce another recovery or toast.
++
++TDD RED was the missing ownership export. GREEN was `7 pass`, `0 fail`, including exactly one New Session notice across later hydration and exactly one existing-session Local notice.
++
++### Reactive global provider fallback
++
++The child-store boundary now accepts a global-provider accessor, and server-sync passes `() => globalStore.provider`. Empty directory catalogs still fall back to a non-empty global catalog, but later global query results are observed rather than reading the initial snapshot forever.
++
++TDD RED failed at the stale value boundary (`input.global.provider.all.size`) when the regression supplied an accessor. GREEN was `7 pass`, `0 fail`, including a global full-to-empty transition.
++
++The Playwright fixture also stopped tracking its own `storageWrites.length` inside persistence effects, removing a command-catalog write feedback loop. Deferred provider resolution now keeps the resolved empty response active for later requests in the same invalidation wave.
++
++### Final verification
++
++```powershell
++bun.cmd test --preload ./happydom.ts ./src/context/global-sync/bootstrap.test.ts ./src/context/global-sync/child-store.test.ts ./src/pages/session/composer/prompt-model-selection.test.ts ./src/components/prompt-input/submit.test.ts
++bun.cmd typecheck
++```
++
++- Affected units: `27 pass`, `0 fail`, `88 expect()` calls.
++- App typecheck: exit 0.
++
++Focused Playwright is green:
++
++```powershell
++bun.cmd run test:e2e -- company-llm-enterprise.spec.ts -g "New Session stays editable while Enterprise providers load"
++```
++
++- Result: `1 passed` in `13.5s`.
++- The fixture mounts the actual `AppInterface`/New Session tree, defers both global and directory provider requests, and verifies the composer stays editable while those requests are fetching.
++- A finite, schema-valid `server.connected` response triggers the real global refresh path; the event response ends immediately and the listener reconnects to a fresh pending request. The server-scoped query invalidation also marks the composer observers fetching. Resolving the deferred wave to a persistent empty fixture catalog then verifies the disabled Enterprise empty editor, disabled submit, and Manage providers dialog.
++- The fixture assigns its fetch implementation to `globalThis.fetch` because loopback event transport intentionally bypasses `platform.fetch`. This assignment is isolated to the dedicated fixture page.
++- The final Manage providers activation uses the spec's existing DOM-click pattern because the development diagnostics overlay can intercept Playwright pointer clicks despite the button being visible and enabled.
++
++The temporary QueryClient/provider-count probe and the disproven `selectQueryData`/individual-query production experiment were removed. Production `useQueries` behavior is unchanged. The retained production changes are the awaited bootstrap lifecycle, session-aware recovery-notice ownership, `isFetching` readiness/loading semantics, and the reactive global-provider accessor at the child-store boundary.
++
++No commit or push was created.

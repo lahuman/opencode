@@ -1,161 +1,285 @@
 import { describe, expect, test } from "bun:test"
 import {
-  applyCompanyProviderCredentialMutation,
+  applyEnterpriseProviderUpdate,
   companyProviderCanStart,
-  companyProviderCredentialStatus,
-  companyProviderCredentialInput,
-  diagnoseCompanyProvider,
   companyProviderDiagnosticResult,
-  companyProviderCredentialModels,
-  companyProviderModelCredentialStatus,
-  companyProviderShouldRestart,
+  diagnoseCompanyProvider,
+  enterpriseDeleteConfirmation,
+  enterpriseProviderFailureKey,
+  enterpriseProviderPresentation,
+  providerCredentialIntent,
+  validateEnterpriseProviderForm,
 } from "./dialog-company-provider-state"
 
-describe("companyProviderCredentialInput", () => {
-  test("trims secrets without placing them in provider config", () => {
-    expect(companyProviderCredentialInput(" secret ", [{ key: " X-Token ", value: " value " }])).toEqual({
-      apiKey: "secret",
-      headers: { "X-Token": "value" },
+describe("enterprise provider form", () => {
+  test("provider update preserves immutable IDs", () => {
+    const result = validateEnterpriseProviderForm({
+      mode: { type: "edit", providerID: "internal" },
+      providerID: "changed-in-the-dom",
+      name: " Internal Updated ",
+      baseURL: " https://new.example/v1 ",
+      models: [{ id: "code", name: " Code Updated " }],
+      existingProviderIDs: new Set(["internal"]),
     })
+
+    expect(result).toMatchObject({
+      providerID: "internal",
+      name: "Internal Updated",
+      baseURL: "https://new.example/v1",
+      models: [{ id: "code", name: "Code Updated" }],
+    })
+    expect(result.error).toBeUndefined()
   })
 
-  test("omits untouched credential kinds so main can preserve encrypted values", () => {
+  test("rejects duplicate provider IDs only while creating", () => {
     expect(
-      companyProviderCredentialInput("", [
-        { key: "", value: "" },
-        { key: "X-Key", value: "" },
-        { key: "", value: "secret" },
-      ]),
-    ).toEqual({})
+      validateEnterpriseProviderForm({
+        mode: { type: "create" },
+        providerID: " INTERNAL ",
+        name: "Internal",
+        baseURL: "https://internal.example/v1",
+        models: [],
+        existingProviderIDs: new Set(["internal"]),
+      }).error,
+    ).toBe("Provider ID already exists")
   })
 
-  test("resolves duplicate header names case-insensitively with the last complete row", () => {
+  test("rejects invalid URLs and duplicate model IDs", () => {
     expect(
-      companyProviderCredentialInput("", [
-        { key: " X-Token ", value: " first " },
-        { key: "x-token", value: " second " },
-        { key: "X-Other", value: " third " },
-      ]),
-    ).toEqual({
-      headers: {
-        "x-token": "second",
-        "X-Other": "third",
-      },
+      validateEnterpriseProviderForm({
+        mode: { type: "create" },
+        providerID: "internal",
+        name: "Internal",
+        baseURL: "file:///private/provider",
+        models: [],
+        existingProviderIDs: new Set(),
+      }).error,
+    ).toBe("Base URL must use http or https")
+    expect(
+      validateEnterpriseProviderForm({
+        mode: { type: "create" },
+        providerID: "internal",
+        name: "Internal",
+        baseURL: "https://internal.example/v1",
+        models: [
+          { id: "code", name: "Code" },
+          { id: " CODE ", name: "Code duplicate" },
+        ],
+        existingProviderIDs: new Set(),
+      }).error,
+    ).toBe("Model IDs must be unique")
+  })
+
+  test("rejects Base URLs with credentials, query parameters, or fragments", () => {
+    for (const baseURL of [
+      "https://user:secret@gateway.example/v1",
+      "https://gateway.example/v1?tenant=internal",
+      "https://gateway.example/v1#models",
+    ]) {
+      expect(
+        validateEnterpriseProviderForm({
+          mode: { type: "create" },
+          providerID: "internal",
+          name: "Internal",
+          baseURL,
+          models: [],
+          existingProviderIDs: new Set(),
+        }).error,
+      ).toBe("Base URL cannot include credentials, query parameters, or fragments")
+    }
+  })
+
+  test("allows a provider with zero models", () => {
+    const result = validateEnterpriseProviderForm({
+      mode: { type: "create" },
+      providerID: "empty",
+      name: "Empty provider",
+      baseURL: "https://empty.example/v1",
+      models: [],
+      existingProviderIDs: new Set(),
     })
+
+    expect(result.models).toEqual([])
+    expect(result.error).toBeUndefined()
   })
 })
 
-describe("company provider catalog", () => {
-  test("merges authoritative credentials with sidecar models and marks restart mismatches", () => {
-    const provider = {
-      models: {
-        code: { id: "code", name: "Server Code", api: { url: "https://code.company.test/v1" } },
-        pending: { id: "pending", name: "Pending Model", api: { url: "https://pending.company.test/v1" } },
-        changed: { id: "changed", name: "Changed Model", api: { url: "https://changed-new.company.test/v1" } },
+describe("enterprise provider credentials", () => {
+  test("maps a preserved recovery code to existing restart guidance", () => {
+    expect(
+      enterpriseProviderFailureKey(
+        Object.assign(new Error("restart_failed_recovery_failed"), { code: "restart_failed_recovery_failed" }),
+      ),
+    ).toBe("settings.skills.error.recoveryFailed")
+    expect(enterpriseProviderFailureKey(new Error("Error invoking remote: restart_failed_rolled_back"))).toBe(
+      "settings.skills.error.rolledBack",
+    )
+  })
+
+  test("credential replacement sends a complete set", () => {
+    expect(providerCredentialIntent("replace", " key ", [{ key: "X-Token", value: " value " }])).toEqual({
+      mode: "replace",
+      credentials: { apiKey: "key", headers: { "X-Token": "value" } },
+    })
+  })
+
+  test("preserve and clear never carry secret values", () => {
+    expect(providerCredentialIntent("preserve", "ignored", [{ key: "X-Token", value: "ignored" }])).toEqual({
+      mode: "preserve",
+    })
+    expect(providerCredentialIntent("clear", "ignored", [{ key: "X-Token", value: "ignored" }])).toEqual({
+      mode: "clear",
+    })
+  })
+
+  test("rejects duplicate header names case-insensitively", () => {
+    expect(
+      providerCredentialIntent("replace", "", [
+        { key: "X-Token", value: "first" },
+        { key: "x-token", value: "second" },
+      ]),
+    ).toEqual({ mode: "replace", error: "Secret header names must be unique" })
+  })
+
+  test("updates provider metadata and replacement credentials atomically", async () => {
+    const inputs: unknown[] = []
+    const mutations: unknown[] = []
+    const replaced = { schemaVersion: 1 as const, providers: [{ id: "replaced" }] }
+
+    await applyEnterpriseProviderUpdate({
+      providerID: "internal",
+      name: "Internal Updated",
+      baseURL: "https://new.example/v1",
+      credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
+      updateProvider: async (input) => {
+        inputs.push(input)
+        return replaced
       },
-    }
-    const rows = companyProviderCredentialModels(provider, {
-      defaultModelID: "code",
-      models: [
-        {
-          id: "code",
-          name: "Company Code",
-          baseURL: "https://code.company.test/v1",
-          credentialStatus: { configured: true },
-        },
-        {
-          id: "main-only",
-          name: "Main Only",
-          baseURL: "https://main-only.company.test/v1",
-          credentialStatus: { configured: false },
-        },
-        {
-          id: "changed",
-          name: "Changed Model",
-          baseURL: "https://changed-old.company.test/v1",
-          credentialStatus: { configured: false },
-        },
-      ],
+      mutate: (value) => mutations.push(value),
     })
 
-    expect(rows).toEqual([
+    expect(inputs).toEqual([
       {
-        id: "code",
-        name: "Company Code",
-        baseURL: "https://code.company.test/v1",
-        isDefault: true,
-        synchronized: true,
-        credentialStatus: { configured: true },
-      },
-      {
-        id: "main-only",
-        name: "Main Only",
-        baseURL: "https://main-only.company.test/v1",
-        isDefault: false,
-        synchronized: false,
-        credentialStatus: { configured: false },
-      },
-      {
-        id: "changed",
-        name: "Changed Model",
-        baseURL: "https://changed-old.company.test/v1",
-        isDefault: false,
-        synchronized: false,
-        credentialStatus: { configured: false },
-      },
-      {
-        id: "pending",
-        name: "Pending Model",
-        baseURL: "https://pending.company.test/v1",
-        isDefault: false,
-        synchronized: false,
-        credentialStatus: undefined,
+        providerID: "internal",
+        name: "Internal Updated",
+        baseURL: "https://new.example/v1",
+        credentials: { apiKey: "secret", headers: {} },
       },
     ])
-    expect(companyProviderModelCredentialStatus(rows[0], "Request failed")).toBe("Credentials configured")
-    expect(companyProviderModelCredentialStatus(rows[1], "Request failed")).toBe("Restart required")
-    expect(companyProviderModelCredentialStatus(rows[3], "Request failed")).toBe("Restart required")
+    expect(mutations).toEqual([replaced])
   })
 
-  test("compares credentials with resolved provider models instead of global config", () => {
-    const rows = companyProviderCredentialModels(
-      {
-        models: {
-          code: {
-            id: "code",
-            name: "Company Code",
-            api: { url: "https://code.company.test/v1" },
-          },
-        },
+  test("does not reconcile metadata when an atomic credential clear fails", async () => {
+    const mutations: unknown[] = []
+    const inputs: unknown[] = []
+    const result = applyEnterpriseProviderUpdate({
+      providerID: "internal",
+      name: "Internal Updated",
+      baseURL: "https://new.example/v1",
+      credentials: { mode: "clear" },
+      updateProvider: async (input) => {
+        inputs.push(input)
+        throw new Error("secure storage failed")
       },
-      {
-        defaultModelID: "code",
-        models: [
-          {
-            id: "code",
-            name: "Company Code",
-            baseURL: "https://code.company.test/v1",
-            credentialStatus: { configured: false },
-          },
-        ],
-      },
-    )
+      mutate: (value) => mutations.push(value),
+    })
 
-    expect(rows[0]?.synchronized).toBe(true)
+    expect(result).rejects.toThrow("secure storage failed")
+    await result.catch(() => undefined)
+    expect(inputs).toEqual([
+      {
+        providerID: "internal",
+        name: "Internal Updated",
+        baseURL: "https://new.example/v1",
+        clearCredentials: true,
+      },
+    ])
+    expect(mutations).toEqual([])
+  })
+
+  test("does not reconcile metadata when an atomic credential replacement fails", async () => {
+    const mutations: unknown[] = []
+    const result = applyEnterpriseProviderUpdate({
+      providerID: "internal",
+      name: "Internal Updated",
+      baseURL: "https://new.example/v1",
+      credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
+      updateProvider: async () => {
+        throw new Error("secure storage failed")
+      },
+      mutate: (value) => mutations.push(value),
+    })
+
+    expect(result).rejects.toThrow("secure storage failed")
+    await result.catch(() => undefined)
+    expect(mutations).toEqual([])
   })
 })
 
-describe("company provider operation state", () => {
-  test("blocks missing prerequisites and double submission", () => {
+describe("enterprise provider presentation state", () => {
+  const catalog = {
+    schemaVersion: 1 as const,
+    default: { providerID: "internal", modelID: "code" },
+    providers: [
+      {
+        id: "internal",
+        name: "Internal",
+        baseURL: "https://internal.example/v1",
+        models: [
+          { id: "chat", name: "Chat" },
+          { id: "code", name: "Code" },
+        ],
+        credentials: { configured: true, headerNames: ["X-Token"] },
+      },
+    ],
+  }
+
+  test("derives model count, redacted credential state, and default badges", () => {
+    expect(enterpriseProviderPresentation(catalog, catalog.providers[0])).toEqual({
+      modelCount: "2 models",
+      credentials: "Credentials configured",
+      defaultModel: "Code",
+      isDefaultProvider: true,
+    })
+  })
+
+  test("presents credential recovery without exposing stored values", () => {
+    expect(
+      enterpriseProviderPresentation(catalog, {
+        ...catalog.providers[0],
+        credentials: {
+          configured: false,
+          headerNames: ["X-Token"],
+          errorCode: "credential_decryption_failed",
+        },
+      }).credentials,
+    ).toBe("Credentials must be re-entered")
+  })
+
+  test("locks all actions while one is pending and disables model actions without a model", () => {
     expect(companyProviderCanStart(undefined, true)).toBe(true)
-    expect(companyProviderCanStart("diagnose", true)).toBe(false)
+    expect(companyProviderCanStart("save", true)).toBe(false)
     expect(companyProviderCanStart(undefined, false)).toBe(false)
   })
 
-  test("restarts only when the enterprise mutation requests it", () => {
-    expect(companyProviderShouldRestart({ restartRequired: true })).toBe(true)
-    expect(companyProviderShouldRestart({ restartRequired: false })).toBe(false)
-    expect(companyProviderShouldRestart(undefined)).toBe(false)
+  test("captures immutable provider and model delete IDs", () => {
+    expect(enterpriseDeleteConfirmation("provider", "internal")).toEqual({
+      type: "provider",
+      providerID: "internal",
+    })
+    expect(enterpriseDeleteConfirmation("model", "internal", "code")).toEqual({
+      type: "model",
+      providerID: "internal",
+      modelID: "code",
+    })
+  })
+})
+
+describe("enterprise diagnostics", () => {
+  test("targets the selected provider and model", async () => {
+    const requests: unknown[] = []
+    await diagnoseCompanyProvider(async (input) => requests.push(input), "internal", "code")
+    expect(requests).toEqual([{ providerID: "internal", modelID: "code", checkToolCall: true }])
   })
 
   test("creates a stable diagnostic result for network failures", () => {
@@ -164,87 +288,5 @@ describe("company provider operation state", () => {
       checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
       failure: { kind: "connection", message: "Request failed" },
     })
-  })
-
-  test("renders loading, configured, empty, and failed credential status", () => {
-    expect(companyProviderCredentialStatus({ loading: true }, "Request failed")).toBe("Checking credentials...")
-    expect(companyProviderCredentialStatus({ loading: false, configured: true }, "Request failed")).toBe(
-      "Credentials configured",
-    )
-    expect(companyProviderCredentialStatus({ loading: false, configured: false }, "Request failed")).toBe(
-      "Credentials not configured",
-    )
-    expect(
-      companyProviderCredentialStatus(
-        { loading: false, configured: false, error: "credential_decryption_failed" },
-        "Request failed",
-      ),
-    ).toBe("Credentials must be re-entered")
-    expect(companyProviderCredentialStatus({ loading: false, error: new Error("offline") }, "Request failed")).toBe(
-      "Request failed",
-    )
-  })
-
-  test("clears dialog secrets before a requested restart", async () => {
-    const events: string[] = []
-    await applyCompanyProviderCredentialMutation({
-      mutation: async () => {
-        events.push("setCredentials")
-        return { restartRequired: true }
-      },
-      clearLocal: () => events.push("clearLocal"),
-      restart: async () => {
-        events.push("restart")
-      },
-    })
-    expect(events).toEqual(["setCredentials", "clearLocal", "restart"])
-  })
-
-  test("does not clear or restart when credential storage fails", async () => {
-    const events: string[] = []
-    const result = applyCompanyProviderCredentialMutation({
-      mutation: async () => {
-        events.push("setCredentials")
-        throw new Error("secure storage failed")
-      },
-      clearLocal: () => events.push("clearLocal"),
-      restart: async () => {
-        events.push("restart")
-      },
-    })
-    expect(result).rejects.toThrow("secure storage failed")
-    await result.catch(() => undefined)
-    expect(events).toEqual(["setCredentials"])
-  })
-
-  test("does not restart when the enterprise API does not request it", async () => {
-    const events: string[] = []
-    const result = await applyCompanyProviderCredentialMutation({
-      mutation: async () => {
-        events.push("mutation")
-        return { restartRequired: false }
-      },
-      clearLocal: () => events.push("clearLocal"),
-      restart: async () => {
-        events.push("restart")
-      },
-    })
-    expect(result).toEqual({ restartRequired: false })
-    expect(events).toEqual(["mutation", "clearLocal"])
-  })
-
-  test("sends the generated company provider diagnose request", async () => {
-    const requests: unknown[] = []
-    const diagnostic = {
-      ok: true,
-      checks: { basic: "pass", streaming: "pass", toolCall: "pass" } as const,
-    }
-    const result = await diagnoseCompanyProvider(async (input) => {
-      requests.push(input)
-      return { data: diagnostic }
-    }, "company-code")
-
-    expect(requests).toEqual([{ providerID: "company-llm", modelID: "company-code", checkToolCall: true }])
-    expect(result.data).toEqual(diagnostic)
   })
 })

@@ -57,12 +57,15 @@ import { cleanupStoreFiles } from "./store-cleanup"
 import { getStore } from "./store"
 import { ENTERPRISE_SKILL_PACKS_KEY } from "./store-keys"
 import { resolveDesktopUserDataPath } from "./user-data"
+import { createEnterpriseCredentialStore, enterpriseSidecarEnvironment } from "./enterprise-credentials"
+import type { EnterpriseProviderCredentials } from "./enterprise-credentials"
 import {
-  createEnterpriseCredentialHandlers,
-  createEnterpriseCredentialStore,
-  enterpriseSidecarEnvironment,
-} from "./enterprise-credentials"
-import { createEnterpriseCredentialRuntime } from "./enterprise-credential-runtime"
+  createEnterpriseProviderRuntime,
+  createEnterpriseSidecarTransitionQueue,
+  initializeEnterpriseProviderStores,
+  type EnterpriseProviderAPI,
+} from "./enterprise-provider-runtime"
+import { createEnterpriseProviderStore, type EnterpriseProviderCatalog } from "./enterprise-providers"
 import { runEnterprisePreflight } from "./enterprise-preflight"
 import {
   createEnterpriseSkillPackController,
@@ -133,6 +136,24 @@ function ensureLoopbackNoProxy() {
 
   upsert("NO_PROXY")
   upsert("no_proxy")
+}
+
+function unavailableEnterpriseProviderAPI(): EnterpriseProviderAPI {
+  const unavailable = async () => {
+    throw new Error("Enterprise provider management is unavailable")
+  }
+  return {
+    providerCatalog: async () => ({ schemaVersion: 1, providers: [] }),
+    createProvider: unavailable,
+    updateProvider: unavailable,
+    deleteProvider: unavailable,
+    createModel: unavailable,
+    updateModel: unavailable,
+    deleteModel: unavailable,
+    setDefaultModel: unavailable,
+    replaceProviderCredentials: unavailable,
+    clearProviderCredentials: unavailable,
+  }
 }
 
 const main = Effect.gen(function* () {
@@ -360,29 +381,57 @@ const main = Effect.gen(function* () {
     encrypt: (value) => safeStorage.encryptString(value),
     decrypt: (value) => safeStorage.decryptString(value),
   })
-  const enterpriseCredentialHandlers = createEnterpriseCredentialHandlers(
-    ENTERPRISE_ENABLED,
-    enterpriseCredentials,
-    ENTERPRISE_PROFILE.enabled
-      ? { defaultModelID: ENTERPRISE_PROFILE.defaultModelID, models: ENTERPRISE_PROFILE.models }
-      : { defaultModelID: "", models: [] },
-  )
-  let restartEnterpriseSidecar: (paths: string[]) => Promise<void> = async () => {
+  const enterpriseProviders = createEnterpriseProviderStore({
+    file: join(app.getPath("userData"), "enterprise-providers.json"),
+  })
+  const readEnterpriseProviderCredentials = async () => {
+    const health = await enterpriseCredentials.health()
+    if (health.state === "corrupt" || health.state === "encryption-unavailable") {
+      return { schemaVersion: 3 as const, providers: {} }
+    }
+    return enterpriseCredentials.read()
+  }
+  if (ENTERPRISE_PROFILE.enabled && !enterpriseStartupFailure) {
+    const profile = ENTERPRISE_PROFILE
+    yield* Effect.promise(async () => {
+      const health = await enterpriseCredentials.health()
+      if (health.state === "corrupt" || health.state === "encryption-unavailable") {
+        await enterpriseProviders.initialize(profile)
+        return
+      }
+      await initializeEnterpriseProviderStores({ catalog: enterpriseProviders, credentials: enterpriseCredentials, profile })
+    })
+  }
+  let restartEnterpriseSidecar: (
+    paths: string[],
+    catalog?: EnterpriseProviderCatalog,
+    credentials?: EnterpriseProviderCredentials,
+  ) => Promise<void> = async () => {
     throw new Error("Enterprise sidecar is not ready")
   }
-  const enterpriseCredentialRuntime = ENTERPRISE_ENABLED
-    ? createEnterpriseCredentialRuntime({
-        handlers: enterpriseCredentialHandlers,
-        read: enterpriseCredentials.all,
-        write: enterpriseCredentials.setAll,
-        restart: () => restartEnterpriseSidecar(enabledSkillPackPaths()),
+  const enqueueEnterpriseSidecarTransition = createEnterpriseSidecarTransitionQueue()
+  const enterpriseProviderRuntime: EnterpriseProviderAPI = ENTERPRISE_ENABLED && !enterpriseStartupFailure
+    ? createEnterpriseProviderRuntime({
+        catalog: {
+          read: async () => (await enterpriseProviders.read()) ?? { schemaVersion: 1, providers: [] },
+          write: enterpriseProviders.write,
+        },
+        credentials: {
+          read: enterpriseCredentials.read,
+          write: enterpriseCredentials.write,
+          health: enterpriseCredentials.health,
+        },
+        restart: (catalog, credentials) =>
+          enqueueEnterpriseSidecarTransition(() =>
+            restartEnterpriseSidecar(enabledSkillPackPaths(), catalog, credentials),
+          ),
       })
-    : enterpriseCredentialHandlers
+    : unavailableEnterpriseProviderAPI()
   const enterpriseSkillPacks = createEnterpriseSkillPackController({
     packs: verifiedSkillPacks,
     read: () => getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
     write: (value) => getStore().set(ENTERPRISE_SKILL_PACKS_KEY, value),
-    restart: (paths) => restartEnterpriseSidecar(paths),
+    restart: (paths) => enqueueEnterpriseSidecarTransition(() => restartEnterpriseSidecar(paths)),
   })
   const enterpriseRecoveryAllowed =
     enterpriseStartupFailure instanceof EnterpriseStateError &&
@@ -391,22 +440,36 @@ const main = Effect.gen(function* () {
   let lastEnterpriseProviderDiagnostic: EnterpriseProviderDiagnostic | undefined
   const enterpriseReadiness = async (provider?: EnterpriseProviderDiagnostic) => {
     if (provider) lastEnterpriseProviderDiagnostic = provider
-    const credentialStatus = await enterpriseCredentialHandlers.status()
+    const catalog = await enterpriseProviders.read()
+    const health = await enterpriseCredentials.health()
+    const credentials =
+      health.state === "corrupt" || health.state === "encryption-unavailable"
+        ? { schemaVersion: 3 as const, providers: {} }
+        : await enterpriseCredentials.read()
+    const defaultProvider = catalog?.default ? credentials.providers[catalog.default.providerID] : undefined
+    const credentialError =
+      health.state === "corrupt"
+        ? ("credential_decryption_failed" as const)
+        : health.state === "encryption-unavailable"
+          ? ("credential_encryption_unavailable" as const)
+          : undefined
     return createEnterpriseReadinessReport({
       packageVerified: !enterpriseStartupFailure,
       appDataWritable: () => checkEnterpriseAppData(app.getPath("userData")),
       encryptionAvailable: safeStorage.isEncryptionAvailable(),
-      credentialConfigured: credentialStatus.configured,
-      credentialError: "errorCode" in credentialStatus ? credentialStatus.errorCode : undefined,
+      credentialConfigured: Boolean(
+        !credentialError && (defaultProvider?.apiKey || Object.keys(defaultProvider?.headers ?? {}).length),
+      ),
+      credentialError,
       findExecutable: findEnterpriseExecutable,
       provider: provider ?? lastEnterpriseProviderDiagnostic,
     })
   }
   configureEnterpriseSupport(async () => {
-    const credentials = await enterpriseCredentials.all()
+    const credentials = await readEnterpriseProviderCredentials()
     return {
       readiness: await enterpriseReadiness(),
-      secrets: Object.values(credentials.models).flatMap((credential) => [
+      secrets: Object.values(credentials.providers).flatMap((credential) => [
         ...(credential.apiKey ? [credential.apiKey] : []),
         ...Object.values(credential.headers),
       ]),
@@ -462,10 +525,7 @@ const main = Effect.gen(function* () {
       exportDebugLogs: () => exportDebugLogs(),
       recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
       enterprise: {
-        credentialCatalog: enterpriseCredentialRuntime.catalog,
-        credentialStatus: enterpriseCredentialRuntime.status,
-        setCredentials: enterpriseCredentialRuntime.set,
-        clearCredentials: enterpriseCredentialRuntime.clear,
+        ...enterpriseProviderRuntime,
         readiness: enterpriseReadiness,
         stateBackups: () =>
           enterpriseRecoveryAllowed
@@ -541,7 +601,17 @@ const main = Effect.gen(function* () {
   const url = `http://${hostname}:${port}`
   const password = randomUUID()
 
-  const spawnSidecar = async (skillPacks: string[]) => {
+  const spawnSidecar = async (
+    skillPacks: string[],
+    catalog?: EnterpriseProviderCatalog,
+    credentials?: EnterpriseProviderCredentials,
+  ) => {
+    const state = ENTERPRISE_ENABLED
+      ? {
+          catalog: catalog ?? (await enterpriseProviders.read()) ?? { schemaVersion: 1 as const, providers: [] },
+          credentials: credentials ?? (await readEnterpriseProviderCredentials()),
+        }
+      : undefined
     const result = await spawnLocalServer(hostname, port, password, {
       userDataPath: app.getPath("userData"),
       env: ENTERPRISE_ENABLED
@@ -550,7 +620,8 @@ const main = Effect.gen(function* () {
             OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(skillPacks),
           }
         : undefined,
-      credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.all() : undefined,
+      catalog: state?.catalog,
+      credentials: state?.credentials,
       onStdout: (message) => writeLog("server", "stdout", { message }),
       onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
       onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
@@ -558,9 +629,9 @@ const main = Effect.gen(function* () {
     server = result.listener
     return result
   }
-  restartEnterpriseSidecar = async (skillPacks) => {
+  restartEnterpriseSidecar = async (skillPacks, catalog, credentials) => {
     await killSidecar()
-    const result = await spawnSidecar(skillPacks)
+    const result = await spawnSidecar(skillPacks, catalog, credentials)
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("Enterprise sidecar restart timed out")), 30_000)
       void result.health.wait.then(

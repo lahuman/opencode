@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createEnterpriseCredentialHandlers, createEnterpriseCredentialStore } from "./enterprise-credentials"
-import type { EnterpriseCredentials } from "./enterprise-credentials"
+import type { EnterpriseCredentials, EnterpriseProviderCredentials } from "./enterprise-credentials"
 
 const dirs: string[] = []
 
@@ -12,6 +12,46 @@ afterEach(async () => {
 })
 
 describe("enterprise credential store", () => {
+  test("persists provider credentials as schema v3 and exposes v2 only as legacy data", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
+    dirs.push(dir)
+    const file = join(dir, "credentials.bin")
+    const store = createEnterpriseCredentialStore({
+      file,
+      encryptionAvailable: () => true,
+      encrypt: (value) => Buffer.from(value.split("").reverse().join(""), "utf8"),
+      decrypt: (value) => value.toString("utf8").split("").reverse().join(""),
+    })
+    const credentials: EnterpriseProviderCredentials = {
+      schemaVersion: 3,
+      providers: { "company-llm": { apiKey: "provider-secret", headers: { Authorization: "provider-header" } } },
+    }
+
+    await store.write(credentials)
+
+    expect(await store.read()).toEqual(credentials)
+    expect(await store.health()).toEqual({ state: "available" })
+    expect(await store.readLegacy()).toBeUndefined()
+    const raw = await readFile(file, "utf8")
+    expect(raw).not.toContain("provider-secret")
+    expect(raw).not.toContain("provider-header")
+
+    await writeFile(
+      file,
+      Buffer.from(
+        JSON.stringify({ schemaVersion: 2, models: { code: { apiKey: "legacy-secret", headers: {} } } })
+          .split("")
+          .reverse()
+          .join(""),
+      ),
+    )
+    expect(await store.read()).toEqual({ schemaVersion: 3, providers: {} })
+    expect(await store.readLegacy()).toEqual({
+      kind: "v2",
+      credentials: { schemaVersion: 2, models: { code: { apiKey: "legacy-secret", headers: {} } } },
+    })
+  })
+
   test("stores and retrieves isolated credentials for each configured model", async () => {
     const dir = await mkdtemp(join(tmpdir(), "enterprise-credentials-"))
     dirs.push(dir)

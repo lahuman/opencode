@@ -8,6 +8,7 @@
     "types": ["node", "bun", "vite/client"]
   },
   "include": [
+    "../src/env.d.ts",
     "./company-llm-enterprise.spec.ts",
     "./fixtures/company-llm-enterprise.tsx",
     "./performance/timeline-stability/**/*.spec.ts",

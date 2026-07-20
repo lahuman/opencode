@@ -76,6 +76,8 @@ import { createPromptInputTransientState } from "./prompt-input/transient-state"
 import { showToast } from "@/utils/toast"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 import type { ReferenceInfo } from "@opencode-ai/sdk/v2/client"
+import { useSettingsDialog } from "./settings-dialog"
+import { enterpriseModelState } from "@/context/model-selection"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
 
@@ -174,6 +176,50 @@ export interface PromptInputProps {
   onAbort?: () => void
   onSubmit?: () => void
   toolbar?: JSX.Element
+}
+
+export const ENTERPRISE_EMPTY_MODEL_MESSAGE = "Add a provider and model to start chatting"
+
+export const EnterpriseEmptyComposer: Component<{
+  newLayoutDesigns: boolean
+}> = (props) => {
+  const openProviders = useSettingsDialog("providers")
+  return (
+    <div
+      data-component="enterprise-empty-composer"
+      class="flex min-h-[96px] w-full flex-col justify-between gap-3 rounded-xl bg-v2-background-bg-base p-3 shadow-[var(--v2-elevation-raised)]"
+    >
+      <div
+        role="textbox"
+        aria-disabled="true"
+        aria-label={ENTERPRISE_EMPTY_MODEL_MESSAGE}
+        contenteditable={false}
+        class="select-none text-13-regular text-text-weak"
+      >
+        {ENTERPRISE_EMPTY_MODEL_MESSAGE}
+      </div>
+      <div class="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          class="rounded-md px-2.5 py-1.5 text-12-medium text-text-base hover:bg-background-stronger"
+          classList={{
+            "bg-background-strong": props.newLayoutDesigns,
+            "border border-border-weak-base": !props.newLayoutDesigns,
+          }}
+          onClick={openProviders}
+        >
+          Manage providers
+        </button>
+        <button
+          data-action="prompt-submit"
+          type="submit"
+          disabled
+          aria-label="Send"
+          class="size-8 cursor-not-allowed rounded-md bg-background-stronger opacity-50"
+        />
+      </div>
+    </div>
+  )
 }
 
 const EXAMPLES = [
@@ -1533,6 +1579,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const agentsShouldFadeIn = createMemo<boolean>((prev) => prev ?? agentsLoading())
   const providersLoading = () => props.controls.model.loading
   const providersShouldFadeIn = createMemo<boolean>((prev) => prev ?? providersLoading())
+  const modelState = createMemo(() =>
+    enterpriseModelState({
+      enterprise: !!platform.enterprise,
+      loading: providersLoading(),
+      model: props.controls.model.selection.current(),
+    }),
+  )
 
   const [promptReady] = createResource(
     () => prompt.ready.promise,
@@ -1586,8 +1639,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   return (
     <div class="relative size-full flex flex-col gap-0">
       {(promptReady(), null)}
+      <Show when={modelState() === "empty"}>
+        <EnterpriseEmptyComposer newLayoutDesigns={props.controls.newLayoutDesigns} />
+      </Show>
       <PromptPopover
-        popover={store.popover}
+        popover={modelState() === "empty" ? null : store.popover}
         setSlashPopoverRef={(el) => (slashPopoverRef = el)}
         atFlat={atFlat()}
         atActive={atActive() ?? undefined}
@@ -1612,7 +1668,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       />
       <Switch>
         <Match when={props.controls.newLayoutDesigns}>
-          <div class="flex flex-col gap-3">
+          <div class="flex flex-col gap-3" classList={{ hidden: modelState() === "empty" }}>
             <DockShellForm
               data-component={newSession() ? "session-new-composer" : "session-composer"}
               onSubmit={handleSubmit}
@@ -1846,6 +1902,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             classList={{
               "group/prompt-input": true,
               "focus-within:shadow-xs-border": true,
+              hidden: modelState() === "empty",
               "border-icon-info-active border-dashed": store.draggingType !== null,
               [props.class ?? ""]: !!props.class,
             }}

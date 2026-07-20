@@ -22,6 +22,7 @@ const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
+const toasts: Array<{ title?: string; description?: string }> = []
 
 let params: { id?: string } = {}
 let search: { draftId?: string } = {}
@@ -29,6 +30,7 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let enterprise = false
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const prompt = {
@@ -101,7 +103,10 @@ beforeAll(async () => {
 
   mock.module("@opencode-ai/ui/toast", () => ({
     Toast: { Region: () => null },
-    showToast: () => 0,
+    showToast: (options: { title?: string; description?: string }) => {
+      toasts.push(options)
+      return 0
+    },
   }))
 
   mock.module("@opencode-ai/core/util/encode", () => ({
@@ -228,6 +233,9 @@ beforeAll(async () => {
   mock.module("@/context/platform", () => ({
     usePlatform: () => ({
       fetch: fetch,
+      get enterprise() {
+        return enterprise ? {} : undefined
+      },
     }),
   }))
 
@@ -257,6 +265,8 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  enterprise = false
+  toasts.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -452,6 +462,39 @@ describe("prompt submit worktree selection", () => {
       message: {
         model: { providerID: "draft-provider", modelID: "draft-model", variant: "draft-variant" },
       },
+    })
+  })
+
+  test("blocks Enterprise submission before creating a session when no model exists", async () => {
+    enterprise = true
+    const model = {
+      current: () => undefined,
+      variant: { current: () => undefined },
+    } as unknown as ModelSelection
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      model,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(createdSessions).toEqual([])
+    expect(toasts).toContainEqual({
+      title: "Add a provider and model to start chatting",
+      description: "Open Settings → Providers to manage Enterprise providers.",
     })
   })
 

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 2 ]; then
+  echo "usage: review-working-tree OUTFILE PATH..." >&2
+  exit 2
+fi
+
+out=$1
+shift
+
+{
+  echo "# Working-tree review package"
+  echo
+  echo "## Base"
+  git rev-parse HEAD
+  echo
+  echo "## Status"
+  git status --short --untracked-files=all -- "$@"
+  echo
+  echo "## Tracked diff stat"
+  git diff --stat HEAD -- "$@"
+  echo
+  echo "## Tracked diff"
+  git diff -U10 HEAD -- "$@"
+  for file in "$@"; do
+    if git ls-files --error-unmatch -- "$file" >/dev/null 2>&1 || [ ! -f "$file" ]; then
+      continue
+    fi
+    echo
+    echo "## Untracked file: $file"
+    git diff --no-index -U10 /dev/null "$file" || true
+  done
+} > "$out"
+
+echo "wrote $out: $(wc -c < "$out" | tr -d ' ') bytes"

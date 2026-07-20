@@ -46,18 +46,24 @@ describe("enterprise guide IPC", () => {
     expect(stdout.trim()).toBe(
       JSON.stringify({
         registered: true,
-        credentialCatalog: {
-          defaultModelID: "company-code",
-          models: [
+        providerCatalog: {
+          schemaVersion: 1,
+          default: { providerID: "company", modelID: "company-code" },
+          providers: [
             {
-              id: "company-code",
-              name: "Company Code",
+              id: "company",
+              name: "Company",
               baseURL: "https://llm.corp.example/v1",
-              credentialStatus: { configured: false },
+              models: [{ id: "company-code", name: "Company Code" }],
+              credentials: { configured: true, headerNames: ["Authorization"] },
             },
           ],
         },
         guide: { version: "2026.08", markdown: "# Registered guide\n" },
+        credentialBypassErrors: [
+          "Enterprise provider credentials are invalid",
+          "Enterprise provider credentials are invalid",
+        ],
         relaunchCalls: 1,
         shellOpenExternalURLs: ["https://llm.corp.example/docs"],
       }),

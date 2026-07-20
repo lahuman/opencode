@@ -1,5 +1,6 @@
 import * as http from "node:http"
 import * as tls from "node:tls"
+import { validateEnterpriseProviderCatalog } from "./enterprise-providers"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -16,6 +17,7 @@ type StartCommand = {
   port: number
   password: string
   userDataPath: string
+  catalog?: unknown
   credentials?: unknown
 }
 
@@ -55,8 +57,14 @@ async function start(command: StartCommand) {
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
+    if (command.catalog !== undefined) {
+      process.env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG = JSON.stringify(
+        validateEnterpriseProviderCatalog(command.catalog),
+      )
+    }
     const { ProviderEnterprise, Server } = await import("virtual:opencode-server")
     ProviderEnterprise.setCredentials(command.credentials)
+    command.catalog = undefined
     command.credentials = undefined
 
     listener = await Server.listen({
@@ -145,6 +153,7 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
     port: command.port,
     password: command.password,
     userDataPath: command.userDataPath,
+    catalog: command.catalog,
     credentials: command.credentials,
   }
 }

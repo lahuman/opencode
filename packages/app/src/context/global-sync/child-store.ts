@@ -32,7 +32,7 @@ export function createChildStoreManager(input: {
   translate: (key: string, vars?: Record<string, string | number>) => string
   queryOptions: QueryOptionsApi
   global: {
-    provider: NormalizedProviderListResponse
+    provider: () => NormalizedProviderListResponse
   }
 }) {
   const children: Record<string, [Store<State>, SetStoreFunction<State>]> = {}
@@ -206,12 +206,13 @@ export function createChildStoreManager(input: {
             projectMeta: initialMeta,
             icon: initialIcon,
             get provider_ready() {
-              return instanceQueriesEnabled() && !providerQuery.isLoading
+              return instanceQueriesEnabled() && !providerQuery.isFetching
             },
             get provider() {
               const EMPTY = { all: new Map(), connected: [], default: {} }
               if (providerQuery.isLoading) return EMPTY
-              if (providerQuery.data?.all.size === 0 && input.global.provider.all.size > 0) return input.global.provider
+              const global = input.global.provider()
+              if (providerQuery.data?.all.size === 0 && global.all.size > 0) return global
               return providerQuery.data ?? EMPTY
             },
             config: {},

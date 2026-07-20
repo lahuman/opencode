@@ -6,7 +6,8 @@ import { getLogger } from "./logging"
 import { getUserShell, loadShellEnv } from "./shell-env"
 import { getStore } from "./store"
 import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
-import type { EnterpriseCredentials } from "./enterprise-credentials"
+import type { EnterpriseProviderCredentials } from "./enterprise-credentials"
+import type { EnterpriseProviderCatalog } from "./enterprise-providers"
 import { createSidecarEnv, postSidecarStartCommand } from "./sidecar-startup"
 
 export type HealthCheck = { wait: Promise<void> }
@@ -25,7 +26,8 @@ const SIDECAR_STOP_TIMEOUT = 6_000
 type SpawnLocalServerOptions = {
   userDataPath: string
   env?: Record<string, string>
-  credentials?: EnterpriseCredentials
+  catalog?: EnterpriseProviderCatalog
+  credentials?: EnterpriseProviderCredentials
   onStdout?: (message: string) => void
   onStderr?: (message: string) => void
   onExit?: (code: number) => void

@@ -246,7 +246,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     translate: language.t,
     queryOptions: queryOptionsApi,
     global: {
-      provider: globalStore.provider,
+      provider: () => globalStore.provider,
     },
   })
 

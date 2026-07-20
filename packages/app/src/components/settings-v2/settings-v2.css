@@ -313,6 +313,12 @@
   color: var(--v2-text-text-muted);
 }
 
+.settings-v2-enterprise-summary .settings-v2-provider-description {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
 .settings-v2-provider-empty {
   padding-block: 20px;
   font-size: 13px;

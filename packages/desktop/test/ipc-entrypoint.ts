@@ -31,6 +31,7 @@ mock.module("electron", () => ({
 
 const { registerMainIpcHandlers } = await import("../src/main/ipc")
 const { parseEnterpriseProfile } = await import("../src/enterprise")
+const { createEnterpriseProviderRuntime } = await import("../src/main/enterprise-provider-runtime")
 const { createUpdaterController } = await import("../src/main/updater-controller")
 const directory = await mkdtemp(join(tmpdir(), "enterprise-guide-registration-"))
 
@@ -39,6 +40,35 @@ try {
   await writeFile(path, "# Registered guide\n", "utf8")
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const listeners = new Map<string, (...args: unknown[]) => unknown>()
+  let runtimeCatalog = {
+    schemaVersion: 1 as const,
+    default: { providerID: "provider", modelID: "model" },
+    providers: [
+      {
+        id: "provider",
+        name: "Provider",
+        baseURL: "https://provider.example/v1",
+        models: [{ id: "model", name: "Model" }],
+      },
+    ],
+  }
+  let runtimeCredentials = { schemaVersion: 3 as const, providers: { provider: { headers: {} } } }
+  const providerRuntime = createEnterpriseProviderRuntime({
+    catalog: {
+      read: async () => structuredClone(runtimeCatalog),
+      write: async (value) => {
+        runtimeCatalog = structuredClone(value)
+      },
+    },
+    credentials: {
+      read: async () => structuredClone(runtimeCredentials),
+      write: async (value) => {
+        runtimeCredentials = structuredClone(value)
+      },
+      health: async () => ({ state: "available" as const }),
+    },
+    restart: async () => undefined,
+  })
   const updater = createUpdaterController({
     enabled: false,
     currentVersion: "2026.08",
@@ -78,23 +108,34 @@ try {
       exportDebugLogs: async () => "logs.zip",
       recordFatalRendererError() {},
       enterprise: {
-        credentialCatalog: async () => ({
-          defaultModelID: "company-code",
-          models: [
+        providerCatalog: async () => ({
+          schemaVersion: 1 as const,
+          default: { providerID: "company", modelID: "company-code" },
+          providers: [
             {
-              id: "company-code",
-              name: "Company Code",
+              id: "company",
+              name: "Company",
               baseURL: "https://llm.corp.example/v1",
-              credentialStatus: { configured: false },
+              models: [{ id: "company-code", name: "Company Code" }],
+              credentials: { configured: true, headerNames: ["Authorization"] },
             },
           ],
         }),
-        credentialStatus: async () => ({ configured: false }),
-        setCredentials: async () => ({ restartRequired: true }),
-        clearCredentials: async () => ({ restartRequired: true }),
+        createProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+        replaceProviderCredentials: (input) => providerRuntime.replaceProviderCredentials(input),
+        clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "warn", checks: [] }),
         stateBackups: async () => [],
         restoreStateBackup: async () => ({ restartRequired: true }),
+        skillPacks: async () => [],
+        setSkillPackEnabled: async () => [],
+        openSkillPackSource: async () => undefined,
         guide: { enabled: true, path, version: "2026.08" },
       },
     },
@@ -121,12 +162,26 @@ try {
   await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
   await listeners.get("open-link")?.({}, "https://user:secret@llm.corp.example/docs")
   await handlers.get("relaunch")?.()
+  const credentialBypassErrors = await Promise.all(
+    [
+      { headers: { "   ": "secret" } },
+      { headers: { "X-Token": "first", "x-token": "second" } },
+    ].map((credentials) =>
+      Promise.resolve(
+        handlers.get("enterprise-provider-credentials-replace")?.({}, { providerID: "provider", credentials }),
+      ).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      ),
+    ),
+  )
 
   console.log(
     JSON.stringify({
       registered: handlers.has("enterprise-guide-read"),
-      credentialCatalog: await handlers.get("enterprise-credential-catalog")?.(),
+      providerCatalog: await handlers.get("enterprise-provider-catalog")?.(),
       guide: await handlers.get("enterprise-guide-read")?.(),
+      credentialBypassErrors,
       relaunchCalls,
       shellOpenExternalURLs,
     }),

@@ -6,7 +6,6 @@ import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 
 import type {
-  EnterpriseCredentialCatalog,
   EnterpriseProviderDiagnostic,
   FatalRendererError,
   ServerReadyData,
@@ -21,6 +20,7 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import type { EnterpriseProviderAPI } from "./enterprise-provider-runtime"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -50,15 +50,7 @@ type Deps = {
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   openExternalURL: (url: string) => Promise<void> | void
-  enterprise: {
-    credentialCatalog: () => Promise<EnterpriseCredentialCatalog>
-    credentialStatus: (modelID: string) => Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials: (input: {
-      modelID: string
-      apiKey?: string
-      headers?: Record<string, string>
-    }) => Promise<{ restartRequired: boolean }>
-    clearCredentials: (modelID: string) => Promise<{ restartRequired: boolean }>
+  enterprise: EnterpriseProviderAPI & {
     readiness: (provider?: EnterpriseProviderDiagnostic) => Promise<unknown>
     stateBackups: () => Promise<{ id: string; appVersion: string; createdAt: string }[]>
     restoreStateBackup: (backupID: string) => Promise<{ restartRequired: true }>
@@ -134,17 +126,35 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
-  registry.handle("enterprise-credential-catalog", () => deps.enterprise.credentialCatalog())
-  registry.handle("enterprise-credential-status", (_event: IpcMainInvokeEvent, modelID: string) =>
-    deps.enterprise.credentialStatus(modelID),
+  registry.handle("enterprise-provider-catalog", () => deps.enterprise.providerCatalog())
+  registry.handle("enterprise-provider-create", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.createProvider(input as Parameters<EnterpriseProviderAPI["createProvider"]>[0]),
   )
-  registry.handle(
-    "enterprise-set-credentials",
-    (_event: IpcMainInvokeEvent, input: { modelID: string; apiKey?: string; headers?: Record<string, string> }) =>
-      deps.enterprise.setCredentials(input),
+  registry.handle("enterprise-provider-update", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.updateProvider(input as Parameters<EnterpriseProviderAPI["updateProvider"]>[0]),
   )
-  registry.handle("enterprise-clear-credentials", (_event: IpcMainInvokeEvent, modelID: string) =>
-    deps.enterprise.clearCredentials(modelID),
+  registry.handle("enterprise-provider-delete", (_event: IpcMainInvokeEvent, providerID: unknown) =>
+    deps.enterprise.deleteProvider(providerID as string),
+  )
+  registry.handle("enterprise-model-create", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.createModel(input as Parameters<EnterpriseProviderAPI["createModel"]>[0]),
+  )
+  registry.handle("enterprise-model-update", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.updateModel(input as Parameters<EnterpriseProviderAPI["updateModel"]>[0]),
+  )
+  registry.handle("enterprise-model-delete", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.deleteModel(input as Parameters<EnterpriseProviderAPI["deleteModel"]>[0]),
+  )
+  registry.handle("enterprise-model-default", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.setDefaultModel(input as Parameters<EnterpriseProviderAPI["setDefaultModel"]>[0]),
+  )
+  registry.handle("enterprise-provider-credentials-replace", (_event: IpcMainInvokeEvent, input: unknown) =>
+    deps.enterprise.replaceProviderCredentials(
+      input as Parameters<EnterpriseProviderAPI["replaceProviderCredentials"]>[0],
+    ),
+  )
+  registry.handle("enterprise-provider-credentials-clear", (_event: IpcMainInvokeEvent, providerID: unknown) =>
+    deps.enterprise.clearProviderCredentials(providerID as string),
   )
   registry.handle("enterprise-readiness", (_event: IpcMainInvokeEvent, provider?: unknown) =>
     deps.enterprise.readiness(parseEnterpriseProviderDiagnostic(provider)),

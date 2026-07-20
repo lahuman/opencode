@@ -1,0 +1,3490 @@
+# Working-tree review package
+
+## Base
+b6205a113c99853222ee844f2b597d2b77f0c0ab
+
+## Status
+ M packages/app/e2e/company-llm-enterprise.spec.ts
+ M packages/app/e2e/fixtures/company-llm-enterprise.tsx
+ M packages/app/src/components/dialog-company-provider-state.ts
+ M packages/app/src/components/dialog-company-provider.test.ts
+ M packages/app/src/components/dialog-company-provider.tsx
+ M packages/app/src/components/settings-providers.tsx
+ M packages/app/src/components/settings-v2/providers.tsx
+ M packages/app/src/components/settings-v2/settings-v2.css
+ M packages/ui/src/components/dialog.tsx
+ M packages/ui/src/context/dialog.tsx
+
+## Tracked diff stat
+ packages/app/e2e/company-llm-enterprise.spec.ts    |  387 ++++----
+ .../app/e2e/fixtures/company-llm-enterprise.tsx    |  245 ++++-
+ .../components/dialog-company-provider-state.ts    |  252 +++--
+ .../src/components/dialog-company-provider.test.ts |  433 ++++----
+ .../app/src/components/dialog-company-provider.tsx | 1033 +++++++++++++++-----
+ packages/app/src/components/settings-providers.tsx |   18 +-
+ .../app/src/components/settings-v2/providers.tsx   |   21 +-
+ .../app/src/components/settings-v2/settings-v2.css |    6 +
+ packages/ui/src/components/dialog.tsx              |    7 +-
+ packages/ui/src/context/dialog.tsx                 |   85 +-
+ 10 files changed, 1648 insertions(+), 839 deletions(-)
+
+## Tracked diff
+diff --git a/packages/app/e2e/company-llm-enterprise.spec.ts b/packages/app/e2e/company-llm-enterprise.spec.ts
+index 06a7a559d..6ba26962d 100644
+--- a/packages/app/e2e/company-llm-enterprise.spec.ts
++++ b/packages/app/e2e/company-llm-enterprise.spec.ts
+@@ -78,177 +78,240 @@ test("mounted management controller rejects before storage, navigation, probes,
+   expect(
+     (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health"),
+   ).toHaveLength(probes)
+   expect(await output<unknown[]>(page, "storage-writes")).toHaveLength(writes)
+   expect(await output<unknown[]>(page, "default-writes")).toEqual([])
+   await expect(page.getByTestId("controller-location")).toHaveText("/")
+   await expect(page.getByTestId("controller-active")).toHaveText("sidecar")
+   await expect(page.getByTestId("controller-close-calls")).toHaveText("0")
+ })
+ 
+-test("DialogConnectProvider diverts enterprise mode directly to Company LLM", async ({ page }) => {
++test("DialogConnectProvider diverts enterprise mode directly to provider management", async ({ page }) => {
+   await page.goto(fixture("connect"))
+ 
+-  await expect(page.getByRole("dialog")).toContainText("Company LLM")
+-  await expect(page.getByLabel("API key")).toBeVisible()
++  await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
++  await expect(page.getByRole("button", { name: "Create provider" })).toBeVisible()
+   await expect(page.locator("[data-component=list]")).toHaveCount(0)
+   await expect(page.getByText("Custom provider", { exact: true })).toHaveCount(0)
+ 
+   const requests = await output<Array<{ path: string }>>(page, "requests")
+   expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
+ })
+ 
+-test("DialogCompanyProvider keeps credentials local and drives generated diagnostics accessibly", async ({ page }) => {
++test("DialogCompanyProvider manages provider, model, credentials, defaults, diagnostics, and deletion", async ({
++  page,
++}) => {
+   await page.goto(fixture("company"))
+   const dialog = page.getByRole("dialog")
+-  const apiKey = page.getByLabel("API key")
+-  const headerName = page.getByPlaceholder("Header name")
+-  const headerValue = page.getByPlaceholder("Secret value")
+   const status = dialog.locator('[data-slot="company-diagnostic-status"]')
+-  const codeModel = page.getByTestId("company-model-company-code")
+-  const reasoningModel = page.getByTestId("company-model-company-reasoning")
+-
+-  await expect(dialog).toContainText("Credentials not configured")
+-  await expect(codeModel).toContainText("Company Code")
+-  await expect(codeModel).toContainText("company-code")
+-  await expect(codeModel).toContainText("https://llm.company.test/v1")
+-  await expect(codeModel).toContainText("Default")
+-  await expect(codeModel).toContainText("Credentials not configured")
+-  await expect(reasoningModel).toContainText("Company Reasoning")
+-  await expect(reasoningModel).toContainText("https://reasoning.company.test/v1")
+-  await expect(reasoningModel).toContainText("Credentials not configured")
+-  await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
+-  await expect.poll(() => output<number>(page, "credential-catalog-calls")).toBeGreaterThan(0)
+-  await expect(status).toHaveAttribute("role", "status")
+-  await expect(status).toHaveAttribute("aria-live", "polite")
+-  await expect(status).toHaveText("Ready to test Company LLM connection")
+-
+-  await apiKey.fill(" secret ")
+-  await headerName.fill(" X-Token ")
+-  await headerValue.fill(" value ")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect.poll(() => output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
++  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("gateway")
++  await page.getByLabel("Provider name").fill("Gateway")
++  await page.getByLabel("Base URL").fill("https://gateway.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++
++  const provider = page.getByTestId("enterprise-provider-gateway")
++  await expect(provider).toContainText("Gateway")
++  await expect(provider).toContainText("https://gateway.example/v1")
++  await expect(provider).toContainText("0 models")
++  await expect(provider).toContainText("Credentials not configured")
++
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("chat")
++  await page.getByLabel("Model name").fill("Chat")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("reasoning")
++  await page.getByLabel("Model name").fill("Reasoning")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++
++  const chat = page.getByTestId("enterprise-model-gateway-chat")
++  const reasoning = page.getByTestId("enterprise-model-gateway-reasoning")
++  await expect(chat).toBeVisible()
++  await expect(reasoning).toBeVisible()
++  await dialog.getByRole("button", { name: "Set default" }).click()
++  await expect(reasoning).toContainText("Default")
++
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("top-secret-api-key")
++  await page.getByPlaceholder("Header name").fill("X-Token")
++  await page.getByPlaceholder("Secret value").fill("top-secret-header")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Credentials configured")
++  await expect(dialog).not.toContainText("top-secret-api-key")
++  await expect(dialog).not.toContainText("top-secret-header")
+   expect(await output<unknown[]>(page, "credential-inputs")).toEqual([
+-    { modelID: "company-code", apiKey: "secret", headers: { "X-Token": "value" } },
++    { providerID: "gateway", hasApiKey: true, headerNames: ["X-Token"] },
+   ])
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toEqual([["", "", ""]])
+ 
+-  await invokeFixtureControl(page, "Credentials no restart")
+-  await apiKey.fill("second")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect.poll(() => output<unknown[]>(page, "credential-inputs")).toHaveLength(2)
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await expect(page.getByLabel("API key")).toHaveValue("")
++  await expect(page.getByPlaceholder("Header name")).toHaveValue("")
++  await expect(page.getByPlaceholder("Secret value")).toHaveValue("")
++  await dialog.getByRole("button", { name: "Cancel edit" }).click()
+ 
+   await invokeFixtureControl(page, "Credentials error")
+-  await apiKey.fill("keep-local")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect(dialog.getByRole("alert")).toBeVisible()
+-  await expect(apiKey).toHaveValue("keep-local")
+-  expect(await output<unknown[]>(page, "restart-snapshots")).toHaveLength(1)
+-
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(status).toHaveText("Company LLM connection test completed successfully")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).not.toHaveAttribute("role")
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await page.getByLabel("Provider name").fill("Gateway Replace Reconciled")
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("failed-replacement-secret")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(dialog.getByRole("alert")).toContainText("Request failed")
++  await expect(provider).toContainText("Gateway Replace Reconciled")
++  await expect(provider).toContainText("Credentials configured")
++  await expect(dialog).not.toContainText("failed-replacement-secret")
++  await dialog.getByRole("button", { name: "Dismiss error" }).click()
+ 
++  await invokeFixtureControl(page, "Credentials error")
++  await page.getByLabel("Provider name").fill("Gateway Clear Reconciled")
++  await page.getByLabel("Credential action").selectOption("clear")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(dialog.getByRole("alert")).toContainText("Request failed")
++  await expect(provider).toContainText("Gateway Clear Reconciled")
++  await dialog.getByRole("button", { name: "Dismiss error" }).click()
++  await invokeFixtureControl(page, "Credentials no restart")
++  await page.getByLabel("Credential action").selectOption("clear")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Credentials not configured")
++  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual(["gateway", "gateway"])
++
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await expect(page.getByLabel("Provider ID")).toBeDisabled()
++  await page.getByLabel("Provider name").fill("Gateway Updated")
++  await page.getByLabel("Base URL").fill("https://gateway-updated.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(provider).toContainText("Gateway Updated")
++  await expect(provider).toContainText("https://gateway-updated.example/v1")
++
++  await reasoning.click()
++  await dialog.getByRole("button", { name: "Edit model" }).click()
++  await expect(page.getByLabel("Model ID")).toBeDisabled()
++  await page.getByLabel("Model name").fill("Reasoning Updated")
++  await dialog.getByRole("button", { name: "Save model" }).click()
+   await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(status).toHaveText("Company LLM connection test completed successfully")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveCount(1)
+-
+-  await invokeFixtureControl(page, "Diagnostic failure")
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(status).toHaveText("Testing Company LLM connection")
++  await expect(status).toHaveText("Testing Gateway Updated / Reasoning Updated connection")
+   await invokeFixtureControl(page, "Resolve diagnostic")
+-  const failure = dialog.locator('[data-slot="company-diagnostic-result"]')
+-  await expect(failure).toHaveAttribute("role", "alert")
+-  await expect(failure.getByText("Failure (connection)", { exact: true })).toBeVisible()
+-  await expect(failure.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
+-  await expect(status).toHaveText("")
+-
+-  await invokeFixtureControl(page, "Diagnostic network error")
+-  await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(failure.getByText("Request failed", { exact: true })).toBeVisible()
+-  await expect(failure).not.toContainText("transport failure with private detail")
++  await expect(status).toHaveText("Gateway Updated / Reasoning Updated connection test completed successfully")
++
++  await dialog.getByRole("button", { name: "Delete model" }).click()
++  await expect(dialog).toContainText("Conversation history remains available")
++  await dialog.getByRole("button", { name: "Confirm delete model" }).click()
++  await expect(reasoning).toHaveCount(0)
++  await expect(chat).toContainText("Default")
++
++  await dialog.getByRole("button", { name: "Delete provider" }).click()
++  await expect(dialog).toContainText("All models and credentials for this provider will be removed")
++  await dialog.getByRole("button", { name: "Confirm delete provider" }).click()
++  await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
++  await expect(provider).toHaveCount(0)
++})
+ 
+-  const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
+-    (request) => request.path === "/provider/company-llm/diagnostics",
+-  )
+-  expect(diagnostics).toEqual(Array.from({ length: 4 }, () => diagnosticRequest))
+-  const requests = await output<Array<{ path: string }>>(page, "requests")
+-  expect(requests.some((request) => request.path === "/provider/auth" || request.path.startsWith("/auth/"))).toBe(false)
++test("pending provider mutations lock every dialog close path", async ({ page }) => {
++  await page.goto(fixture("company"))
++  const dialog = page.getByRole("dialog")
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("pending")
++  await page.getByLabel("Provider name").fill("Pending")
++  await page.getByLabel("Base URL").fill("https://pending.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await invokeFixtureControl(page, "Credentials pending")
++  await dialog.getByRole("button", { name: "Edit provider" }).click()
++  await page.getByLabel("Credential action").selectOption("replace")
++  await page.getByLabel("API key").fill("pending-secret")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await expect(
++    page.getByTestId("company-controls").locator("button").filter({ hasText: "Resolve credentials" }),
++  ).toBeEnabled()
++
++  const headerClose = dialog.locator('[data-slot="dialog-close-button"]')
++  const footerClose = dialog.locator('[data-slot="dialog-body"]').getByRole("button", { name: "Close" })
++  await expect(headerClose).toBeDisabled()
++  await expect(footerClose).toBeDisabled()
++  await page.keyboard.press("Escape")
++  await expect(dialog).toBeVisible()
++  await page.locator('[data-component="dialog-overlay"]').click({ force: true })
++  await expect(dialog).toBeVisible()
++
++  await invokeFixtureControl(page, "Resolve credentials")
++  await expect(headerClose).toBeEnabled()
++  await expect(footerClose).toBeEnabled()
++  await expect(dialog).not.toContainText("pending-secret")
+ })
+ 
+-test("DialogCompanyProvider clears model-scoped secrets and diagnostics when switching models", async ({ page }) => {
++test("delete confirmation is an accessible modal interaction within provider management", async ({ page }) => {
+   await page.goto(fixture("company"))
+   const dialog = page.getByRole("dialog")
+-  const apiKey = page.getByLabel("API key")
+-  const headerName = page.getByPlaceholder("Header name")
+-  const headerValue = page.getByPlaceholder("Secret value")
+-
+-  await expect(page.getByLabel("Base URL")).toHaveValue("https://llm.company.test/v1")
+-  await apiKey.fill("code-secret")
+-  await headerName.fill("X-Code-Token")
+-  await headerValue.fill("code-header")
++  await dialog.getByRole("button", { name: "Create provider" }).click()
++  await page.getByLabel("Provider ID").fill("confirm")
++  await page.getByLabel("Provider name").fill("Confirm")
++  await page.getByLabel("Base URL").fill("https://confirm.example/v1")
++  await dialog.getByRole("button", { name: "Save provider" }).click()
++  await dialog.getByRole("button", { name: "Add model" }).click()
++  await page.getByLabel("Model ID").fill("code")
++  await page.getByLabel("Model name").fill("Code")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++
+   await dialog.getByRole("button", { name: "Test connection" }).click()
+-  await expect(page.getByTestId("company-model-company-code")).toBeDisabled()
+-  await expect(page.getByTestId("company-model-company-reasoning")).toBeDisabled()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toBeVisible()
+-
+-  await page.getByTestId("company-model-company-reasoning").click()
+-
+-  await expect(apiKey).toHaveValue("")
+-  await expect(headerName).toHaveValue("")
+-  await expect(headerValue).toHaveValue("")
+-  await expect(page.getByLabel("Base URL")).toHaveValue("https://reasoning.company.test/v1")
+-  await expect(dialog.locator('[data-slot="company-diagnostic-result"]')).toHaveCount(0)
+-  await expect(dialog.locator('[data-slot="company-diagnostic-status"]')).toHaveText(
+-    "Ready to test Company LLM connection",
+-  )
++  const readiness = dialog.getByText(/Offline readiness:/)
++  await expect(readiness).toBeVisible()
++
++  await dialog.getByRole("button", { name: "Edit model" }).click()
++  await page.getByLabel("Model name").fill("")
++  await dialog.getByRole("button", { name: "Save model" }).click()
++  const dismissError = dialog.getByRole("button", { name: "Dismiss error" })
++  await expect(dismissError).toBeVisible()
++  await dialog.getByRole("button", { name: "Cancel edit" }).click()
++
++  const deleteModel = dialog.getByRole("button", { name: "Delete model" })
++  await deleteModel.click()
++  const confirmation = dialog.getByRole("alertdialog", { name: "Delete model Code" })
++  const confirm = confirmation.getByRole("button", { name: "Confirm delete model" })
++  await expect(confirmation).toHaveAttribute("aria-describedby", "enterprise-delete-description")
++  await expect(confirm).toBeFocused()
++  await expect(page.getByTestId("enterprise-provider-confirm")).toBeDisabled()
++  await expect(dialog.getByRole("button", { name: "Add model" })).toBeDisabled()
++  await expect(dialog.locator('[data-slot="dialog-close-button"]')).toBeDisabled()
++  await expect(dismissError).toBeDisabled()
++  await expect(readiness).toHaveAttribute("tabindex", "-1")
++  const cancel = confirmation.getByRole("button", { name: "Cancel delete" })
++  await page.keyboard.press("Shift+Tab")
++  await expect(cancel).toBeFocused()
++  await page.keyboard.press("Tab")
++  await expect(confirm).toBeFocused()
++  await page.keyboard.press("Tab")
++  await expect(cancel).toBeFocused()
++  await page.keyboard.press("Escape")
++  await expect(dialog).toBeVisible()
++  await expect(confirmation).toBeVisible()
+ 
+-  await invokeFixtureControl(page, "Credentials no restart")
+-  await apiKey.fill("reasoning-secret")
+-  await dialog.getByRole("button", { name: "Save" }).click()
+-  await expect
+-    .poll(() => output<unknown[]>(page, "credential-inputs"))
+-    .toContainEqual({
+-      modelID: "company-reasoning",
+-      apiKey: "reasoning-secret",
+-    })
+-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials configured")
+-  await dialog.getByRole("button", { name: "Clear credentials" }).click()
+-  await expect.poll(() => output<string[]>(page, "credential-clear-inputs")).toEqual(["company-reasoning"])
+-  await expect(page.getByTestId("company-model-company-reasoning")).toContainText("Credentials not configured")
++  await cancel.click()
++  await expect(confirmation).toHaveCount(0)
++  await expect(deleteModel).toBeFocused()
+ })
+ 
+-test("DialogCompanyProvider blocks models until desktop and sidecar catalogs are synchronized", async ({ page }) => {
+-  await page.goto(fixture("company-mismatch"))
+-  const dialog = page.getByRole("dialog")
+-  const pending = page.getByTestId("company-model-pending-model")
+-
+-  await expect(dialog.getByRole("alert")).toContainText("Restart the desktop app")
+-  await expect(pending).toContainText("Pending Model")
+-  await expect(pending).toContainText("https://pending.company.test/v1")
+-  await expect(pending).toContainText("Restart required")
+-  await pending.click()
+-  await expect(page.getByLabel("API key")).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Test connection" })).toBeDisabled()
+-  await expect(dialog.getByRole("button", { name: "Clear credentials" })).toBeDisabled()
+-  expect(await output<unknown[]>(page, "credential-inputs")).toEqual([])
+-  expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
+-})
++for (const scenario of ["settings-layout", "settings-v2-layout"]) {
++  test(`${scenario} summarizes the Enterprise catalog and opens provider management`, async ({ page }) => {
++    await page.goto(fixture(scenario))
++
++    await expect(page.getByText("1 provider", { exact: true })).toBeVisible()
++    await expect(page.getByText("Company LLM / Company Code", { exact: true })).toBeVisible()
++    await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled()
++    await page.getByRole("button", { name: "Manage providers" }).click()
++    await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
++  })
++}
+ 
+ test("settings diagnostics display the authenticated server remediation", async ({ page }) => {
+   await page.goto(fixture("settings"))
+   await expect(page.getByTestId("settings-credential-status")).toHaveText("Credentials not configured")
+   await expect.poll(() => output<string[]>(page, "credential-status-inputs")).toEqual([])
+   await invokeFixtureControl(page, "Diagnostic failure")
+ 
+   await page.getByRole("button", { name: "Settings test connection" }).click()
+   await expect(page.getByRole("button", { name: "Testing settings connection" })).toBeDisabled()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+@@ -263,21 +326,21 @@ test("settings diagnostics display the authenticated server remediation", async
+ test("settings success toast creates its icon inside the Solid render owner", async ({ page }) => {
+   const warnings: string[] = []
+   page.on("console", (message) => {
+     if (message.type() === "warning") warnings.push(message.text())
+   })
+   await page.goto(fixture("settings"))
+ 
+   await page.getByRole("button", { name: "Settings test connection" }).click()
+   await invokeFixtureControl(page, "Resolve diagnostic")
+ 
+-  await expect(page.getByText("Company LLM connection succeeded", { exact: true })).toBeVisible()
++  await expect(page.getByText("Enterprise provider connection succeeded", { exact: true })).toBeVisible()
+   expect(warnings.filter((warning) => warning.includes("cleanups created outside"))).toEqual([])
+ })
+ 
+ test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
+   await page.goto(fixture("error-enterprise"))
+ 
+   const guide = page.getByRole("button", { name: "Kernexa AI 가이드 열기" })
+   await expect(guide).toBeVisible()
+   await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
+   await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
+@@ -369,89 +432,37 @@ responsiveViewports.forEach((viewport) => {
+     await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeGreaterThan(arrowStart)
+     await page.keyboard.press("Shift+Tab")
+     await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused()
+     await page.keyboard.press("Tab")
+     await expect(body).toBeFocused()
+     await page.screenshot({ path: testInfo.outputPath(`company-guide-${viewport.name}.png`) })
+     await page.keyboard.press("Escape")
+     await expect(dialog).toBeHidden()
+   })
+ 
+-  test(`Company LLM dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
++  test(`Enterprise provider dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
+     await page.setViewportSize({ width: viewport.width, height: viewport.height })
+     await page.goto(fixture("company"))
+     const dialog = page.getByRole("dialog")
+     await expect(dialog).toBeVisible()
+     await page.getByTestId("company-controls").evaluate((node) => node.setAttribute("hidden", ""))
+-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}.png`) })
+-    await invokeFixtureControl(page, "Diagnostic failure")
+-    await dialog.getByRole("button", { name: "Test connection" }).click()
+-    await invokeFixtureControl(page, "Resolve diagnostic")
+-    const remediation = dialog.getByText(SAFE_REMEDIATION, { exact: true })
+-    const remediationVisible = () =>
+-      remediation.evaluate((node) => {
+-        const content = node.closest('[role="dialog"]')?.getBoundingClientRect()
+-        const value = node.getBoundingClientRect()
+-        return Boolean(content && value.top >= content.top && value.bottom <= content.bottom)
+-      })
+-    if (!(await remediationVisible())) await remediation.scrollIntoViewIfNeeded()
+-    expect(await remediationVisible()).toBe(true)
+-    const rows = await dialog.locator('[data-slot="company-diagnostic-result"]').evaluate((node) => {
+-      const children = [...node.children].filter((child): child is HTMLElement => child instanceof HTMLElement)
+-      return Array.from({ length: children.length / 2 }, (_, index) => {
+-        const label = children[index * 2]
+-        const value = children[index * 2 + 1]
+-        const textRects = (element: HTMLElement) => {
+-          const range = document.createRange()
+-          range.selectNodeContents(element)
+-          return [...range.getClientRects()].map((rect) => ({
+-            top: rect.top,
+-            right: rect.right,
+-            bottom: rect.bottom,
+-            left: rect.left,
+-          }))
+-        }
+-        const labelRects = textRects(label)
+-        const valueRects = textRects(value)
+-        const sharedLines = labelRects.flatMap((labelRect) =>
+-          valueRects
+-            .filter((valueRect) => labelRect.top < valueRect.bottom && labelRect.bottom > valueRect.top)
+-            .map((valueRect) => valueRect.left - labelRect.right),
+-        )
+-        return {
+-          label: label.textContent,
+-          value: value.textContent,
+-          labelOverflows: label.scrollWidth > label.clientWidth,
+-          valueOverflows: value.scrollWidth > value.clientWidth,
+-          textIntersects: sharedLines.some((gap) => gap < 0),
+-          sharedLineGap: sharedLines.length ? Math.min(...sharedLines) : undefined,
+-        }
+-      })
+-    })
+-    expect(rows).toEqual(
+-      expect.arrayContaining([
+-        expect.objectContaining({ label: "Basic response", value: "fail" }),
+-        expect.objectContaining({ label: "Streaming", value: "skipped" }),
+-        expect.objectContaining({ label: "Tool calling", value: "skipped" }),
+-        expect.objectContaining({ label: "Failure (connection)", value: SAFE_REMEDIATION }),
+-      ]),
+-    )
+-    expect(rows.every((row) => !row.labelOverflows && !row.valueOverflows)).toBe(true)
+-    expect(rows.every((row) => !row.textIntersects)).toBe(true)
+-    expect(rows.every((row) => row.sharedLineGap === undefined || row.sharedLineGap >= 8)).toBe(true)
++    await dialog.getByRole("button", { name: "Create provider" }).click()
++    await page.getByLabel("Provider ID").fill("compact-gateway")
++    await page.getByLabel("Provider name").fill("Compact Gateway")
++    await page.getByLabel("Base URL").fill("https://gateway.example/v1")
++    await expect(dialog.getByRole("button", { name: "Save provider" })).toBeVisible()
+ 
+     const box = await dialog.boundingBox()
+     expect(box).not.toBeNull()
+     expect(box?.x).toBeGreaterThanOrEqual(0)
+     expect(box?.y).toBeGreaterThanOrEqual(0)
+     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width)
+     expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(viewport.height)
+     expect(
+       await dialog.evaluate((node) => ({
+         horizontal: node.scrollWidth > node.clientWidth,
+-        vertical: node.scrollHeight > node.clientHeight,
+       })),
+-    ).toEqual({ horizontal: false, vertical: false })
++    ).toEqual({ horizontal: false })
+ 
+-    await page.screenshot({ path: testInfo.outputPath(`company-llm-${viewport.name}-failure.png`) })
++    await page.screenshot({ path: testInfo.outputPath(`enterprise-providers-${viewport.name}.png`) })
+   })
+ })
+diff --git a/packages/app/e2e/fixtures/company-llm-enterprise.tsx b/packages/app/e2e/fixtures/company-llm-enterprise.tsx
+index 80e6fd564..3cb8282f7 100644
+--- a/packages/app/e2e/fixtures/company-llm-enterprise.tsx
++++ b/packages/app/e2e/fixtures/company-llm-enterprise.tsx
+@@ -1,28 +1,30 @@
+ import "@/index.css"
+ import { MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
+ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
+ import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
+ import { MarkedProvider } from "@opencode-ai/ui/context/marked"
+-import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
++import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Show, Switch } from "solid-js"
+ import { render } from "solid-js/web"
+ import { createStore } from "solid-js/store"
+ import { AppBaseProviders } from "@/app-base-providers"
+ import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
+ import { DialogConnectProvider } from "@/components/dialog-connect-provider"
+ import { useServerManagementController } from "@/components/dialog-select-server"
++import { SettingsProviders } from "@/components/settings-providers"
++import { SettingsProvidersV2 } from "@/components/settings-v2/providers"
+ import { WindowsAppMenu } from "@/components/windows-app-menu"
+ import { CommandProvider, useCommand } from "@/context/command"
+ import { DesktopCommands } from "@/desktop-commands"
+ import { GlobalProvider } from "@/context/global"
+ import { LanguageProvider } from "@/context/language"
+-import { type Platform, PlatformProvider, usePlatform } from "@/context/platform"
++import { type EnterpriseProviderCatalogView, type Platform, PlatformProvider, usePlatform } from "@/context/platform"
+ import { ServerConnection, ServerProvider, useServer } from "@/context/server"
+ import { ServerSDKProvider } from "@/context/server-sdk"
+ import { ServerSyncProvider } from "@/context/server-sync"
+ import { SettingsProvider, useSettings } from "@/context/settings"
+ import { TabsProvider, useTabs } from "@/context/tabs"
+ import { setV2Toast, ToastRegion } from "@/utils/toast"
+ import { useServerHealth } from "@/utils/server-health"
+ 
+ const DIAGNOSTIC_SUCCESS = {
+   ok: true,
+@@ -46,22 +48,26 @@ const GUIDE_MARKDOWN = [
+ ].join("\n")
+ 
+ type RequestRecord = {
+   origin: string
+   host: string
+   method: string
+   path: string
+   query: string
+   body?: unknown
+ }
+-type CredentialInput = { modelID: string; apiKey?: string; headers?: Record<string, string> }
+-type CredentialMode = "restart" | "no-restart" | "error"
++type CredentialInput = {
++  providerID: string
++  hasApiKey: boolean
++  headerNames: string[]
++}
++type CredentialMode = "restart" | "no-restart" | "error" | "pending"
+ type DiagnosticOutcome = "success" | "failure" | "network-error"
+ 
+ function createHarness(scenario?: string | null) {
+   const sidecar: ServerConnection.Sidecar = {
+     type: "sidecar",
+     variant: "base",
+     displayName: "Company sidecar",
+     http: { url: "http://127.0.0.1:5199" },
+   }
+   const remote: ServerConnection.Http = {
+@@ -80,45 +86,74 @@ function createHarness(scenario?: string | null) {
+     storageWrites: [] as Array<{ name: string; key: string; value: string | null }>,
+     credentialInputs: [] as CredentialInput[],
+     credentialStatusInputs: [] as string[],
+     credentialClearInputs: [] as string[],
+     credentialCatalogCalls: 0,
+     defaultWrites: [] as Array<ServerConnection.Key | null>,
+     restartSnapshots: [] as string[][],
+     externalLinks: [] as string[],
+   })
+   const [diagnosticPending, setDiagnosticPending] = createSignal(false)
++  const [credentialPending, setCredentialPending] = createSignal(false)
+   const behavior = {
+-    configured: { "company-code": false, "company-reasoning": false } as Record<string, boolean>,
+     credentialMode: "restart" as CredentialMode,
+     diagnosticOutcome: "success" as DiagnosticOutcome,
+   }
++  const catalogState: { value: EnterpriseProviderCatalogView } = {
++    value: scenario?.startsWith("settings")
++      ? {
++          schemaVersion: 1,
++          default: { providerID: "company-llm", modelID: "company-code" },
++          providers: [
++            {
++              id: "company-llm",
++              name: "Company LLM",
++              baseURL: "https://llm.company.test/v1",
++              models: [{ id: "company-code", name: "Company Code" }],
++              credentials: { configured: false, headerNames: [] },
++            },
++          ],
++        }
++      : { schemaVersion: 1, providers: [] },
++  }
+   const diagnostic = { resolve: undefined as ((value: unknown) => void) | undefined }
++  const credential = { resolve: undefined as (() => void) | undefined }
+   const history = createMemoryHistory()
+   history.set({ value: "/", scroll: false, replace: true })
+ 
+   const storage = (name = "default.dat") => {
+     const values = stores.get(name) ?? new Map<string, string>()
+     stores.set(name, values)
+     return {
+       getItem: async (key: string) => values.get(key) ?? null,
+       setItem: async (key: string, value: string) => {
+         setObservations("storageWrites", observations.storageWrites.length, { name, key, value })
+         values.set(key, value)
+       },
+       removeItem: async (key: string) => {
+         setObservations("storageWrites", observations.storageWrites.length, { name, key, value: null })
+         values.delete(key)
+       },
+     }
+   }
+ 
++  const credentialTransition = async () => {
++    if (behavior.credentialMode === "error") throw new Error("secure storage failed")
++    if (behavior.credentialMode !== "pending") return
++    await new Promise<void>((resolve) => {
++      credential.resolve = resolve
++      setCredentialPending(true)
++    })
++    credential.resolve = undefined
++    setCredentialPending(false)
++  }
++
+   const json = (value: unknown) =>
+     new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } })
+   const fetch = (async (source: RequestInfo | URL, init?: RequestInit) => {
+     const request = source instanceof Request ? source : new Request(source, init)
+     const url = new URL(request.url)
+     const body =
+       request.method === "GET"
+         ? undefined
+         : await request
+             .clone()
+@@ -137,65 +172,80 @@ function createHarness(scenario?: string | null) {
+     })
+ 
+     if (url.pathname === "/global/health") return json({ healthy: true, version: "test" })
+     if (url.pathname === "/global/config") {
+       return json({ $schema: "https://opencode.ai/config.json" })
+     }
+     if (url.pathname === "/provider") {
+       if (!scenario?.startsWith("company") && scenario !== "connect" && scenario !== "settings") {
+         return json({ all: [], connected: [], default: {} })
+       }
+-      const model = (id: string, name: string, url: string) => ({
++      const model = (providerID: string, id: string, name: string, url: string) => ({
+         id,
+-        providerID: "company-llm",
++        providerID,
+         name,
+         api: { id, url, npm: "@ai-sdk/openai-compatible" },
+         status: "active",
+       })
+       return json({
+         all: [
+           {
+             id: "company-llm",
+             name: "Company LLM",
+             source: "config",
+             env: [],
+             options: {},
+             models: {
+-              "company-code": model("company-code", "Company Code", "https://llm.company.test/v1"),
++              "company-code": model("company-llm", "company-code", "Company Code", "https://llm.company.test/v1"),
++              ...(scenario === "company-mismatch"
++                ? {
++                    "pending-model": model(
++                      "company-llm",
++                      "pending-model",
++                      "Pending Model",
++                      "https://pending.company.test/v1",
++                    ),
++                  }
++                : {}),
++            },
++          },
++          {
++            id: "company-llm-2",
++            name: "Company Reasoning",
++            source: "config",
++            env: [],
++            options: {},
++            models: {
+               "company-reasoning": model(
++                "company-llm-2",
+                 "company-reasoning",
+                 "Company Reasoning",
+                 "https://reasoning.company.test/v1",
+               ),
+-              ...(scenario === "company-mismatch"
+-                ? {
+-                    "pending-model": model("pending-model", "Pending Model", "https://pending.company.test/v1"),
+-                  }
+-                : {}),
+             },
+           },
+         ],
+         connected: [],
+-        default: { "company-llm": "company-code" },
++        default: { "company-llm": "company-code", "company-llm-2": "company-reasoning" },
+       })
+     }
+     if (url.pathname === "/path") {
+       return json({
+         home: "/home",
+         state: "/state",
+         config: "/config",
+         worktree: "/repo",
+         directory: "/repo",
+       })
+     }
+     if (url.pathname === "/project") return json([])
+-    if (url.pathname === "/provider/company-llm/diagnostics") {
++    if (/^\/provider\/[^/]+\/diagnostics$/.test(url.pathname)) {
+       if (behavior.diagnosticOutcome === "network-error") {
+         throw new Error("transport failure with private detail")
+       }
+       const value = await new Promise<unknown>((resolve) => {
+         diagnostic.resolve = resolve
+         setDiagnosticPending(true)
+       })
+       diagnostic.resolve = undefined
+       setDiagnosticPending(false)
+       return json(value)
+@@ -240,80 +290,165 @@ function createHarness(scenario?: string | null) {
+     async openDirectoryPickerDialog() {
+       return null
+     },
+     async getDefaultServer() {
+       return ServerConnection.key(remote)
+     },
+     async setDefaultServer(key) {
+       setObservations("defaultWrites", observations.defaultWrites.length, key)
+     },
+     enterprise: {
+-      async credentialCatalog() {
++      async providerCatalog() {
+         setObservations("credentialCatalogCalls", (value) => value + 1)
+-        return {
+-          defaultModelID: "company-code",
+-          models: [
+-            {
+-              id: "company-code",
+-              name: "Company Code",
+-              baseURL: "https://llm.company.test/v1",
+-              credentialStatus: { configured: behavior.configured["company-code"] },
+-            },
+-            {
+-              id: "company-reasoning",
+-              name: "Company Reasoning",
+-              baseURL: "https://reasoning.company.test/v1",
+-              credentialStatus: { configured: behavior.configured["company-reasoning"] },
+-            },
+-          ],
++        return structuredClone(catalogState.value)
++      },
++      async createProvider(input) {
++        catalogState.value.providers.push({
++          ...input.provider,
++          models: input.provider.models.map((model) => ({ ...model })),
++          credentials: {
++            configured: Boolean(input.credentials?.apiKey || Object.keys(input.credentials?.headers ?? {}).length),
++            headerNames: Object.keys(input.credentials?.headers ?? {}),
++          },
++        })
++        return this.providerCatalog()
++      },
++      async updateProvider(input) {
++        if (input.credentials) {
++          setObservations("credentialInputs", observations.credentialInputs.length, {
++            providerID: input.providerID,
++            hasApiKey: Boolean(input.credentials.apiKey),
++            headerNames: Object.keys(input.credentials.headers),
++          })
++          await credentialTransition()
+         }
++        catalogState.value.providers = catalogState.value.providers.map((provider) =>
++          provider.id === input.providerID
++            ? {
++                ...provider,
++                name: input.name,
++                baseURL: input.baseURL,
++                ...(input.credentials
++                  ? {
++                      credentials: {
++                        configured: Boolean(input.credentials.apiKey || Object.keys(input.credentials.headers).length),
++                        headerNames: Object.keys(input.credentials.headers),
++                      },
++                    }
++                  : {}),
++              }
++            : provider,
++        )
++        return this.providerCatalog()
+       },
+-      async credentialStatus(modelID) {
+-        setObservations("credentialStatusInputs", observations.credentialStatusInputs.length, modelID)
+-        return { configured: behavior.configured[modelID] ?? false }
++      async deleteProvider(providerID) {
++        catalogState.value.providers = catalogState.value.providers.filter((provider) => provider.id !== providerID)
++        if (catalogState.value.default?.providerID === providerID) {
++          const provider = catalogState.value.providers.find((item) => item.models.length)
++          catalogState.value.default = provider
++            ? { providerID: provider.id, modelID: provider.models[0].id }
++            : undefined
++        }
++        return this.providerCatalog()
++      },
++      async createModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        provider?.models.push({ ...input.model })
++        return this.providerCatalog()
+       },
+-      async setCredentials(input) {
+-        setObservations("credentialInputs", observations.credentialInputs.length, input)
+-        if (behavior.credentialMode === "error") throw new Error("secure storage failed")
+-        behavior.configured[input.modelID] = true
+-        return { restartRequired: behavior.credentialMode === "restart" }
++      async updateModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider)
++          provider.models = provider.models.map((model) =>
++            model.id === input.modelID ? { ...model, name: input.name } : model,
++          )
++        return this.providerCatalog()
++      },
++      async deleteModel(input) {
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider) provider.models = provider.models.filter((model) => model.id !== input.modelID)
++        if (
++          catalogState.value.default?.providerID === input.providerID &&
++          catalogState.value.default.modelID === input.modelID
++        ) {
++          const fallback = provider?.models[0]
++          const other = catalogState.value.providers.find((item) => item.models.length)
++          catalogState.value.default = fallback
++            ? { providerID: input.providerID, modelID: fallback.id }
++            : other
++              ? { providerID: other.id, modelID: other.models[0].id }
++              : undefined
++        }
++        return this.providerCatalog()
++      },
++      async setDefaultModel(input) {
++        catalogState.value.default = { ...input }
++        return this.providerCatalog()
++      },
++      async replaceProviderCredentials(input) {
++        setObservations("credentialInputs", observations.credentialInputs.length, {
++          providerID: input.providerID,
++          hasApiKey: Boolean(input.credentials.apiKey),
++          headerNames: Object.keys(input.credentials.headers),
++        })
++        await credentialTransition()
++        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
++        if (provider)
++          provider.credentials = {
++            configured: Boolean(input.credentials.apiKey || Object.keys(input.credentials.headers).length),
++            headerNames: Object.keys(input.credentials.headers),
++          }
++        return this.providerCatalog()
+       },
+-      async clearCredentials(modelID) {
+-        setObservations("credentialClearInputs", observations.credentialClearInputs.length, modelID)
+-        behavior.configured[modelID] = false
+-        return { restartRequired: behavior.credentialMode === "restart" }
++      async clearProviderCredentials(providerID) {
++        setObservations("credentialClearInputs", observations.credentialClearInputs.length, providerID)
++        await credentialTransition()
++        const provider = catalogState.value.providers.find((item) => item.id === providerID)
++        if (provider) provider.credentials = { configured: false, headerNames: [] }
++        return this.providerCatalog()
+       },
+       async readGuide() {
+         return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
+       },
+       async readiness() {
+         return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }
+       },
+       async stateBackups() {
+         return []
+       },
+       async restoreStateBackup() {
+         return { restartRequired: true as const }
+       },
++      async skillPacks() {
++        return []
++      },
++      async setSkillPackEnabled() {
++        return []
++      },
++      async openSkillPackSource() {},
+     },
+   }
+ 
+   return {
+     behavior,
++    credentialPending,
+     diagnosticPending,
+     history,
+     observations,
+     platform,
+     remote,
+     resolveDiagnostic() {
+       diagnostic.resolve?.(behavior.diagnosticOutcome === "success" ? DIAGNOSTIC_SUCCESS : DIAGNOSTIC_FAILURE)
+     },
++    resolveCredential() {
++      credential.resolve?.()
++    },
+     sidecar,
+     persistedServers() {
+       observations.storageWrites.length
+       const value = stores.get("opencode.global.dat")?.get("server")
+       if (!value) return []
+       return (JSON.parse(value) as { list?: unknown[] }).list ?? []
+     },
+   }
+ }
+ 
+@@ -514,20 +649,26 @@ function CompanyControls(props: { harness: Harness }) {
+       <div class="fixed bottom-2 left-2 z-50 flex gap-1" data-testid="company-controls">
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "restart")}>
+           Credentials restart
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "no-restart")}>
+           Credentials no restart
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "error")}>
+           Credentials error
+         </button>
++        <button type="button" onClick={() => (props.harness.behavior.credentialMode = "pending")}>
++          Credentials pending
++        </button>
++        <button type="button" disabled={!props.harness.credentialPending()} onClick={props.harness.resolveCredential}>
++          Resolve credentials
++        </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "success")}>
+           Diagnostic success
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "failure")}>
+           Diagnostic failure
+         </button>
+         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "network-error")}>
+           Diagnostic network error
+         </button>
+         <button type="button" disabled={!props.harness.diagnosticPending()} onClick={props.harness.resolveDiagnostic}>
+@@ -628,20 +769,30 @@ function SettingsScenario(props: { harness: Harness }) {
+   return (
+     <>
+       <DialogTree harness={props.harness}>
+         <SettingsDiagnosticConsumer />
+       </DialogTree>
+       <CompanyControls harness={props.harness} />
+     </>
+   )
+ }
+ 
++function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
++  return (
++    <DialogTree harness={props.harness}>
++      <Show when={props.v2} fallback={<SettingsProviders />}>
++        <SettingsProvidersV2 />
++      </Show>
++    </DialogTree>
++  )
++}
++
+ function Fixture() {
+   const scenario = new URLSearchParams(window.location.search).get("scenario")
+   const harness = createHarness(scenario)
+   return (
+     <Switch fallback={<p>Unknown scenario</p>}>
+       <Match when={scenario === "server"}>
+         <ServerScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "controller"}>
+         <ControllerScenario harness={harness} />
+@@ -651,20 +802,26 @@ function Fixture() {
+       </Match>
+       <Match when={scenario === "company"}>
+         <CompanyScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "company-mismatch"}>
+         <CompanyScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "settings"}>
+         <SettingsScenario harness={harness} />
+       </Match>
++      <Match when={scenario === "settings-layout"}>
++        <SettingsLayoutScenario harness={harness} />
++      </Match>
++      <Match when={scenario === "settings-v2-layout"}>
++        <SettingsLayoutScenario harness={harness} v2 />
++      </Match>
+       <Match when={scenario === "guide"}>
+         <GuideScenario harness={harness} />
+       </Match>
+       <Match when={scenario === "error-enterprise"}>
+         <ErrorScenario harness={harness} enterprise />
+       </Match>
+       <Match when={scenario === "error-public"}>
+         <ErrorScenario harness={harness} enterprise={false} />
+       </Match>
+     </Switch>
+diff --git a/packages/app/src/components/dialog-company-provider-state.ts b/packages/app/src/components/dialog-company-provider-state.ts
+index a236bf007..d8a70c335 100644
+--- a/packages/app/src/components/dialog-company-provider-state.ts
++++ b/packages/app/src/components/dialog-company-provider-state.ts
+@@ -1,151 +1,201 @@
++import type {
++  CredentialReplacement,
++  EnterpriseProvider,
++  EnterpriseProviderCatalogView,
++  EnterpriseProviderModel,
++} from "@/context/platform"
++
+ export type CompanyProviderDiagnosticResult = {
+   ok: boolean
+   checks: {
+     basic: "pass" | "fail" | "skipped"
+     streaming: "pass" | "fail" | "skipped"
+     toolCall: "pass" | "fail" | "skipped"
+   }
+   failure?: { kind: string; message: string }
+ }
+ 
+-export type CompanyProviderAction = "save" | "clear" | "diagnose" | undefined
+-export type CredentialMutationResult = { restartRequired: boolean }
+-export type CompanyCredentialCatalog = {
+-  defaultModelID: string
+-  models: {
+-    id: string
+-    name: string
+-    baseURL: string
+-    credentialStatus: { configured: boolean; errorCode?: string }
+-  }[]
+-}
+-export type CompanyResolvedProvider = {
+-  models?: Record<
+-    string,
+-    {
+-      id?: string
+-      name?: string
+-      api?: { url?: unknown }
+-    }
+-  >
++export type CompanyProviderAction = "save" | "clear" | "diagnose" | "delete" | "default" | undefined
++
++export type EnterpriseProviderFormMode = { type: "create" } | { type: "edit"; providerID: string }
++export type EnterpriseProviderFormInput = {
++  mode: EnterpriseProviderFormMode
++  providerID: string
++  name: string
++  baseURL: string
++  models: EnterpriseProviderModel[]
++  existingProviderIDs: Set<string>
+ }
+-export type CompanyProviderCredentialModel = {
+-  id: string
++export type EnterpriseProviderFormResult = {
++  providerID: string
+   name: string
+   baseURL: string
+-  isDefault: boolean
+-  synchronized: boolean
+-  credentialStatus: { configured: boolean; errorCode?: string } | undefined
++  models: EnterpriseProviderModel[]
++  error?: string
+ }
++export type ProviderCredentialMode = "preserve" | "replace" | "clear"
++export type ProviderCredentialIntent =
++  | { mode: "preserve" }
++  | { mode: "clear" }
++  | { mode: "replace"; credentials: CredentialReplacement; error?: undefined }
++  | { mode: "replace"; error: string; credentials?: undefined }
++export type EnterpriseDeleteConfirmation =
++  | { type: "provider"; providerID: string }
++  | { type: "model"; providerID: string; modelID: string }
+ 
+-export const COMPANY_PROVIDER_FAILURE_MESSAGE = "Company LLM connection test failed. Check the server and try again."
++export const COMPANY_PROVIDER_FAILURE_MESSAGE =
++  "Enterprise provider connection test failed. Check the server and try again."
+ 
+-export function companyProviderCredentialInput(apiKey: string, headers: { key: string; value: string }[]) {
+-  const values = new Map<string, readonly [string, string]>()
+-  headers.forEach((header) => {
+-    const key = header.key.trim()
+-    const value = header.value.trim()
+-    if (!key || !value) return
+-    values.set(key.toLowerCase(), [key, value])
+-  })
+-  const entries = Object.fromEntries([...values.values()])
++export function validateEnterpriseProviderForm(input: EnterpriseProviderFormInput): EnterpriseProviderFormResult {
++  const providerID = (input.mode.type === "edit" ? input.mode.providerID : input.providerID).trim()
++  const name = input.name.trim()
++  const baseURL = input.baseURL.trim()
++  const models = input.models.map((model) => ({ id: model.id.trim(), name: model.name.trim() }))
++  const value = { providerID, name, baseURL, models }
++
++  if (!providerID) return { ...value, error: "Provider ID is required" }
++  if (!name) return { ...value, error: "Provider name is required" }
++  if (!baseURL) return { ...value, error: "Base URL is required" }
++  if (
++    input.mode.type === "create" &&
++    [...input.existingProviderIDs].some((id) => id.toLowerCase() === providerID.toLowerCase())
++  )
++    return { ...value, error: "Provider ID already exists" }
++
++  const url = URL.parse(baseURL)
++  if (!url || (url.protocol !== "http:" && url.protocol !== "https:"))
++    return { ...value, error: "Base URL must use http or https" }
++  if (url.username || url.password || url.search || url.hash)
++    return { ...value, error: "Base URL cannot include credentials, query parameters, or fragments" }
++  if (models.some((model) => !model.id)) return { ...value, error: "Model ID is required" }
++  if (models.some((model) => !model.name)) return { ...value, error: "Model name is required" }
++  if (new Set(models.map((model) => model.id.toLowerCase())).size !== models.length)
++    return { ...value, error: "Model IDs must be unique" }
++  return value
++}
++
++export function providerCredentialIntent(
++  mode: ProviderCredentialMode,
++  apiKey: string,
++  headers: { key: string; value: string }[],
++): ProviderCredentialIntent {
++  if (mode === "preserve") return { mode }
++  if (mode === "clear") return { mode }
++
++  const complete = headers.filter((header) => header.key.trim() || header.value.trim())
++  if (complete.some((header) => !header.key.trim() || !header.value.trim()))
++    return { mode, error: "Secret headers require a name and value" }
++  const keys = complete.map((header) => header.key.trim().toLowerCase())
++  if (new Set(keys).size !== keys.length) return { mode, error: "Secret header names must be unique" }
+   const secret = apiKey.trim()
+   return {
+-    ...(secret ? { apiKey: secret } : {}),
+-    ...(Object.keys(entries).length ? { headers: entries } : {}),
++    mode,
++    credentials: {
++      ...(secret ? { apiKey: secret } : {}),
++      headers: Object.fromEntries(complete.map((header) => [header.key.trim(), header.value.trim()])),
++    },
+   }
+ }
+ 
+-export function companyProviderCredentialModels(
+-  provider: CompanyResolvedProvider | undefined,
+-  catalog: CompanyCredentialCatalog,
+-): CompanyProviderCredentialModel[] {
+-  const serverModels = Object.entries(provider?.models ?? {}).map(([id, model]) => ({
+-    id,
+-    name: model.name ?? id,
+-    baseURL: typeof model.api?.url === "string" ? model.api.url : "",
+-  }))
+-  const server = new Map(serverModels.map((model) => [model.id, model]))
+-  const main = new Set(catalog.models.map((model) => model.id))
+-  return [
+-    ...catalog.models.map((model) => ({
+-      ...model,
+-      isDefault: model.id === catalog.defaultModelID,
+-      synchronized: server.get(model.id)?.baseURL === model.baseURL,
+-    })),
+-    ...serverModels.flatMap((model) =>
+-      main.has(model.id)
+-        ? []
+-        : [
+-            {
+-              ...model,
+-              isDefault: false,
+-              synchronized: false,
+-              credentialStatus: undefined,
+-            },
+-          ],
+-    ),
+-  ]
+-}
++export async function applyEnterpriseProviderUpdate<T>(input: {
++  providerID: string
++  name: string
++  baseURL: string
++  credentials: { mode: "preserve" } | { mode: "clear" } | { mode: "replace"; credentials: CredentialReplacement }
++  updateProvider: (value: { providerID: string; name: string; baseURL: string }) => Promise<T>
++  replaceProviderCredentials: (value: { providerID: string; credentials: CredentialReplacement }) => Promise<T>
++  clearProviderCredentials: (providerID: string) => Promise<T>
++  mutate: (value: T) => void
++}) {
++  const updated = await input.updateProvider({
++    providerID: input.providerID,
++    name: input.name,
++    baseURL: input.baseURL,
++  })
++  if (input.credentials.mode === "preserve") {
++    input.mutate(updated)
++    return updated
++  }
+ 
+-export function companyProviderModelCredentialStatus(model: CompanyProviderCredentialModel, failureMessage: string) {
+-  if (!model.synchronized) return "Restart required"
+-  return companyProviderCredentialStatus(
+-    {
+-      loading: false,
+-      configured: model.credentialStatus?.configured,
+-      error: model.credentialStatus?.errorCode,
++  const credentials =
++    input.credentials.mode === "replace"
++      ? input.replaceProviderCredentials({
++          providerID: input.providerID,
++          credentials: input.credentials.credentials,
++        })
++      : input.clearProviderCredentials(input.providerID)
++  return credentials.then(
++    (catalog) => {
++      input.mutate(catalog)
++      return catalog
++    },
++    (error: unknown) => {
++      input.mutate(updated)
++      throw error
+     },
+-    failureMessage,
+   )
+ }
+ 
+-export function companyProviderCanStart(action: CompanyProviderAction, ready: boolean) {
+-  return action === undefined && ready
+-}
+-
+-export function companyProviderShouldRestart(result?: CredentialMutationResult) {
+-  return result?.restartRequired === true
++export function enterpriseProviderPresentation(
++  catalog: EnterpriseProviderCatalogView,
++  provider: EnterpriseProviderCatalogView["providers"][number],
++) {
++  const model = provider.models.find(
++    (item) => catalog.default?.providerID === provider.id && item.id === catalog.default.modelID,
++  )
++  return {
++    modelCount: `${provider.models.length} ${provider.models.length === 1 ? "model" : "models"}`,
++    credentials: provider.credentials.errorCode
++      ? "Credentials must be re-entered"
++      : provider.credentials.configured
++        ? "Credentials configured"
++        : "Credentials not configured",
++    defaultModel: model?.name,
++    isDefaultProvider: Boolean(model),
++  }
+ }
+ 
+-export function companyProviderCredentialStatus(
+-  status: { loading: boolean; configured?: boolean; error?: unknown },
+-  failureMessage: string,
+-) {
+-  if (status.loading) return "Checking credentials..."
+-  if (status.error === "credential_decryption_failed" || status.error === "credential_encryption_unavailable")
+-    return "Credentials must be re-entered"
+-  if (status.error) return failureMessage
+-  return status.configured ? "Credentials configured" : "Credentials not configured"
++export function enterpriseDeleteConfirmation(type: "provider", providerID: string): EnterpriseDeleteConfirmation
++export function enterpriseDeleteConfirmation(
++  type: "model",
++  providerID: string,
++  modelID: string,
++): EnterpriseDeleteConfirmation
++export function enterpriseDeleteConfirmation(type: "provider" | "model", providerID: string, modelID?: string) {
++  if (type === "provider") return { type, providerID }
++  return { type, providerID, modelID: modelID ?? "" }
+ }
+ 
+-export async function applyCompanyProviderCredentialMutation(input: {
+-  mutation: () => Promise<CredentialMutationResult>
+-  clearLocal: () => void
+-  restart: () => Promise<void>
+-}) {
+-  const result = await input.mutation()
+-  input.clearLocal()
+-  if (companyProviderShouldRestart(result)) await input.restart()
+-  return result
++export function companyProviderCanStart(action: CompanyProviderAction, ready: boolean) {
++  return action === undefined && ready
+ }
+ 
+ export function diagnoseCompanyProvider<T>(
+   diagnose: (input: { providerID: string; modelID: string; checkToolCall: boolean }) => T,
++  providerID: string,
+   modelID: string,
+ ) {
+-  return diagnose({ providerID: "company-llm", modelID, checkToolCall: true })
++  return diagnose({ providerID, modelID, checkToolCall: true })
+ }
+ 
+ export function companyProviderDiagnosticResult(
+   result: CompanyProviderDiagnosticResult | undefined,
+   failureMessage: string,
+ ) {
+   return (
+     result ?? {
+       ok: false,
+       checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+       failure: { kind: "connection", message: failureMessage },
+     }
+   )
+ }
++
++export function providerFormFromCatalog(provider: EnterpriseProvider): EnterpriseProviderFormResult {
++  return {
++    providerID: provider.id,
++    name: provider.name,
++    baseURL: provider.baseURL,
++    models: provider.models.map((model) => ({ ...model })),
++  }
++}
+diff --git a/packages/app/src/components/dialog-company-provider.test.ts b/packages/app/src/components/dialog-company-provider.test.ts
+index a2dc2789a..6b44f6244 100644
+--- a/packages/app/src/components/dialog-company-provider.test.ts
++++ b/packages/app/src/components/dialog-company-provider.test.ts
+@@ -1,250 +1,285 @@
+ import { describe, expect, test } from "bun:test"
+ import {
+-  applyCompanyProviderCredentialMutation,
++  applyEnterpriseProviderUpdate,
+   companyProviderCanStart,
+-  companyProviderCredentialStatus,
+-  companyProviderCredentialInput,
+-  diagnoseCompanyProvider,
+   companyProviderDiagnosticResult,
+-  companyProviderCredentialModels,
+-  companyProviderModelCredentialStatus,
+-  companyProviderShouldRestart,
++  diagnoseCompanyProvider,
++  enterpriseDeleteConfirmation,
++  enterpriseProviderPresentation,
++  providerCredentialIntent,
++  validateEnterpriseProviderForm,
+ } from "./dialog-company-provider-state"
+ 
+-describe("companyProviderCredentialInput", () => {
+-  test("trims secrets without placing them in provider config", () => {
+-    expect(companyProviderCredentialInput(" secret ", [{ key: " X-Token ", value: " value " }])).toEqual({
+-      apiKey: "secret",
+-      headers: { "X-Token": "value" },
++describe("enterprise provider form", () => {
++  test("provider update preserves immutable IDs", () => {
++    const result = validateEnterpriseProviderForm({
++      mode: { type: "edit", providerID: "internal" },
++      providerID: "changed-in-the-dom",
++      name: " Internal Updated ",
++      baseURL: " https://new.example/v1 ",
++      models: [{ id: "code", name: " Code Updated " }],
++      existingProviderIDs: new Set(["internal"]),
++    })
++
++    expect(result).toMatchObject({
++      providerID: "internal",
++      name: "Internal Updated",
++      baseURL: "https://new.example/v1",
++      models: [{ id: "code", name: "Code Updated" }],
+     })
++    expect(result.error).toBeUndefined()
+   })
+ 
+-  test("omits untouched credential kinds so main can preserve encrypted values", () => {
++  test("rejects duplicate provider IDs only while creating", () => {
+     expect(
+-      companyProviderCredentialInput("", [
+-        { key: "", value: "" },
+-        { key: "X-Key", value: "" },
+-        { key: "", value: "secret" },
+-      ]),
+-    ).toEqual({})
++      validateEnterpriseProviderForm({
++        mode: { type: "create" },
++        providerID: " INTERNAL ",
++        name: "Internal",
++        baseURL: "https://internal.example/v1",
++        models: [],
++        existingProviderIDs: new Set(["internal"]),
++      }).error,
++    ).toBe("Provider ID already exists")
+   })
+ 
+-  test("resolves duplicate header names case-insensitively with the last complete row", () => {
++  test("rejects invalid URLs and duplicate model IDs", () => {
+     expect(
+-      companyProviderCredentialInput("", [
+-        { key: " X-Token ", value: " first " },
+-        { key: "x-token", value: " second " },
+-        { key: "X-Other", value: " third " },
+-      ]),
+-    ).toEqual({
+-      headers: {
+-        "x-token": "second",
+-        "X-Other": "third",
+-      },
+-    })
++      validateEnterpriseProviderForm({
++        mode: { type: "create" },
++        providerID: "internal",
++        name: "Internal",
++        baseURL: "file:///private/provider",
++        models: [],
++        existingProviderIDs: new Set(),
++      }).error,
++    ).toBe("Base URL must use http or https")
++    expect(
++      validateEnterpriseProviderForm({
++        mode: { type: "create" },
++        providerID: "internal",
++        name: "Internal",
++        baseURL: "https://internal.example/v1",
++        models: [
++          { id: "code", name: "Code" },
++          { id: " CODE ", name: "Code duplicate" },
++        ],
++        existingProviderIDs: new Set(),
++      }).error,
++    ).toBe("Model IDs must be unique")
+   })
+-})
+ 
+-describe("company provider catalog", () => {
+-  test("merges authoritative credentials with sidecar models and marks restart mismatches", () => {
+-    const provider = {
+-      models: {
+-        code: { id: "code", name: "Server Code", api: { url: "https://code.company.test/v1" } },
+-        pending: { id: "pending", name: "Pending Model", api: { url: "https://pending.company.test/v1" } },
+-        changed: { id: "changed", name: "Changed Model", api: { url: "https://changed-new.company.test/v1" } },
+-      },
++  test("rejects Base URLs with credentials, query parameters, or fragments", () => {
++    for (const baseURL of [
++      "https://user:secret@gateway.example/v1",
++      "https://gateway.example/v1?tenant=internal",
++      "https://gateway.example/v1#models",
++    ]) {
++      expect(
++        validateEnterpriseProviderForm({
++          mode: { type: "create" },
++          providerID: "internal",
++          name: "Internal",
++          baseURL,
++          models: [],
++          existingProviderIDs: new Set(),
++        }).error,
++      ).toBe("Base URL cannot include credentials, query parameters, or fragments")
+     }
+-    const rows = companyProviderCredentialModels(provider, {
+-      defaultModelID: "code",
+-      models: [
+-        {
+-          id: "code",
+-          name: "Company Code",
+-          baseURL: "https://code.company.test/v1",
+-          credentialStatus: { configured: true },
+-        },
+-        {
+-          id: "main-only",
+-          name: "Main Only",
+-          baseURL: "https://main-only.company.test/v1",
+-          credentialStatus: { configured: false },
+-        },
+-        {
+-          id: "changed",
+-          name: "Changed Model",
+-          baseURL: "https://changed-old.company.test/v1",
+-          credentialStatus: { configured: false },
+-        },
+-      ],
+-    })
+-
+-    expect(rows).toEqual([
+-      {
+-        id: "code",
+-        name: "Company Code",
+-        baseURL: "https://code.company.test/v1",
+-        isDefault: true,
+-        synchronized: true,
+-        credentialStatus: { configured: true },
+-      },
+-      {
+-        id: "main-only",
+-        name: "Main Only",
+-        baseURL: "https://main-only.company.test/v1",
+-        isDefault: false,
+-        synchronized: false,
+-        credentialStatus: { configured: false },
+-      },
+-      {
+-        id: "changed",
+-        name: "Changed Model",
+-        baseURL: "https://changed-old.company.test/v1",
+-        isDefault: false,
+-        synchronized: false,
+-        credentialStatus: { configured: false },
+-      },
+-      {
+-        id: "pending",
+-        name: "Pending Model",
+-        baseURL: "https://pending.company.test/v1",
+-        isDefault: false,
+-        synchronized: false,
+-        credentialStatus: undefined,
+-      },
+-    ])
+-    expect(companyProviderModelCredentialStatus(rows[0], "Request failed")).toBe("Credentials configured")
+-    expect(companyProviderModelCredentialStatus(rows[1], "Request failed")).toBe("Restart required")
+-    expect(companyProviderModelCredentialStatus(rows[3], "Request failed")).toBe("Restart required")
+   })
+ 
+-  test("compares credentials with resolved provider models instead of global config", () => {
+-    const rows = companyProviderCredentialModels(
+-      {
+-        models: {
+-          code: {
+-            id: "code",
+-            name: "Company Code",
+-            api: { url: "https://code.company.test/v1" },
+-          },
+-        },
+-      },
+-      {
+-        defaultModelID: "code",
+-        models: [
+-          {
+-            id: "code",
+-            name: "Company Code",
+-            baseURL: "https://code.company.test/v1",
+-            credentialStatus: { configured: false },
+-          },
+-        ],
+-      },
+-    )
++  test("allows a provider with zero models", () => {
++    const result = validateEnterpriseProviderForm({
++      mode: { type: "create" },
++      providerID: "empty",
++      name: "Empty provider",
++      baseURL: "https://empty.example/v1",
++      models: [],
++      existingProviderIDs: new Set(),
++    })
+ 
+-    expect(rows[0]?.synchronized).toBe(true)
++    expect(result.models).toEqual([])
++    expect(result.error).toBeUndefined()
+   })
+ })
+ 
+-describe("company provider operation state", () => {
+-  test("blocks missing prerequisites and double submission", () => {
+-    expect(companyProviderCanStart(undefined, true)).toBe(true)
+-    expect(companyProviderCanStart("diagnose", true)).toBe(false)
+-    expect(companyProviderCanStart(undefined, false)).toBe(false)
+-  })
+-
+-  test("restarts only when the enterprise mutation requests it", () => {
+-    expect(companyProviderShouldRestart({ restartRequired: true })).toBe(true)
+-    expect(companyProviderShouldRestart({ restartRequired: false })).toBe(false)
+-    expect(companyProviderShouldRestart(undefined)).toBe(false)
++describe("enterprise provider credentials", () => {
++  test("credential replacement sends a complete set", () => {
++    expect(providerCredentialIntent("replace", " key ", [{ key: "X-Token", value: " value " }])).toEqual({
++      mode: "replace",
++      credentials: { apiKey: "key", headers: { "X-Token": "value" } },
++    })
+   })
+ 
+-  test("creates a stable diagnostic result for network failures", () => {
+-    expect(companyProviderDiagnosticResult(undefined, "Request failed")).toEqual({
+-      ok: false,
+-      checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
+-      failure: { kind: "connection", message: "Request failed" },
++  test("preserve and clear never carry secret values", () => {
++    expect(providerCredentialIntent("preserve", "ignored", [{ key: "X-Token", value: "ignored" }])).toEqual({
++      mode: "preserve",
++    })
++    expect(providerCredentialIntent("clear", "ignored", [{ key: "X-Token", value: "ignored" }])).toEqual({
++      mode: "clear",
+     })
+   })
+ 
+-  test("renders loading, configured, empty, and failed credential status", () => {
+-    expect(companyProviderCredentialStatus({ loading: true }, "Request failed")).toBe("Checking credentials...")
+-    expect(companyProviderCredentialStatus({ loading: false, configured: true }, "Request failed")).toBe(
+-      "Credentials configured",
+-    )
+-    expect(companyProviderCredentialStatus({ loading: false, configured: false }, "Request failed")).toBe(
+-      "Credentials not configured",
+-    )
++  test("rejects duplicate header names case-insensitively", () => {
+     expect(
+-      companyProviderCredentialStatus(
+-        { loading: false, configured: false, error: "credential_decryption_failed" },
+-        "Request failed",
+-      ),
+-    ).toBe("Credentials must be re-entered")
+-    expect(companyProviderCredentialStatus({ loading: false, error: new Error("offline") }, "Request failed")).toBe(
+-      "Request failed",
+-    )
++      providerCredentialIntent("replace", "", [
++        { key: "X-Token", value: "first" },
++        { key: "x-token", value: "second" },
++      ]),
++    ).toEqual({ mode: "replace", error: "Secret header names must be unique" })
+   })
+ 
+-  test("clears dialog secrets before a requested restart", async () => {
+-    const events: string[] = []
+-    await applyCompanyProviderCredentialMutation({
+-      mutation: async () => {
+-        events.push("setCredentials")
+-        return { restartRequired: true }
++  test("updates provider metadata before replacing credentials explicitly", async () => {
++    const metadataInputs: unknown[] = []
++    const credentialInputs: unknown[] = []
++    const mutations: unknown[] = []
++    const updated = { schemaVersion: 1 as const, providers: [{ id: "updated" }] }
++    const replaced = { schemaVersion: 1 as const, providers: [{ id: "replaced" }] }
++
++    await applyEnterpriseProviderUpdate({
++      providerID: "internal",
++      name: "Internal Updated",
++      baseURL: "https://new.example/v1",
++      credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
++      updateProvider: async (input) => {
++        metadataInputs.push(input)
++        return updated
++      },
++      replaceProviderCredentials: async (input) => {
++        credentialInputs.push(input)
++        return replaced
+       },
+-      clearLocal: () => events.push("clearLocal"),
+-      restart: async () => {
+-        events.push("restart")
++      clearProviderCredentials: async () => {
++        throw new Error("clear must not run")
+       },
++      mutate: (value) => mutations.push(value),
+     })
+-    expect(events).toEqual(["setCredentials", "clearLocal", "restart"])
++
++    expect(metadataInputs).toEqual([
++      { providerID: "internal", name: "Internal Updated", baseURL: "https://new.example/v1" },
++    ])
++    expect(credentialInputs).toEqual([{ providerID: "internal", credentials: { apiKey: "secret", headers: {} } }])
++    expect(mutations).toEqual([replaced])
+   })
+ 
+-  test("does not clear or restart when credential storage fails", async () => {
+-    const events: string[] = []
+-    const result = applyCompanyProviderCredentialMutation({
+-      mutation: async () => {
+-        events.push("setCredentials")
+-        throw new Error("secure storage failed")
++  test("reconciles committed metadata when credential clear fails", async () => {
++    const mutations: unknown[] = []
++    const updated = { schemaVersion: 1 as const, providers: [{ id: "committed" }] }
++    const result = applyEnterpriseProviderUpdate({
++      providerID: "internal",
++      name: "Internal Updated",
++      baseURL: "https://new.example/v1",
++      credentials: { mode: "clear" },
++      updateProvider: async () => updated,
++      replaceProviderCredentials: async () => {
++        throw new Error("replace must not run")
+       },
+-      clearLocal: () => events.push("clearLocal"),
+-      restart: async () => {
+-        events.push("restart")
++      clearProviderCredentials: async () => {
++        throw new Error("secure storage failed")
+       },
++      mutate: (value) => mutations.push(value),
+     })
++
+     expect(result).rejects.toThrow("secure storage failed")
+     await result.catch(() => undefined)
+-    expect(events).toEqual(["setCredentials"])
++    expect(mutations).toEqual([updated])
+   })
+ 
+-  test("does not restart when the enterprise API does not request it", async () => {
+-    const events: string[] = []
+-    const result = await applyCompanyProviderCredentialMutation({
+-      mutation: async () => {
+-        events.push("mutation")
+-        return { restartRequired: false }
++  test("reconciles committed metadata when explicit credential replacement fails", async () => {
++    const mutations: unknown[] = []
++    const updated = { schemaVersion: 1 as const, providers: [{ id: "committed" }] }
++    const result = applyEnterpriseProviderUpdate({
++      providerID: "internal",
++      name: "Internal Updated",
++      baseURL: "https://new.example/v1",
++      credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
++      updateProvider: async () => updated,
++      replaceProviderCredentials: async () => {
++        throw new Error("secure storage failed")
+       },
+-      clearLocal: () => events.push("clearLocal"),
+-      restart: async () => {
+-        events.push("restart")
++      clearProviderCredentials: async () => {
++        throw new Error("clear must not run")
+       },
++      mutate: (value) => mutations.push(value),
++    })
++
++    expect(result).rejects.toThrow("secure storage failed")
++    await result.catch(() => undefined)
++    expect(mutations).toEqual([updated])
++  })
++})
++
++describe("enterprise provider presentation state", () => {
++  const catalog = {
++    schemaVersion: 1 as const,
++    default: { providerID: "internal", modelID: "code" },
++    providers: [
++      {
++        id: "internal",
++        name: "Internal",
++        baseURL: "https://internal.example/v1",
++        models: [
++          { id: "chat", name: "Chat" },
++          { id: "code", name: "Code" },
++        ],
++        credentials: { configured: true, headerNames: ["X-Token"] },
++      },
++    ],
++  }
++
++  test("derives model count, redacted credential state, and default badges", () => {
++    expect(enterpriseProviderPresentation(catalog, catalog.providers[0])).toEqual({
++      modelCount: "2 models",
++      credentials: "Credentials configured",
++      defaultModel: "Code",
++      isDefaultProvider: true,
+     })
+-    expect(result).toEqual({ restartRequired: false })
+-    expect(events).toEqual(["mutation", "clearLocal"])
+   })
+ 
+-  test("sends the generated company provider diagnose request", async () => {
++  test("presents credential recovery without exposing stored values", () => {
++    expect(
++      enterpriseProviderPresentation(catalog, {
++        ...catalog.providers[0],
++        credentials: {
++          configured: false,
++          headerNames: ["X-Token"],
++          errorCode: "credential_decryption_failed",
++        },
++      }).credentials,
++    ).toBe("Credentials must be re-entered")
++  })
++
++  test("locks all actions while one is pending and disables model actions without a model", () => {
++    expect(companyProviderCanStart(undefined, true)).toBe(true)
++    expect(companyProviderCanStart("save", true)).toBe(false)
++    expect(companyProviderCanStart(undefined, false)).toBe(false)
++  })
++
++  test("captures immutable provider and model delete IDs", () => {
++    expect(enterpriseDeleteConfirmation("provider", "internal")).toEqual({
++      type: "provider",
++      providerID: "internal",
++    })
++    expect(enterpriseDeleteConfirmation("model", "internal", "code")).toEqual({
++      type: "model",
++      providerID: "internal",
++      modelID: "code",
++    })
++  })
++})
++
++describe("enterprise diagnostics", () => {
++  test("targets the selected provider and model", async () => {
+     const requests: unknown[] = []
+-    const diagnostic = {
+-      ok: true,
+-      checks: { basic: "pass", streaming: "pass", toolCall: "pass" } as const,
+-    }
+-    const result = await diagnoseCompanyProvider(async (input) => {
+-      requests.push(input)
+-      return { data: diagnostic }
+-    }, "company-code")
++    await diagnoseCompanyProvider(async (input) => requests.push(input), "internal", "code")
++    expect(requests).toEqual([{ providerID: "internal", modelID: "code", checkToolCall: true }])
++  })
+ 
+-    expect(requests).toEqual([{ providerID: "company-llm", modelID: "company-code", checkToolCall: true }])
+-    expect(result.data).toEqual(diagnostic)
++  test("creates a stable diagnostic result for network failures", () => {
++    expect(companyProviderDiagnosticResult(undefined, "Request failed")).toEqual({
++      ok: false,
++      checks: { basic: "fail", streaming: "skipped", toolCall: "skipped" },
++      failure: { kind: "connection", message: "Request failed" },
++    })
+   })
+ })
+diff --git a/packages/app/src/components/dialog-company-provider.tsx b/packages/app/src/components/dialog-company-provider.tsx
+index 255a7e1de..837fb21e5 100644
+--- a/packages/app/src/components/dialog-company-provider.tsx
++++ b/packages/app/src/components/dialog-company-provider.tsx
+@@ -1,429 +1,886 @@
+ import { Button } from "@opencode-ai/ui/button"
+ import { useDialog } from "@opencode-ai/ui/context/dialog"
+ import { Dialog } from "@opencode-ai/ui/dialog"
+ import { IconButton } from "@opencode-ai/ui/icon-button"
+ import { TextField } from "@opencode-ai/ui/text-field"
+ import { Tooltip } from "@opencode-ai/ui/tooltip"
+ import { useLanguage } from "@/context/language"
+-import { usePlatform } from "@/context/platform"
++import { usePlatform, type EnterpriseProviderCatalogView } from "@/context/platform"
+ import { useServerSDK } from "@/context/server-sdk"
+-import { useServerSync } from "@/context/server-sync"
+ import { showToast } from "@/utils/toast"
+ import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
+ import { createStore } from "solid-js/store"
+ import {
+-  applyCompanyProviderCredentialMutation,
++  applyEnterpriseProviderUpdate,
+   COMPANY_PROVIDER_FAILURE_MESSAGE,
+   companyProviderCanStart,
+-  companyProviderCredentialInput,
+-  companyProviderCredentialModels,
+   companyProviderDiagnosticResult,
+-  companyProviderModelCredentialStatus,
+   diagnoseCompanyProvider,
++  enterpriseDeleteConfirmation,
++  enterpriseProviderPresentation,
++  providerCredentialIntent,
++  validateEnterpriseProviderForm,
+   type CompanyProviderAction,
+   type CompanyProviderDiagnosticResult,
+-  type CredentialMutationResult,
++  type EnterpriseDeleteConfirmation,
++  type ProviderCredentialMode,
+ } from "./dialog-company-provider-state"
+ 
+ export function useCompanyProviderSettingsState() {
+   const platform = usePlatform()
+   const language = useLanguage()
+   const serverSDK = useServerSDK()
+-  const serverSync = useServerSync()
+   const [catalog, catalogActions] = createResource(
+     () => platform.enterprise,
+-    (enterprise) => enterprise?.credentialCatalog(),
++    (enterprise) => enterprise?.providerCatalog(),
+   )
+-  const models = createMemo(() => {
+-    if (!catalog.latest || !serverSync().data.ready) return []
+-    return companyProviderCredentialModels(serverSync().data.provider.all.get("company-llm"), catalog.latest)
+-  })
+-  const defaultModel = createMemo(
+-    () => models().find((model) => model.isDefault) ?? models().find((model) => model.synchronized),
++  const providers = createMemo(() => catalog.latest?.providers ?? [])
++  const defaultProvider = createMemo(() =>
++    providers().find((provider) => provider.id === catalog.latest?.default?.providerID),
++  )
++  const defaultModel = createMemo(() =>
++    defaultProvider()?.models.find((model) => model.id === catalog.latest?.default?.modelID),
+   )
+   const [checking, setChecking] = createSignal(false)
++
+   const testConnection = async () => {
++    const provider = defaultProvider()
+     const model = defaultModel()
+-    if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(model?.synchronized))) return
+-    if (!model) return
++    if (!companyProviderCanStart(checking() ? "diagnose" : undefined, Boolean(provider && model))) return
++    if (!provider || !model) return
+     setChecking(true)
+-    const response = await diagnoseCompanyProvider((input) => serverSDK().client.provider.diagnose(input), model.id)
++    const response = await diagnoseCompanyProvider(
++      (input) => serverSDK().client.provider.diagnose(input),
++      provider.id,
++      model.id,
++    )
+       .then((value) => value.data)
+       .catch(() => undefined)
+     const result = companyProviderDiagnosticResult(response, language.t("common.requestFailed"))
+     setChecking(false)
+     if (result.ok) {
+       showToast({
+         variant: "success",
+         icon: "circle-check",
+-        title: "Company LLM connection succeeded",
+-        description: model.name,
++        title: "Enterprise provider connection succeeded",
++        description: `${provider.name} / ${model.name}`,
+       })
+       return
+     }
+     showToast({
+       variant: "error",
+       title: COMPANY_PROVIDER_FAILURE_MESSAGE,
+       description: result.failure?.message ?? "connection",
+     })
+   }
+ 
+-  const statusLabel = () => {
+-    if (catalog.loading || !serverSync().data.ready) return "Checking credentials..."
++  const status = () => {
++    if (catalog.loading) return "Loading providers..."
+     if (catalog.error) return language.t("common.requestFailed")
+-    const model = defaultModel()
+-    if (!model) return "Credentials not configured"
+-    return companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))
++    const provider = defaultProvider()
++    if (!provider) return "No default model"
++    return provider.credentials.configured ? "Credentials configured" : "Credentials not configured"
+   }
+ 
+   return {
+-    models,
++    catalog,
++    providers,
++    defaultProvider,
+     defaultModel,
+     checking,
+-    status: statusLabel,
++    status,
+     refreshStatus: catalogActions.refetch,
+     testConnection,
+   }
+ }
+ 
++type ProviderEditor = "create-provider" | "edit-provider" | "create-model" | "edit-model" | undefined
++
+ export function DialogCompanyProvider(props: { onBack?: () => void }) {
+   const dialog = useDialog()
+   const platform = usePlatform()
+   const language = useLanguage()
+   const serverSDK = useServerSDK()
+-  const serverSync = useServerSync()
+   const [catalog, catalogActions] = createResource(
+     () => platform.enterprise,
+-    (enterprise) => enterprise?.credentialCatalog(),
++    (enterprise) => enterprise?.providerCatalog(),
+   )
+-  const models = createMemo(() => {
+-    if (!catalog.latest || !serverSync().data.ready) return []
+-    return companyProviderCredentialModels(serverSync().data.provider.all.get("company-llm"), catalog.latest)
+-  })
+   const [state, setState] = createStore({
+-    apiKey: "",
+-    headers: [{ key: "", value: "" }],
+-    modelID: "",
++    selectedProviderID: "",
++    selectedModelID: "",
++    editor: undefined as ProviderEditor,
+     action: undefined as CompanyProviderAction,
+-    result: undefined as CompanyProviderDiagnosticResult | undefined,
++    confirm: undefined as EnterpriseDeleteConfirmation | undefined,
+     error: undefined as string | undefined,
++    result: undefined as CompanyProviderDiagnosticResult | undefined,
++  })
++  const [providerForm, setProviderForm] = createStore({
++    providerID: "",
++    name: "",
++    baseURL: "",
++    models: [] as { id: string; name: string }[],
++    credentialMode: "preserve" as ProviderCredentialMode,
++    apiKey: "",
++    headers: [{ key: "", value: "" }],
+   })
++  const [modelForm, setModelForm] = createStore({ id: "", name: "" })
++  let confirmationTrigger: HTMLElement | undefined
++  let confirmationButton: HTMLButtonElement | undefined
+   const [readinessProvider, setReadinessProvider] = createSignal<{
++    providerID: string
+     modelID: string
+     result: CompanyProviderDiagnosticResult
+   }>()
+   const [readiness] = createResource(
+     () => {
+-      const provider = readinessProvider()
+-      if (!provider || provider.modelID !== state.modelID) return
+-      return { enterprise: platform.enterprise, provider: provider.result }
++      const value = readinessProvider()
++      return value && value.providerID === state.selectedProviderID && value.modelID === state.selectedModelID
++        ? { enterprise: platform.enterprise, result: value.result }
++        : false
+     },
+-    (input) => input.enterprise?.readiness(input.provider),
++    (input) => input.enterprise?.readiness(input.result),
+   )
++  const providers = createMemo(() => catalog.latest?.providers ?? [])
++  const selectedProvider = createMemo(() => providers().find((provider) => provider.id === state.selectedProviderID))
++  const selectedModel = createMemo(() => selectedProvider()?.models.find((model) => model.id === state.selectedModelID))
+ 
+   createEffect(() => {
+-    if (models().some((model) => model.id === state.modelID)) return
+-    setState(
+-      "modelID",
+-      models().find((model) => model.isDefault)?.id ?? models().find((model) => model.synchronized)?.id ?? "",
+-    )
++    const value = catalog.latest
++    if (!value) return
++    const provider = value.providers.find((item) => item.id === state.selectedProviderID)
++    if (!provider) {
++      const next = value.providers.find((item) => item.id === value.default?.providerID) ?? value.providers[0]
++      setState({ selectedProviderID: next?.id ?? "", selectedModelID: defaultModelID(value, next?.id) })
++      return
++    }
++    if (provider.models.some((model) => model.id === state.selectedModelID)) return
++    setState("selectedModelID", defaultModelID(value, provider.id))
+   })
+ 
+   const resetSecrets = () => {
+-    setState("apiKey", "")
+-    setState("headers", [{ key: "", value: "" }])
++    setProviderForm("credentialMode", "preserve")
++    setProviderForm("apiKey", "")
++    setProviderForm("headers", [{ key: "", value: "" }])
+   }
+-
+-  const selectModel = (modelID: string) => {
+-    if (modelID === state.modelID) return
++  const clearTransient = () => {
+     resetSecrets()
+     setState("result", undefined)
+     setState("error", undefined)
+     setReadinessProvider(undefined)
+-    setState("modelID", modelID)
++  }
++  const selectProvider = (providerID: string) => {
++    if (state.action !== undefined || providerID === state.selectedProviderID) return
++    clearTransient()
++    setState("editor", undefined)
++    setState("confirm", undefined)
++    setState("selectedProviderID", providerID)
++    setState("selectedModelID", defaultModelID(catalog.latest, providerID))
++  }
++  const selectModel = (modelID: string) => {
++    if (state.action !== undefined || modelID === state.selectedModelID) return
++    clearTransient()
++    setState("editor", undefined)
++    setState("confirm", undefined)
++    setState("selectedModelID", modelID)
+   }
+ 
+-  const mutateCredentials = async (
+-    nextAction: Exclude<CompanyProviderAction, "diagnose" | undefined>,
+-    mutation: () => Promise<CredentialMutationResult>,
++  const beginProviderEditor = (mode: "create" | "edit") => {
++    const provider = selectedProvider()
++    clearTransient()
++    setState("confirm", undefined)
++    setState("editor", mode === "create" ? "create-provider" : "edit-provider")
++    setProviderForm({
++      providerID: mode === "edit" ? (provider?.id ?? "") : "",
++      name: mode === "edit" ? (provider?.name ?? "") : "",
++      baseURL: mode === "edit" ? (provider?.baseURL ?? "") : "",
++      models: mode === "edit" ? (provider?.models.map((model) => ({ ...model })) ?? []) : [],
++      credentialMode: "preserve",
++      apiKey: "",
++      headers: [{ key: "", value: "" }],
++    })
++  }
++  const beginModelEditor = (mode: "create" | "edit") => {
++    const model = selectedModel()
++    setState("error", undefined)
++    setState("confirm", undefined)
++    setState("editor", mode === "create" ? "create-model" : "edit-model")
++    setModelForm({ id: mode === "edit" ? (model?.id ?? "") : "", name: mode === "edit" ? (model?.name ?? "") : "" })
++  }
++
++  const mutate = async (
++    action: Exclude<CompanyProviderAction, undefined>,
++    mutation: () => Promise<EnterpriseProviderCatalogView>,
+   ) => {
+-    if (!companyProviderCanStart(state.action, true)) return
+-    setState("action", nextAction)
++    if (state.action !== undefined) return false
++    setState("action", action)
+     setState("error", undefined)
+-    const response = await applyCompanyProviderCredentialMutation({
+-      mutation,
+-      clearLocal: resetSecrets,
+-      restart: () => platform.restart(),
+-    }).then(
++    const result = await mutation().then(
+       (value) => ({ value }),
+-      (error: unknown) => ({
+-        error:
+-          error instanceof Error && error.message.includes("Enterprise credential model is not configured")
+-            ? ("catalog" as const)
+-            : ("request" as const),
+-      }),
++      () => ({ error: true as const }),
+     )
+-    if ("error" in response) {
+-      setState(
+-        "error",
+-        response.error === "catalog"
+-          ? "The model catalog changed. Restart the desktop app before configuring credentials."
+-          : language.t("common.requestFailed"),
+-      )
+-      setState("action", undefined)
+-      return
+-    }
+-
+-    await catalogActions.refetch()
+     setState("action", undefined)
++    if ("error" in result) {
++      resetSecrets()
++      setState("error", language.t("common.requestFailed"))
++      return false
++    }
++    catalogActions.mutate(result.value)
++    return true
+   }
+ 
+-  const save = async (event: SubmitEvent) => {
++  const saveProvider = async (event: SubmitEvent) => {
+     event.preventDefault()
+     const enterprise = platform.enterprise
+     if (!enterprise) return
+-    if (!selectedModel()?.synchronized) return
+-    const input = companyProviderCredentialInput(state.apiKey, state.headers)
+-    if (!companyProviderCanStart(state.action, Object.keys(input).length > 0)) return
+-    await mutateCredentials("save", () => enterprise.setCredentials({ modelID: state.modelID, ...input }))
++    const mode =
++      state.editor === "edit-provider"
++        ? ({ type: "edit", providerID: state.selectedProviderID } as const)
++        : ({ type: "create" } as const)
++    const value = validateEnterpriseProviderForm({
++      mode,
++      providerID: providerForm.providerID,
++      name: providerForm.name,
++      baseURL: providerForm.baseURL,
++      models: providerForm.models,
++      existingProviderIDs: new Set(providers().map((provider) => provider.id)),
++    })
++    if (value.error) {
++      setState("error", value.error)
++      return
++    }
++    const credentials = providerCredentialIntent(providerForm.credentialMode, providerForm.apiKey, providerForm.headers)
++    if ("error" in credentials && credentials.error) {
++      setState("error", credentials.error)
++      return
++    }
++    const replacement =
++      credentials.mode === "replace" && "credentials" in credentials ? credentials.credentials : undefined
++    const created = mode.type === "create"
++    const complete = await mutate("save", () => {
++      if (created) {
++        return enterprise.createProvider({
++          provider: { id: value.providerID, name: value.name, baseURL: value.baseURL, models: value.models },
++          ...(replacement ? { credentials: replacement } : {}),
++        })
++      }
++      return applyEnterpriseProviderUpdate({
++        providerID: value.providerID,
++        name: value.name,
++        baseURL: value.baseURL,
++        credentials: replacement
++          ? { mode: "replace", credentials: replacement }
++          : credentials.mode === "clear"
++            ? { mode: "clear" }
++            : { mode: "preserve" },
++        updateProvider: (input) => enterprise.updateProvider(input),
++        replaceProviderCredentials: (input) => enterprise.replaceProviderCredentials(input),
++        clearProviderCredentials: (providerID) => enterprise.clearProviderCredentials(providerID),
++        mutate: catalogActions.mutate,
++      })
++    })
++    if (!complete) return
++    setState({ selectedProviderID: value.providerID, editor: undefined, confirm: undefined })
++    resetSecrets()
+   }
+ 
+-  const clear = async () => {
++  const saveModel = async (event: SubmitEvent) => {
++    event.preventDefault()
+     const enterprise = platform.enterprise
+-    if (!enterprise || !selectedModel()?.synchronized || !selectedModel()?.credentialStatus?.configured) return
+-    await mutateCredentials("clear", () => enterprise.clearCredentials(state.modelID))
++    const provider = selectedProvider()
++    if (!enterprise || !provider) return
++    const edit = state.editor === "edit-model"
++    const modelID = (edit ? state.selectedModelID : modelForm.id).trim()
++    const name = modelForm.name.trim()
++    const duplicate = provider.models.some(
++      (model) => model.id.toLowerCase() === modelID.toLowerCase() && (!edit || model.id !== state.selectedModelID),
++    )
++    if (!modelID || !name || duplicate) {
++      setState(
++        "error",
++        duplicate ? "Model ID already exists" : !modelID ? "Model ID is required" : "Model name is required",
++      )
++      return
++    }
++    const complete = await mutate("save", () =>
++      edit
++        ? enterprise.updateModel({ providerID: provider.id, modelID: state.selectedModelID, name })
++        : enterprise.createModel({ providerID: provider.id, model: { id: modelID, name } }),
++    )
++    if (!complete) return
++    setState({ selectedModelID: modelID, editor: undefined })
+   }
+ 
++  const setDefault = async () => {
++    const enterprise = platform.enterprise
++    const provider = selectedProvider()
++    const model = selectedModel()
++    if (!enterprise || !provider || !model) return
++    await mutate("default", () => enterprise.setDefaultModel({ providerID: provider.id, modelID: model.id }))
++  }
++  const confirmDelete = async () => {
++    const enterprise = platform.enterprise
++    const target = state.confirm
++    if (!enterprise || !target) return
++    const complete = await mutate("delete", () =>
++      target.type === "provider"
++        ? enterprise.deleteProvider(target.providerID)
++        : enterprise.deleteModel({ providerID: target.providerID, modelID: target.modelID }),
++    )
++    if (!complete) return
++    setState({ confirm: undefined, editor: undefined })
++    queueMicrotask(() => {
++      if (confirmationTrigger?.isConnected) confirmationTrigger.focus()
++    })
++  }
++  const requestDelete = (target: EnterpriseDeleteConfirmation, trigger: HTMLElement) => {
++    confirmationTrigger = trigger
++    setState("confirm", target)
++    queueMicrotask(() => confirmationButton?.focus())
++  }
++  const cancelDelete = () => {
++    setState("confirm", undefined)
++    queueMicrotask(() => confirmationTrigger?.focus())
++  }
+   const diagnose = async () => {
+-    if (!companyProviderCanStart(state.action, Boolean(selectedModel()?.synchronized))) return
+-    const modelID = state.modelID
+-    setState("result", undefined)
+-    setState("action", "diagnose")
+-    setState("error", undefined)
++    const provider = selectedProvider()
++    const model = selectedModel()
++    if (!provider || !model || !companyProviderCanStart(state.action, true)) return
++    const providerID = provider.id
++    const modelID = model.id
++    setState({ action: "diagnose", result: undefined, error: undefined })
+     const response = await diagnoseCompanyProvider(
+       (input) => serverSDK().client.provider.diagnose(input),
+-      state.modelID,
++      providerID,
++      modelID,
+     )
+       .then((value) => value.data)
+       .catch(() => undefined)
+-    if (state.modelID !== modelID) {
+-      setState("action", undefined)
+-      return
+-    }
++    setState("action", undefined)
++    if (state.selectedProviderID !== providerID || state.selectedModelID !== modelID) return
+     const result = companyProviderDiagnosticResult(response, language.t("common.requestFailed"))
+     setState("result", result)
+-    setReadinessProvider({ modelID, result })
+-    setState("action", undefined)
++    setReadinessProvider({ providerID, modelID, result })
+   }
+ 
+-  const statusLabel = () => {
+-    if (catalog.loading || !serverSync().data.ready) return "Checking credentials..."
+-    if (catalog.error) return language.t("common.requestFailed")
++  const pairLabel = () => {
++    const provider = selectedProvider()
+     const model = selectedModel()
+-    if (!model) return "Credentials not configured"
+-    return companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))
++    if (!provider || !model) return "Enterprise provider"
++    return `${provider.name} / ${model.name}`
+   }
+-
+-  const selectedModel = createMemo(() => models().find((model) => model.id === state.modelID))
+-  const editorDisabled = () => state.action !== undefined || !selectedModel()?.synchronized
+-  const input = createMemo(() => companyProviderCredentialInput(state.apiKey, state.headers))
+   const diagnosticStatus = () => {
+-    if (state.action === "diagnose") return "Testing Company LLM connection"
+-    if (!state.result) return "Ready to test Company LLM connection"
+-    if (state.result.ok) return "Company LLM connection test completed successfully"
++    if (state.action === "diagnose") return `Testing ${pairLabel()} connection`
++    if (!state.result) return selectedModel() ? `Ready to test ${pairLabel()} connection` : "Select a model to test"
++    if (state.result.ok) return `${pairLabel()} connection test completed successfully`
+     return ""
+   }
++  const pending = () => state.action !== undefined
++  const locked = () => pending() || state.confirm !== undefined
+ 
+   return (
+-    <Dialog title="Company LLM" size="large" class="w-full max-w-[900px]">
+-      <form class="flex min-w-0 flex-col gap-4 px-4 pb-4" onSubmit={save}>
++    <Dialog title="Enterprise providers" size="large" class="w-full max-w-[980px]" preventClose={locked()}>
++      <div class="flex max-h-[min(720px,calc(100vh-96px))] min-w-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
+         <Show when={catalog.error}>
+           <p
+             class="rounded-md border border-border-danger-base px-3 py-2 text-12-regular text-text-danger-base"
+             role="alert"
+           >
+-            Credential settings could not be loaded. Restart the desktop app and try again.
++            Provider settings could not be loaded. Restart the desktop app and try again.
+           </p>
+         </Show>
+-        <Show when={models().some((model) => !model.synchronized)}>
+-          <p
+-            class="rounded-md border border-border-warning-base bg-surface-warning-strong/10 px-3 py-2 text-12-regular text-text-strong"
+-            role="alert"
+-          >
+-            The desktop and server model catalogs differ. Restart the desktop app before configuring affected models.
+-          </p>
++        <Show when={state.error}>
++          {(message) => (
++            <div
++              class="flex items-center justify-between gap-3 rounded-md border border-border-danger-base px-3 py-2"
++              role="alert"
++            >
++              <span class="text-12-regular text-text-danger-base">{message()}</span>
++              <Button
++                type="button"
++                size="small"
++                variant="ghost"
++                disabled={locked()}
++                onClick={() => {
++                  resetSecrets()
++                  setState("error", undefined)
++                }}
++              >
++                Dismiss error
++              </Button>
++            </div>
++          )}
+         </Show>
+ 
+-        <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)]">
+-          <div class="flex min-w-0 flex-col gap-2" aria-label="Enterprise models">
+-            <span class="text-12-medium text-text-weak">Models</span>
++        <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.25fr)]">
++          <section class="flex min-w-0 flex-col gap-2" aria-label="Enterprise providers">
++            <div class="flex items-center justify-between gap-2">
++              <span class="text-12-medium text-text-weak">Providers</span>
++              <Button
++                type="button"
++                size="small"
++                variant="secondary"
++                disabled={locked()}
++                onClick={() => beginProviderEditor("create")}
++              >
++                Create provider
++              </Button>
++            </div>
+             <Show
+-              when={!catalog.loading && serverSync().data.ready}
+-              fallback={<span class="text-12-regular text-text-weak">Loading models...</span>}
++              when={!catalog.loading}
++              fallback={<span class="text-12-regular text-text-weak">Loading providers...</span>}
+             >
+-              <For each={models()} fallback={<span class="text-12-regular text-text-weak">No configured models</span>}>
+-                {(model) => (
+-                  <button
+-                    type="button"
+-                    data-testid={`company-model-${model.id}`}
+-                    aria-pressed={model.id === state.modelID}
+-                    class="flex min-w-0 flex-col gap-1 rounded-md border px-3 py-2 text-left"
+-                    classList={{
+-                      "border-border-focus bg-surface-raised-base": model.id === state.modelID,
+-                      "border-border-weak-base bg-surface-base": model.id !== state.modelID,
+-                    }}
+-                    disabled={state.action !== undefined}
+-                    onClick={() => selectModel(model.id)}
+-                  >
+-                    <span class="flex min-w-0 items-center justify-between gap-2">
+-                      <span class="truncate text-13-medium text-text-strong">{model.name}</span>
+-                      <Show when={model.isDefault}>
+-                        <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
+-                          Default
+-                        </span>
++              <For
++                each={providers()}
++                fallback={<span class="py-4 text-12-regular text-text-weak">No enterprise providers configured</span>}
++              >
++                {(provider) => {
++                  const presentation = () => enterpriseProviderPresentation(catalog.latest!, provider)
++                  return (
++                    <button
++                      type="button"
++                      data-testid={`enterprise-provider-${provider.id}`}
++                      aria-pressed={provider.id === state.selectedProviderID}
++                      class="flex min-w-0 flex-col gap-1 rounded-md border px-3 py-2 text-left"
++                      classList={{
++                        "border-border-focus bg-surface-raised-base": provider.id === state.selectedProviderID,
++                        "border-border-weak-base bg-surface-base": provider.id !== state.selectedProviderID,
++                      }}
++                      disabled={locked()}
++                      onClick={() => selectProvider(provider.id)}
++                    >
++                      <span class="flex min-w-0 items-center justify-between gap-2">
++                        <span class="truncate text-13-medium text-text-strong">{provider.name}</span>
++                        <Show when={presentation().isDefaultProvider}>
++                          <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
++                            Default
++                          </span>
++                        </Show>
++                      </span>
++                      <span class="truncate text-11-regular text-text-weak">{provider.id}</span>
++                      <span class="break-all text-11-regular text-text-weak">{provider.baseURL}</span>
++                      <span class="text-11-regular text-text-weak">{presentation().modelCount}</span>
++                      <span class="text-11-medium text-text-strong">{presentation().credentials}</span>
++                      <Show when={presentation().defaultModel}>
++                        {(model) => <span class="text-11-regular text-text-weak">Default model: {model()}</span>}
+                       </Show>
+-                    </span>
+-                    <span class="truncate text-11-regular text-text-weak">{model.id}</span>
+-                    <span class="break-all text-11-regular text-text-weak">{model.baseURL}</span>
+-                    <span class="text-11-medium text-text-strong">
+-                      {companyProviderModelCredentialStatus(model, language.t("common.requestFailed"))}
+-                    </span>
+-                  </button>
+-                )}
++                    </button>
++                  )
++                }}
+               </For>
+             </Show>
+-          </div>
+-
+-          <div class="flex min-w-0 flex-col gap-4">
+-            <TextField label="Base URL" value={selectedModel()?.baseURL ?? ""} disabled />
+-
+-            <div class="flex items-center justify-between gap-3 text-12-regular">
+-              <span class="text-text-weak">Credential status</span>
+-              <span class="text-text-strong" role="status" aria-live="polite" aria-atomic="true">
+-                {statusLabel()}
+-              </span>
+-            </div>
++          </section>
+ 
+-            <TextField
+-              label="API key"
+-              type="password"
+-              autocomplete="off"
+-              value={state.apiKey}
+-              disabled={editorDisabled()}
+-              onChange={(value) => setState("apiKey", value)}
+-            />
+-
+-            <div class="flex min-w-0 flex-col gap-2">
+-              <div class="flex items-center justify-between gap-3">
+-                <span class="text-12-medium text-text-weak">Secret headers</span>
+-                <Tooltip value="Add secret header" placement="top">
+-                  <IconButton
+-                    type="button"
+-                    icon="plus-small"
+-                    variant="ghost"
+-                    aria-label="Add secret header"
+-                    disabled={editorDisabled()}
+-                    onClick={() => setState("headers", state.headers.length, { key: "", value: "" })}
++          <section class="flex min-w-0 flex-col gap-4" aria-label="Provider details">
++            <Show when={state.editor === "create-provider" || state.editor === "edit-provider"}>
++              <form class="flex min-w-0 flex-col gap-3" onSubmit={saveProvider}>
++                <h3 class="text-14-medium text-text-strong">
++                  {state.editor === "create-provider" ? "Create provider" : "Edit provider"}
++                </h3>
++                <TextField
++                  label="Provider ID"
++                  value={providerForm.providerID}
++                  disabled={locked() || state.editor === "edit-provider"}
++                  onChange={(value) => setProviderForm("providerID", value)}
++                />
++                <TextField
++                  label="Provider name"
++                  value={providerForm.name}
++                  disabled={locked()}
++                  onChange={(value) => setProviderForm("name", value)}
++                />
++                <TextField
++                  label="Base URL"
++                  value={providerForm.baseURL}
++                  disabled={locked()}
++                  onChange={(value) => setProviderForm("baseURL", value)}
++                />
++                <div class="flex min-w-0 flex-col gap-2">
++                  <span class="text-12-medium text-text-weak">Models</span>
++                  <For
++                    each={providerForm.models}
++                    fallback={<span class="text-11-regular text-text-weak">This provider has zero models.</span>}
++                  >
++                    {(model, index) => (
++                      <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
++                        <TextField
++                          label={`Model ID ${index() + 1}`}
++                          value={model.id}
++                          disabled={locked() || state.editor === "edit-provider"}
++                          onChange={(value) => setProviderForm("models", index(), "id", value)}
++                        />
++                        <TextField
++                          label={`Model name ${index() + 1}`}
++                          value={model.name}
++                          disabled={locked() || state.editor === "edit-provider"}
++                          onChange={(value) => setProviderForm("models", index(), "name", value)}
++                        />
++                        <Tooltip value="Remove initial model" placement="top">
++                          <IconButton
++                            type="button"
++                            icon="trash"
++                            variant="ghost"
++                            class="mt-1.5"
++                            aria-label="Remove initial model"
++                            disabled={locked() || state.editor === "edit-provider"}
++                            onClick={() =>
++                              setProviderForm("models", (models) => models.filter((_, row) => row !== index()))
++                            }
++                          />
++                        </Tooltip>
++                      </div>
++                    )}
++                  </For>
++                  <Show when={state.editor === "create-provider"}>
++                    <Button
++                      type="button"
++                      size="small"
++                      variant="ghost"
++                      disabled={locked()}
++                      onClick={() => setProviderForm("models", providerForm.models.length, { id: "", name: "" })}
++                    >
++                      Add initial model
++                    </Button>
++                  </Show>
++                </div>
++                <label class="flex min-w-0 flex-col gap-1 text-12-medium text-text-weak">
++                  Credential action
++                  <select
++                    class="h-8 rounded-md border border-border-weak-base bg-surface-base px-2 text-13-regular text-text-strong"
++                    value={providerForm.credentialMode}
++                    disabled={locked()}
++                    onChange={(event) => {
++                      resetSecrets()
++                      const value = event.currentTarget.value
++                      setProviderForm(
++                        "credentialMode",
++                        value === "replace" ? "replace" : value === "clear" ? "clear" : "preserve",
++                      )
++                    }}
++                  >
++                    <option value="preserve">Preserve credentials</option>
++                    <option value="replace">Replace credentials</option>
++                    <option value="clear">Clear credentials</option>
++                  </select>
++                </label>
++                <Show when={providerForm.credentialMode === "replace"}>
++                  <TextField
++                    label="API key"
++                    type="password"
++                    autocomplete="off"
++                    value={providerForm.apiKey}
++                    disabled={locked()}
++                    onChange={(value) => setProviderForm("apiKey", value)}
+                   />
+-                </Tooltip>
+-              </div>
+-              <For each={state.headers}>
+-                {(header, index) => (
+-                  <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
+-                    <TextField
+-                      label="Secret header"
+-                      hideLabel
+-                      placeholder="Header name"
+-                      autocomplete="off"
+-                      value={header.key}
+-                      disabled={editorDisabled()}
+-                      onChange={(value) => setState("headers", index(), "key", value)}
+-                    />
+-                    <TextField
+-                      label="Secret value"
+-                      hideLabel
+-                      type="password"
+-                      placeholder="Secret value"
+-                      autocomplete="off"
+-                      value={header.value}
+-                      disabled={editorDisabled()}
+-                      onChange={(value) => setState("headers", index(), "value", value)}
+-                    />
+-                    <Tooltip value="Remove secret header" placement="top">
++                  <div class="flex min-w-0 flex-col gap-2">
++                    <div class="flex items-center justify-between gap-2">
++                      <span class="text-12-medium text-text-weak">Secret headers</span>
+                       <IconButton
+                         type="button"
+-                        icon="trash"
++                        icon="plus-small"
+                         variant="ghost"
+-                        class="mt-1.5"
+-                        aria-label="Remove secret header"
+-                        disabled={editorDisabled() || state.headers.length === 1}
+-                        onClick={() => setState("headers", (rows) => rows.filter((_, row) => row !== index()))}
++                        aria-label="Add secret header"
++                        disabled={locked()}
++                        onClick={() => setProviderForm("headers", providerForm.headers.length, { key: "", value: "" })}
+                       />
+-                    </Tooltip>
++                    </div>
++                    <For each={providerForm.headers}>
++                      {(header, index) => (
++                        <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
++                          <TextField
++                            label="Secret header"
++                            hideLabel
++                            placeholder="Header name"
++                            autocomplete="off"
++                            value={header.key}
++                            disabled={locked()}
++                            onChange={(value) => setProviderForm("headers", index(), "key", value)}
++                          />
++                          <TextField
++                            label="Secret value"
++                            hideLabel
++                            type="password"
++                            placeholder="Secret value"
++                            autocomplete="off"
++                            value={header.value}
++                            disabled={locked()}
++                            onChange={(value) => setProviderForm("headers", index(), "value", value)}
++                          />
++                          <IconButton
++                            type="button"
++                            icon="trash"
++                            variant="ghost"
++                            class="mt-1.5"
++                            aria-label="Remove secret header"
++                            disabled={locked() || providerForm.headers.length === 1}
++                            onClick={() =>
++                              setProviderForm("headers", (headers) => headers.filter((_, row) => row !== index()))
++                            }
++                          />
++                        </div>
++                      )}
++                    </For>
+                   </div>
+-                )}
+-              </For>
+-            </div>
++                </Show>
++                <div class="flex flex-wrap gap-2">
++                  <Button type="submit" variant="primary" disabled={locked()}>
++                    {state.action === "save" ? "Saving..." : "Save provider"}
++                  </Button>
++                  <Button
++                    type="button"
++                    variant="ghost"
++                    disabled={locked()}
++                    onClick={() => {
++                      resetSecrets()
++                      setState("editor", undefined)
++                    }}
++                  >
++                    Cancel edit
++                  </Button>
++                </div>
++              </form>
++            </Show>
+ 
+-            <div class="flex flex-wrap items-center gap-2">
+-              <Button type="submit" variant="primary" disabled={!Object.keys(input()).length || editorDisabled()}>
+-                {state.action === "save" ? language.t("common.saving") : language.t("common.save")}
+-              </Button>
+-              <Button
+-                type="button"
+-                variant="secondary"
+-                disabled={editorDisabled() || !state.modelID}
+-                onClick={diagnose}
+-              >
+-                {state.action === "diagnose" ? "Testing..." : "Test connection"}
+-              </Button>
+-              <Button
+-                type="button"
+-                variant="secondary"
+-                disabled={editorDisabled() || !selectedModel()?.credentialStatus?.configured}
+-                onClick={clear}
+-              >
+-                {state.action === "clear" ? "Clearing..." : "Clear credentials"}
+-              </Button>
+-              <Button
+-                type="button"
+-                variant="ghost"
+-                disabled={state.action !== undefined}
+-                onClick={props.onBack ?? dialog.close}
+-              >
+-                {language.t("common.cancel")}
+-              </Button>
+-            </div>
+-          </div>
++            <Show when={state.editor === "create-model" || state.editor === "edit-model"}>
++              <form class="flex min-w-0 flex-col gap-3" onSubmit={saveModel}>
++                <h3 class="text-14-medium text-text-strong">
++                  {state.editor === "create-model" ? "Add model" : "Edit model"}
++                </h3>
++                <TextField
++                  label="Model ID"
++                  value={modelForm.id}
++                  disabled={locked() || state.editor === "edit-model"}
++                  onChange={(value) => setModelForm("id", value)}
++                />
++                <TextField
++                  label="Model name"
++                  value={modelForm.name}
++                  disabled={locked()}
++                  onChange={(value) => setModelForm("name", value)}
++                />
++                <div class="flex flex-wrap gap-2">
++                  <Button type="submit" variant="primary" disabled={locked()}>
++                    {state.action === "save" ? "Saving..." : "Save model"}
++                  </Button>
++                  <Button
++                    type="button"
++                    variant="ghost"
++                    disabled={locked()}
++                    onClick={() => setState("editor", undefined)}
++                  >
++                    Cancel edit
++                  </Button>
++                </div>
++              </form>
++            </Show>
++
++            <Show when={!state.editor && selectedProvider()}>
++              {(provider) => (
++                <div class="flex min-w-0 flex-col gap-4">
++                  <div class="flex min-w-0 flex-wrap items-start justify-between gap-3">
++                    <div class="min-w-0">
++                      <h3 class="truncate text-14-medium text-text-strong">{provider().name}</h3>
++                      <p class="break-all text-12-regular text-text-weak">{provider().baseURL}</p>
++                      <p class="text-12-regular text-text-weak" role="status">
++                        {enterpriseProviderPresentation(catalog.latest!, provider()).credentials}
++                      </p>
++                      <Show when={provider().credentials.headerNames.length}>
++                        <p class="text-11-regular text-text-weak">
++                          Configured headers: {provider().credentials.headerNames.join(", ")}
++                        </p>
++                      </Show>
++                    </div>
++                    <div class="flex flex-wrap gap-2">
++                      <Button
++                        type="button"
++                        size="small"
++                        variant="secondary"
++                        disabled={locked()}
++                        onClick={() => beginProviderEditor("edit")}
++                      >
++                        Edit provider
++                      </Button>
++                      <Button
++                        type="button"
++                        size="small"
++                        variant="secondary"
++                        disabled={locked()}
++                        onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
++                          requestDelete(enterpriseDeleteConfirmation("provider", provider().id), event.currentTarget)
++                        }
++                      >
++                        Delete provider
++                      </Button>
++                    </div>
++                  </div>
++
++                  <div class="flex min-w-0 flex-col gap-2">
++                    <div class="flex items-center justify-between gap-2">
++                      <span class="text-12-medium text-text-weak">Models</span>
++                      <Button
++                        type="button"
++                        size="small"
++                        variant="secondary"
++                        disabled={locked()}
++                        onClick={() => beginModelEditor("create")}
++                      >
++                        Add model
++                      </Button>
++                    </div>
++                    <For
++                      each={provider().models}
++                      fallback={<span class="py-3 text-12-regular text-text-weak">No models configured</span>}
++                    >
++                      {(model) => (
++                        <button
++                          type="button"
++                          data-testid={`enterprise-model-${provider().id}-${model.id}`}
++                          aria-pressed={model.id === state.selectedModelID}
++                          class="flex min-w-0 items-center justify-between gap-2 rounded-md border px-3 py-2 text-left"
++                          classList={{
++                            "border-border-focus bg-surface-raised-base": model.id === state.selectedModelID,
++                            "border-border-weak-base bg-surface-base": model.id !== state.selectedModelID,
++                          }}
++                          disabled={locked()}
++                          onClick={() => selectModel(model.id)}
++                        >
++                          <span class="min-w-0">
++                            <span class="block truncate text-13-medium text-text-strong">{model.name}</span>
++                            <span class="block truncate text-11-regular text-text-weak">{model.id}</span>
++                          </span>
++                          <Show
++                            when={
++                              catalog.latest?.default?.providerID === provider().id &&
++                              catalog.latest?.default?.modelID === model.id
++                            }
++                          >
++                            <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
++                              Default
++                            </span>
++                          </Show>
++                        </button>
++                      )}
++                    </For>
++                  </div>
++
++                  <div class="flex flex-wrap gap-2">
++                    <Button
++                      type="button"
++                      variant="secondary"
++                      disabled={locked() || !selectedModel()}
++                      onClick={() => beginModelEditor("edit")}
++                    >
++                      Edit model
++                    </Button>
++                    <Button
++                      type="button"
++                      variant="secondary"
++                      disabled={
++                        locked() ||
++                        !selectedModel() ||
++                        (catalog.latest?.default?.providerID === provider().id &&
++                          catalog.latest?.default?.modelID === selectedModel()?.id)
++                      }
++                      onClick={setDefault}
++                    >
++                      Set default
++                    </Button>
++                    <Button
++                      type="button"
++                      variant="secondary"
++                      disabled={locked() || !selectedModel()}
++                      onClick={diagnose}
++                    >
++                      {state.action === "diagnose" ? "Testing..." : "Test connection"}
++                    </Button>
++                    <Button
++                      type="button"
++                      variant="secondary"
++                      disabled={locked() || !selectedModel()}
++                      onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
++                        const model = selectedModel()
++                        if (model)
++                          requestDelete(
++                            enterpriseDeleteConfirmation("model", provider().id, model.id),
++                            event.currentTarget,
++                          )
++                      }}
++                    >
++                      Delete model
++                    </Button>
++                  </div>
++                </div>
++              )}
++            </Show>
++          </section>
+         </div>
+ 
++        <Show when={state.confirm}>
++          {(target) => {
++            const value = target()
++            const provider = providers().find((provider) => provider.id === value.providerID)
++            const name =
++              value.type === "provider"
++                ? (provider?.name ?? value.providerID)
++                : (provider?.models.find((model) => model.id === value.modelID)?.name ?? value.modelID)
++            return (
++              <div
++                class="rounded-md border border-border-danger-base px-3 py-3"
++                role="alertdialog"
++                aria-modal="true"
++                aria-labelledby="enterprise-delete-title"
++                aria-describedby="enterprise-delete-description"
++                onKeyDown={containConfirmationFocus}
++              >
++                <h3 id="enterprise-delete-title" class="text-13-medium text-text-strong">
++                  Delete {value.type} {name}
++                </h3>
++                <p id="enterprise-delete-description" class="mt-1 text-12-regular text-text-strong">
++                  {value.type === "provider"
++                    ? "All models and credentials for this provider will be removed."
++                    : "Conversation history remains available."}
++                </p>
++                <div class="mt-2 flex gap-2">
++                  <Button
++                    ref={(element: HTMLButtonElement) => {
++                      confirmationButton = element
++                    }}
++                    type="button"
++                    size="small"
++                    variant="primary"
++                    disabled={pending()}
++                    onClick={confirmDelete}
++                  >
++                    Confirm delete {value.type}
++                  </Button>
++                  <Button type="button" size="small" variant="ghost" disabled={pending()} onClick={cancelDelete}>
++                    Cancel delete
++                  </Button>
++                </div>
++              </div>
++            )
++          }}
++        </Show>
++
+         <span class="sr-only" data-slot="company-diagnostic-status" role="status" aria-live="polite" aria-atomic="true">
+           {diagnosticStatus()}
+         </span>
+-
+-        <Show when={state.error}>
+-          {(message) => (
+-            <p class="text-12-regular text-text-danger-base" role="alert">
+-              {message()}
+-            </p>
+-          )}
+-        </Show>
+-
+         <Show when={state.result}>
+           {(diagnostic) => (
+             <div
+               data-slot="company-diagnostic-result"
+               class="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] gap-x-3 gap-y-2 border-t border-border-weak-base pt-3 text-12-regular sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4"
+               role={diagnostic().ok ? undefined : "alert"}
+               aria-atomic="true"
+             >
++              <span class="min-w-0 break-words text-text-weak">Provider / model</span>
++              <span class="min-w-0 break-words text-right text-text-strong">{pairLabel()}</span>
+               <span class="min-w-0 break-words text-text-weak">Basic response</span>
+               <span class="min-w-0 break-words text-right text-text-strong capitalize">
+                 {diagnostic().checks.basic}
+               </span>
+               <span class="min-w-0 break-words text-text-weak">Streaming</span>
+               <span class="min-w-0 break-words text-right text-text-strong capitalize">
+                 {diagnostic().checks.streaming}
+               </span>
+               <span class="min-w-0 break-words text-text-weak">Tool calling</span>
+               <span class="min-w-0 break-words text-right text-text-strong capitalize">
+@@ -433,34 +890,84 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
+                 {(failure) => (
+                   <>
+                     <span class="min-w-0 break-words text-text-weak">Failure ({failure().kind})</span>
+                     <span class="min-w-0 max-w-72 break-words text-right text-text-strong">{failure().message}</span>
+                   </>
+                 )}
+               </Show>
+             </div>
+           )}
+         </Show>
+-
+-        <Show when={readinessProvider()?.modelID === state.modelID ? readiness.latest : undefined}>
++        <Show
++          when={
++            readinessProvider()?.providerID === state.selectedProviderID &&
++            readinessProvider()?.modelID === state.selectedModelID
++              ? readiness.latest
++              : undefined
++          }
++        >
+           {(report) => (
+             <details class="border-t border-border-weak-base pt-3 text-12-regular">
+-              <summary class="cursor-pointer text-text-strong capitalize">
++              <summary class="cursor-pointer text-text-strong capitalize" tabIndex={state.confirm ? -1 : undefined}>
+                 Offline readiness: {report().overall}
+               </summary>
+               <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
+                 <For each={report().checks}>
+                   {(check) => (
+                     <>
+                       <span class="min-w-0 break-words text-text-weak">{check.message}</span>
+                       <span class="min-w-0 break-words text-right text-text-strong capitalize">{check.status}</span>
+                     </>
+                   )}
+                 </For>
+               </div>
+             </details>
+           )}
+         </Show>
+-      </form>
++        <div class="flex justify-end">
++          <Button
++            type="button"
++            variant="ghost"
++            disabled={locked()}
++            onClick={() => {
++              resetSecrets()
++              if (props.onBack) {
++                props.onBack()
++                return
++              }
++              dialog.close()
++            }}
++          >
++            {language.t("common.close")}
++          </Button>
++        </div>
++      </div>
+     </Dialog>
+   )
+ }
++
++function containConfirmationFocus(event: KeyboardEvent & { currentTarget: HTMLDivElement }) {
++  if (event.key !== "Tab") return
++  const controls = Array.from(
++    event.currentTarget.querySelectorAll<HTMLElement>(
++      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
++    ),
++  ).filter((control) => control.tabIndex >= 0)
++  if (!controls.length) return
++  const current = controls.indexOf(document.activeElement as HTMLElement)
++  const next = event.shiftKey
++    ? controls[(current <= 0 ? controls.length : current) - 1]
++    : controls[(current + 1) % controls.length]
++  event.preventDefault()
++  next.focus()
++}
++
++function defaultModelID(catalog: EnterpriseProviderCatalogView | undefined, providerID: string | undefined) {
++  const provider = catalog?.providers.find((item) => item.id === providerID)
++  if (!provider) return ""
++  if (
++    catalog?.default?.providerID === provider.id &&
++    provider.models.some((model) => model.id === catalog.default?.modelID)
++  )
++    return catalog.default.modelID
++  return provider.models[0]?.id ?? ""
++}
+diff --git a/packages/app/src/components/settings-providers.tsx b/packages/app/src/components/settings-providers.tsx
+index 29751b2a6..09735c7d7 100644
+--- a/packages/app/src/components/settings-providers.tsx
++++ b/packages/app/src/components/settings-providers.tsx
+@@ -36,53 +36,61 @@ export const SettingsProviders: Component<{ onBack?: () => void }> = (props) =>
+     <SettingsServerScope>
+       <SettingsProvidersContent onBack={props.onBack} />
+     </SettingsServerScope>
+   )
+ }
+ 
+ function SettingsCompanyProvider() {
+   const dialog = useDialog()
+   const language = useLanguage()
+   const company = useCompanyProviderSettingsState()
+-  const model = () => company.defaultModel()?.name ?? "No configured model"
++  const providerCount = () =>
++    `${company.providers().length} ${company.providers().length === 1 ? "provider" : "providers"}`
++  const defaultPair = () => {
++    const provider = company.defaultProvider()
++    const model = company.defaultModel()
++    if (!provider || !model) return "No default provider / model"
++    return `${provider.name} / ${model.name}`
++  }
+ 
+   return (
+     <div class="flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10">
+       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+         <div class="flex max-w-[720px] items-center pt-6 pb-8">
+           <h2 class="text-16-medium text-text-strong">{language.t("settings.providers.title")}</h2>
+         </div>
+       </div>
+       <div class="flex max-w-[720px] flex-col gap-1">
+         <SettingsList>
+           <div class="flex min-h-16 flex-wrap items-center justify-between gap-4 py-3">
+             <div class="flex min-w-0 flex-col gap-1">
+-              <span class="text-14-medium text-text-strong">Company LLM</span>
++              <span class="text-14-medium text-text-strong">Enterprise providers</span>
+               <div class="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-12-regular text-text-weak">
+-                <span class="truncate">{model()}</span>
++                <span>{providerCount()}</span>
++                <span class="truncate">{defaultPair()}</span>
+                 <span role="status" aria-live="polite" aria-atomic="true">
+                   {company.status()}
+                 </span>
+               </div>
+             </div>
+             <div class="flex flex-wrap items-center gap-2">
+               <Button
+                 size="small"
+                 variant="secondary"
+                 onClick={() => dialog.show(() => <DialogCompanyProvider />, company.refreshStatus)}
+               >
+-                Configure
++                Manage providers
+               </Button>
+               <Button
+                 size="small"
+                 variant="secondary"
+-                disabled={company.checking() || !company.defaultModel()?.synchronized}
++                disabled={company.checking() || !company.defaultProvider() || !company.defaultModel()}
+                 onClick={company.testConnection}
+               >
+                 {company.checking() ? "Testing..." : "Test connection"}
+               </Button>
+             </div>
+           </div>
+         </SettingsList>
+       </div>
+     </div>
+   )
+diff --git a/packages/app/src/components/settings-v2/providers.tsx b/packages/app/src/components/settings-v2/providers.tsx
+index c90d41492..4b0d6484b 100644
+--- a/packages/app/src/components/settings-v2/providers.tsx
++++ b/packages/app/src/components/settings-v2/providers.tsx
+@@ -257,53 +257,62 @@ export const SettingsProvidersV2: Component<{ onBack?: () => void }> = (props) =
+         </div>
+       </div>
+     </>
+   )
+ }
+ 
+ function SettingsCompanyProviderV2() {
+   const dialog = useDialog()
+   const language = useLanguage()
+   const company = useCompanyProviderSettingsState()
+-  const model = () => company.defaultModel()?.name ?? "No configured model"
++  const providerCount = () =>
++    `${company.providers().length} ${company.providers().length === 1 ? "provider" : "providers"}`
++  const defaultPair = () => {
++    const provider = company.defaultProvider()
++    const model = company.defaultModel()
++    if (!provider || !model) return "No default provider / model"
++    return `${provider.name} / ${model.name}`
++  }
+ 
+   return (
+     <>
+       <div class="settings-v2-tab-header">
+         <h2 class="settings-v2-tab-title">{language.t("settings.providers.title")}</h2>
+       </div>
+       <div class="settings-v2-tab-body settings-v2-providers">
+         <div class="settings-v2-section">
+           <SettingsListV2>
+             <div class="settings-v2-provider-row">
+               <div class="settings-v2-provider-lead">
+-                <div class="settings-v2-provider-copy">
++                <div class="settings-v2-provider-copy settings-v2-enterprise-summary">
+                   <div class="settings-v2-provider-main">
+-                    <span class="settings-v2-provider-name">Company LLM</span>
++                    <span class="settings-v2-provider-name">Enterprise providers</span>
+                   </div>
+                   <p class="settings-v2-provider-description" role="status" aria-live="polite" aria-atomic="true">
+-                    {model()} - {company.status()}
++                    <span>{providerCount()}</span>
++                    <span>{defaultPair()}</span>
++                    <span>{company.status()}</span>
+                   </p>
+                 </div>
+               </div>
+               <div class="flex flex-wrap items-center gap-2">
+                 <ButtonV2
+                   size="normal"
+                   variant="neutral"
+                   onClick={() => dialog.show(() => <DialogCompanyProvider />, company.refreshStatus)}
+                 >
+-                  Configure
++                  Manage providers
+                 </ButtonV2>
+                 <ButtonV2
+                   size="normal"
+                   variant="neutral"
+-                  disabled={company.checking() || !company.defaultModel()?.synchronized}
++                  disabled={company.checking() || !company.defaultProvider() || !company.defaultModel()}
+                   onClick={company.testConnection}
+                 >
+                   {company.checking() ? "Testing..." : "Test connection"}
+                 </ButtonV2>
+               </div>
+             </div>
+           </SettingsListV2>
+         </div>
+       </div>
+     </>
+diff --git a/packages/app/src/components/settings-v2/settings-v2.css b/packages/app/src/components/settings-v2/settings-v2.css
+index 87b830221..ff2c0f5e0 100644
+--- a/packages/app/src/components/settings-v2/settings-v2.css
++++ b/packages/app/src/components/settings-v2/settings-v2.css
+@@ -306,20 +306,26 @@
+ }
+ 
+ .settings-v2-provider-description {
+   margin: 0;
+   font-size: 13px;
+   font-weight: 440;
+   line-height: 1;
+   color: var(--v2-text-text-muted);
+ }
+ 
++.settings-v2-enterprise-summary .settings-v2-provider-description {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 2px 12px;
++}
++
+ .settings-v2-provider-empty {
+   padding-block: 20px;
+   font-size: 13px;
+   font-weight: 440;
+   line-height: 1;
+   color: var(--v2-text-text-muted);
+ }
+ 
+ .settings-v2-provider-env-hint {
+   padding-right: 12px;
+diff --git a/packages/ui/src/components/dialog.tsx b/packages/ui/src/components/dialog.tsx
+index 981e3f45d..1443ec2a9 100644
+--- a/packages/ui/src/components/dialog.tsx
++++ b/packages/ui/src/components/dialog.tsx
+@@ -1,28 +1,32 @@
+ import { Dialog as Kobalte } from "@kobalte/core/dialog"
+-import { ComponentProps, JSXElement, Match, ParentProps, Show, Switch } from "solid-js"
++import { ComponentProps, JSXElement, Match, onCleanup, ParentProps, Show, Switch } from "solid-js"
+ import { useI18n } from "../context/i18n"
++import { useDialogLayer } from "../context/dialog"
+ import { IconButton } from "./icon-button"
+ 
+ export interface DialogProps extends ParentProps {
+   title?: JSXElement
+   description?: JSXElement
+   action?: JSXElement
+   size?: "normal" | "large" | "x-large"
+   class?: ComponentProps<"div">["class"]
+   classList?: ComponentProps<"div">["classList"]
+   fit?: boolean
+   transition?: boolean
++  preventClose?: boolean
+ }
+ 
+ export function Dialog(props: DialogProps) {
+   const i18n = useI18n()
++  const unregister = useDialogLayer()?.registerCloseGuard(() => !props.preventClose)
++  onCleanup(() => unregister?.())
+   return (
+     <div
+       data-component="dialog"
+       data-fit={props.fit ? true : undefined}
+       data-size={props.size || "normal"}
+       data-transition={props.transition ? true : undefined}
+     >
+       <div data-slot="dialog-container">
+         <Kobalte.Content
+           data-slot="dialog-content"
+@@ -47,20 +51,21 @@ export function Dialog(props: DialogProps) {
+               </Show>
+               <Switch>
+                 <Match when={props.action}>{props.action}</Match>
+                 <Match when={true}>
+                   <Kobalte.CloseButton
+                     data-slot="dialog-close-button"
+                     as={IconButton}
+                     icon="close"
+                     variant="ghost"
+                     aria-label={i18n.t("ui.common.close")}
++                    disabled={props.preventClose}
+                   />
+                 </Match>
+               </Switch>
+             </div>
+           </Show>
+           <Show when={props.description}>
+             <Kobalte.Description data-slot="dialog-description" style={{ "margin-left": "-4px" }}>
+               {props.description}
+             </Kobalte.Description>
+           </Show>
+diff --git a/packages/ui/src/context/dialog.tsx b/packages/ui/src/context/dialog.tsx
+index 16ab56d1f..0af858b31 100644
+--- a/packages/ui/src/context/dialog.tsx
++++ b/packages/ui/src/context/dialog.tsx
+@@ -11,27 +11,33 @@ import {
+   useContext,
+   type JSX,
+   startTransition,
+   For,
+ } from "solid-js"
+ import { Dialog as Kobalte } from "@kobalte/core/dialog"
+ import { makeEventListener } from "@solid-primitives/event-listener"
+ import { createDialogFocusManager } from "./dialog-focus"
+ 
+ type DialogElement = () => JSX.Element
++type DialogLayer = {
++  registerCloseGuard(guard: () => boolean): () => void
++}
++
++const LayerContext = createContext<DialogLayer>()
+ 
+ type Active = {
+   id: string
+   node: JSX.Element
+   dispose: () => void
+   owner: Owner
+   onClose?: () => void
++  canClose: () => boolean
+   setClosing: (closing: boolean) => void
+ }
+ 
+ const Context = createContext<ReturnType<typeof init>>()
+ 
+ function init() {
+   const [stack, setStack] = createSignal<Active[]>([])
+   const timer = { current: undefined as ReturnType<typeof setTimeout> | undefined }
+   const lock = { value: false }
+   const focus = createDialogFocusManager({
+@@ -41,21 +47,21 @@ function init() {
+ 
+   onCleanup(() => {
+     if (timer.current === undefined) return
+     clearTimeout(timer.current)
+     timer.current = undefined
+   })
+ 
+   const close = (id?: string) => {
+     const items = stack()
+     const current = id ? items.find((item) => item.id === id) : items.at(-1)
+-    if (!current || lock.value) return
++    if (!current || lock.value || !current.canClose()) return
+     lock.value = true
+     current.onClose?.()
+     current.setClosing(true)
+ 
+     const closed = current.id
+     if (timer.current !== undefined) {
+       clearTimeout(timer.current)
+       timer.current = undefined
+     }
+ 
+@@ -81,64 +87,75 @@ function init() {
+ 
+     makeEventListener(window, "keydown", onKeyDown, { capture: true })
+   })
+ 
+   const mount = (element: DialogElement, owner: Owner, onClose: (() => void) | undefined, layer: number) => {
+     focus.opened(layer)
+     const id = Math.random().toString(36).slice(2)
+     const zIndex = 50 + layer * 10
+     let dispose: (() => void) | undefined
+     let setClosing: ((closing: boolean) => void) | undefined
++    const guard = { current: undefined as (() => boolean) | undefined }
++    const dialogLayer: DialogLayer = {
++      registerCloseGuard(value) {
++        guard.current = value
++        return () => {
++          if (guard.current === value) guard.current = undefined
++        }
++      },
++    }
+ 
+     const node = runWithOwner(owner, () =>
+       createRoot((d: () => void) => {
+         dispose = d
+         const [closing, setClosingSignal] = createSignal(false)
+         setClosing = setClosingSignal
+         return (
+-          <Kobalte
+-            modal
+-            open={!closing()}
+-            onOpenChange={(open: boolean) => {
+-              if (open) return
+-              close(id)
+-            }}
+-          >
+-            <Kobalte.Portal>
+-              <Kobalte.Overlay
+-                data-component="dialog-overlay"
+-                style={{ "z-index": String(zIndex) }}
+-                onClick={() => close(id)}
+-              />
+-              <div
+-                data-dialog-layer={layer}
+-                style={{
+-                  position: "fixed",
+-                  inset: "0",
+-                  "z-index": String(zIndex),
+-                  display: "flex",
+-                  "align-items": "center",
+-                  "justify-content": "center",
+-                  "pointer-events": "none",
+-                }}
+-              >
+-                {element()}
+-              </div>
+-            </Kobalte.Portal>
+-          </Kobalte>
++          <LayerContext.Provider value={dialogLayer}>
++            <Kobalte
++              modal
++              open={!closing()}
++              onOpenChange={(open: boolean) => {
++                if (open) return
++                close(id)
++              }}
++            >
++              <Kobalte.Portal>
++                <Kobalte.Overlay
++                  data-component="dialog-overlay"
++                  style={{ "z-index": String(zIndex) }}
++                  onClick={() => close(id)}
++                />
++                <div
++                  data-dialog-layer={layer}
++                  style={{
++                    position: "fixed",
++                    inset: "0",
++                    "z-index": String(zIndex),
++                    display: "flex",
++                    "align-items": "center",
++                    "justify-content": "center",
++                    "pointer-events": "none",
++                  }}
++                >
++                  {element()}
++                </div>
++              </Kobalte.Portal>
++            </Kobalte>
++          </LayerContext.Provider>
+         )
+       }),
+     )
+ 
+     if (!dispose || !setClosing) return
+ 
+-    const active: Active = { id, node, dispose, owner, onClose, setClosing }
++    const active: Active = { id, node, dispose, owner, onClose, setClosing, canClose: () => guard.current?.() ?? true }
+     setStack((items) => [...items, active])
+   }
+ 
+   const push = (element: DialogElement, owner: Owner, onClose?: () => void) => {
+     if (timer.current !== undefined) {
+       clearTimeout(timer.current)
+       timer.current = undefined
+     }
+     lock.value = false
+     mount(element, owner, onClose, stack().length)
+@@ -196,10 +213,14 @@ export function useDialog() {
+     },
+     push(element: DialogElement, onClose?: () => void) {
+       const base = ctx.stack().at(-1)?.owner ?? owner
+       return startTransition(() => ctx.push(element, base, onClose))
+     },
+     close() {
+       ctx.close()
+     },
+   }
+ }
++
++export function useDialogLayer() {
++  return useContext(LayerContext)
++}

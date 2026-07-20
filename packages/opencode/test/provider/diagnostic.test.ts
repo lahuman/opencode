@@ -669,9 +669,9 @@ endpointIt.instance(
   Effect.gen(function* () {
     endpointRequests.length = 0
     ProviderEnterprise.setCredentials({
-      schemaVersion: 2,
-      models: {
-        "company-code": {
+      schemaVersion: 3,
+      providers: {
+        "company-llm": {
           apiKey: "enterprise-api-key",
           headers: { "x-company-token": "enterprise-header-value" },
         },

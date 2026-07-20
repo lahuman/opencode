@@ -7,11 +7,12 @@ const Credentials = Schema.Struct({
   headers: Schema.Record(Schema.String, Schema.String),
 })
 const CredentialStore = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
-  models: Schema.Record(Schema.String, Credentials),
+  schemaVersion: Schema.Literal(3),
+  providers: Schema.Record(Schema.String, Credentials),
 })
 const decode = Schema.decodeUnknownOption(CredentialStore)
-let currentCredentials: typeof CredentialStore.Type = { schemaVersion: 2, models: {} }
+let currentCredentials: typeof CredentialStore.Type = { schemaVersion: 3, providers: {} }
+let enabled = false
 const enterpriseFetch: typeof fetch = Object.assign(
   async (request: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const response = await fetch(request, {
@@ -20,18 +21,20 @@ const enterpriseFetch: typeof fetch = Object.assign(
     })
     if (![301, 302, 303, 307, 308].includes(response.status)) return response
     await response.body?.cancel().catch(() => undefined)
-    throw new Error("Company LLM redirects are disabled")
+    throw new Error("Enterprise provider redirects are disabled")
   },
   { preconnect: fetch.preconnect },
 )
 
 export function setCredentials(input: unknown) {
-  currentCredentials = Option.getOrElse(decode(input), () => ({ schemaVersion: 2, models: {} }))
+  const credentials = decode(input)
+  enabled = Option.isSome(credentials)
+  currentCredentials = Option.getOrElse(credentials, () => ({ schemaVersion: 3, providers: {} }))
 }
 
-export function options(providerID: ProviderV2.ID, modelID: string, current: Record<string, unknown>) {
-  if (providerID !== ProviderV2.ID.make("company-llm")) return current
-  const credentials = currentCredentials.models[modelID] ?? { headers: {} }
+export function options(providerID: ProviderV2.ID, _modelID: string, current: Record<string, unknown>) {
+  if (!enabled) return current
+  const credentials = currentCredentials.providers[providerID] ?? { headers: {} }
   const credentialHeaderNames = new Set(Object.keys(credentials.headers).map((name) => name.toLowerCase()))
   return {
     ...current,

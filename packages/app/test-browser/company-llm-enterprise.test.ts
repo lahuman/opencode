@@ -28,9 +28,9 @@ describe("enterprise provider diversion", () => {
   })
 
   test("preserves the ordinary provider connection path", () => {
-    expect(
-      providerConnectionForMode({ enterprise: false, company: () => "company", ordinary: () => "ordinary" }),
-    ).toBe("ordinary")
+    expect(providerConnectionForMode({ enterprise: false, company: () => "company", ordinary: () => "ordinary" })).toBe(
+      "ordinary",
+    )
   })
 })
 

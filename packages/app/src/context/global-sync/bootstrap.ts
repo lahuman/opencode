@@ -222,7 +222,6 @@ export async function bootstrapDirectory(input: {
   queryClient: QueryClient
   session?: ServerSession
 }) {
-  const loading = input.store.status !== "complete"
   const seededProject = projectID(input.directory, input.global.project)
   const seededPath = input.global.path.directory === input.directory ? input.global.path : undefined
   if (seededProject) input.setStore("project", seededProject)
@@ -230,17 +229,17 @@ export async function bootstrapDirectory(input: {
   if (Object.keys(input.store.config).length === 0 && Object.keys(input.global.config).length > 0) {
     input.setStore("config", reconcile(input.global.config, { merge: false }))
   }
-  if (loading) input.setStore("status", "partial")
+  input.setStore("status", "partial")
 
   const revKey = ScopedKey.from(input.scope, input.directory)
   const rev = (providerRev.get(revKey) ?? 0) + 1
   providerRev.set(revKey, rev)
-  ;(async () => {
+  return (async () => {
     const slow = [
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
         input.queryClient
-          .ensureQueryData(loadAgentsQuery(input.scope, input.directory, input.sdk))
+          .fetchQuery(loadAgentsQuery(input.scope, input.directory, input.sdk))
           .then((data) => input.setStore("agent", data)),
       () =>
         retry(() => input.sdk.config.get().then((x) => input.setStore("config", reconcile(x.data!, { merge: false })))),
@@ -353,15 +352,7 @@ export async function bootstrapDirectory(input: {
       () => Promise.resolve(input.loadSessions(input.directory)),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpQuery(input.scope, input.directory, input.sdk))),
       input.mcp && (() => input.queryClient.fetchQuery(loadMcpResourcesQuery(input.scope, input.directory, input.sdk))),
-      () =>
-        input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)).catch((err) => {
-          const project = getFilename(input.directory)
-          showToast({
-            variant: "error",
-            title: input.translate("toast.project.reloadFailed.title", { project }),
-            description: formatServerError(err, input.translate),
-          })
-        }),
+      () => input.queryClient.fetchQuery(loadProvidersQuery(input.scope, input.directory, input.sdk)),
     ].filter(Boolean) as (() => Promise<any>)[]
 
     await waitForPaint()
@@ -376,6 +367,6 @@ export async function bootstrapDirectory(input: {
       })
     }
 
-    if (loading && slowErrs.length === 0) input.setStore("status", "complete")
+    if (providerRev.get(revKey) === rev && slowErrs.length === 0) input.setStore("status", "complete")
   })()
 }

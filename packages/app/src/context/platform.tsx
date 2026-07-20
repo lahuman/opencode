@@ -18,6 +18,34 @@ type OpenAttachmentPickerOptions = {
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type PlatformName = "web" | "desktop"
 type DesktopOS = "macos" | "windows" | "linux"
+export type EnterpriseModelRef = { providerID: string; modelID: string }
+export type EnterpriseProviderModel = { id: string; name: string }
+export type EnterpriseProvider = {
+  id: string
+  name: string
+  baseURL: string
+  models: EnterpriseProviderModel[]
+}
+export type EnterpriseProviderCatalogView = {
+  schemaVersion: 1
+  default?: EnterpriseModelRef
+  providers: Array<
+    EnterpriseProvider & {
+      credentials: {
+        configured: boolean
+        headerNames: string[]
+        errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
+      }
+    }
+  >
+}
+export type CredentialReplacement = { apiKey?: string; headers: Record<string, string> }
+export type EnterpriseProviderErrorCode =
+  | "restart_failed_rolled_back"
+  | "restart_failed_recovery_failed"
+  | "credential_decryption_failed"
+  | "credential_encryption_unavailable"
+  | "credential_provider_not_configured"
 
 export type FatalRendererErrorLog = {
   error: string
@@ -75,25 +103,31 @@ type PlatformBase = {
 
   /** Enterprise credential management through desktop secure storage */
   enterprise?: {
-    credentialCatalog(): Promise<{
-      defaultModelID: string
-      models: {
-        id: string
-        name: string
-        baseURL: string
-        credentialStatus: {
-          configured: boolean
-          errorCode?: "credential_decryption_failed" | "credential_encryption_unavailable"
-        }
-      }[]
-    }>
-    credentialStatus(modelID: string): Promise<{ configured: boolean; errorCode?: string }>
-    setCredentials(input: {
-      modelID: string
-      apiKey?: string
-      headers?: Record<string, string>
-    }): Promise<{ restartRequired: boolean }>
-    clearCredentials(modelID: string): Promise<{ restartRequired: boolean }>
+    providerCatalog(): Promise<EnterpriseProviderCatalogView>
+    createProvider(input: {
+      provider: EnterpriseProvider
+      credentials?: CredentialReplacement
+    }): Promise<EnterpriseProviderCatalogView>
+    updateProvider(input: {
+      providerID: string
+      name: string
+      baseURL: string
+      credentials?: CredentialReplacement
+      clearCredentials?: true
+    }): Promise<EnterpriseProviderCatalogView>
+    deleteProvider(providerID: string): Promise<EnterpriseProviderCatalogView>
+    createModel(input: {
+      providerID: string
+      model: EnterpriseProviderModel
+    }): Promise<EnterpriseProviderCatalogView>
+    updateModel(input: { providerID: string; modelID: string; name: string }): Promise<EnterpriseProviderCatalogView>
+    deleteModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
+    setDefaultModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
+    replaceProviderCredentials(input: {
+      providerID: string
+      credentials: CredentialReplacement
+    }): Promise<EnterpriseProviderCatalogView>
+    clearProviderCredentials(providerID: string): Promise<EnterpriseProviderCatalogView>
     readGuide(): Promise<{ version: string; markdown: string }>
     readiness(provider?: {
       ok: boolean

@@ -18,6 +18,7 @@ test("enterprise enforcement keeps local plugins and removes registry plugins", 
       enabled: true,
       defaultsPath: undefined,
       allowedOrigins: new Set(["https://llm.corp.example"]),
+      catalog: { schemaVersion: 1, providers: [] },
     },
   )
   expect(result.plugin).toEqual([local.spec])
@@ -39,9 +40,175 @@ test("enterprise enforcement overrides retained model SDKs", () => {
       enabled: true,
       defaultsPath: undefined,
       allowedOrigins: new Set(["https://llm.corp.example"]),
+      catalog: {
+        schemaVersion: 1,
+        providers: [
+          {
+            id: "company",
+            name: "Company",
+            baseURL: "https://llm.corp.example/v1",
+            models: [{ id: "default", name: "Default" }],
+          },
+        ],
+      },
     },
   )
   expect(result.provider?.company?.models?.default?.provider?.npm).toBe("@ai-sdk/openai-compatible")
+})
+
+test("enterprise enforcement rebuilds registered providers from the runtime catalog", () => {
+  const policy = {
+    enabled: true,
+    defaultsPath: undefined,
+    guidePath: undefined,
+    skillPaths: [],
+    allowedOrigins: new Set<string>(),
+    catalog: {
+      schemaVersion: 1 as const,
+      default: { providerID: "internal", modelID: "code" },
+      providers: [
+        {
+          id: "internal",
+          name: "Internal",
+          baseURL: "https://arbitrary.example/v1",
+          models: [{ id: "code", name: "Code" }],
+        },
+      ],
+    },
+  }
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        internal: {
+          npm: "other-package",
+          options: { baseURL: "https://attacker.example/v1" },
+          models: { code: { name: "Changed" } },
+        },
+        injected: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://injected.example/v1" },
+          models: { model: {} },
+        },
+      },
+    },
+    policy,
+  )
+
+  expect(Object.keys(result.provider ?? {})).toEqual(["internal"])
+  expect(result.provider?.internal.npm).toBe("@ai-sdk/openai-compatible")
+  expect(result.provider?.internal.options?.baseURL).toBe("https://arbitrary.example/v1")
+})
+
+test("enterprise enforcement supplies the catalog default when merged config has no model", () => {
+  const result = ConfigEnterprise.enforce(
+    {},
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set<string>(),
+      catalog: {
+        schemaVersion: 1,
+        default: { providerID: "internal", modelID: "code" },
+        providers: [
+          {
+            id: "internal",
+            name: "Internal",
+            baseURL: "https://internal.example/v1",
+            models: [{ id: "code", name: "Code" }],
+          },
+        ],
+      },
+    },
+  )
+
+  expect(result.model).toBe("internal/code")
+})
+
+test("enterprise enforcement replaces a stale project model with the catalog default", () => {
+  const result = ConfigEnterprise.enforce(
+    { model: "deleted/old" },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set<string>(),
+      catalog: {
+        schemaVersion: 1,
+        default: { providerID: "internal", modelID: "code" },
+        providers: [
+          {
+            id: "internal",
+            name: "Internal",
+            baseURL: "https://internal.example/v1",
+            models: [{ id: "code", name: "Code" }],
+          },
+        ],
+      },
+    },
+  )
+
+  expect(result.model).toBe("internal/code")
+})
+
+test("enterprise enforcement overwrites a registered provider's legacy API endpoint", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        internal: {
+          api: "https://attacker.example/v1",
+          models: { code: {} },
+        },
+      },
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set<string>(),
+      catalog: {
+        schemaVersion: 1,
+        providers: [
+          {
+            id: "internal",
+            name: "Internal",
+            baseURL: "https://internal.example/v1",
+            models: [{ id: "code", name: "Code" }],
+          },
+        ],
+      },
+    },
+  )
+
+  expect(result.provider?.internal.api).toBe("https://internal.example/v1")
+  expect(result.provider?.internal.options?.baseURL).toBe("https://internal.example/v1")
+})
+
+test("enterprise enforcement overwrites a registered model's configured ID", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        internal: {
+          models: { code: { id: "attacker-model" } },
+        },
+      },
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set<string>(),
+      catalog: {
+        schemaVersion: 1,
+        providers: [
+          {
+            id: "internal",
+            name: "Internal",
+            baseURL: "https://internal.example/v1",
+            models: [{ id: "code", name: "Code" }],
+          },
+        ],
+      },
+    },
+  )
+
+  expect(result.provider?.internal.models?.code?.id).toBe("code")
 })
 
 test("enterprise enforcement clears provider credential env", () => {
@@ -74,6 +241,17 @@ test("enterprise enforcement clears provider credential env", () => {
       enabled: true,
       defaultsPath: undefined,
       allowedOrigins: new Set(["https://llm.corp.example"]),
+      catalog: {
+        schemaVersion: 1,
+        providers: [
+          {
+            id: "company",
+            name: "Company",
+            baseURL: "https://llm.corp.example/v1",
+            models: [{ id: "default", name: "Default" }],
+          },
+        ],
+      },
     },
   )
   expect(result.provider?.company?.env).toEqual([])
@@ -82,7 +260,7 @@ test("enterprise enforcement clears provider credential env", () => {
   expect(result.provider?.company?.models?.default?.options).toEqual({})
 })
 
-test("materializes only catalog company provider metadata as structured defaults", () => {
+test("materializes runtime provider catalog metadata as structured defaults", () => {
   const result = ConfigEnterprise.materializeDefaults(
     {
       provider: {
@@ -97,23 +275,28 @@ test("materializes only catalog company provider metadata as structured defaults
       enabled: true,
       defaultsPath: "C:/app/enterprise/opencode.jsonc",
       allowedOrigins: new Set(["https://llm.corp.example"]),
-      models: [
-        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
-        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
-      ],
-      defaultModelID: "company-code",
+      catalog: {
+        schemaVersion: 1,
+        default: { providerID: "company-llm", modelID: "company-code" },
+        providers: [
+          {
+            id: "company-llm",
+            name: "Company LLM",
+            baseURL: "https://llm.corp.example/v1",
+            models: [
+              { id: "company-code", name: "Company Code" },
+              { id: "company-fast", name: "Company Fast" },
+            ],
+          },
+        ],
+      },
       skillPaths: ["C:/app/enterprise/skill-packs/ponytail/skills"],
     },
   )
   expect(result.model).toBe("company-llm/company-code")
   expect(result.provider?.["company-llm"]?.models?.["company-code"]?.name).toBe("Company Code")
-  expect(result.provider?.["company-llm"]?.models?.["company-code"]?.provider?.api).toBe(
-    "https://llm.corp.example/v1",
-  )
-  expect(result.provider?.["company-llm"]?.models?.["company-fast"]?.provider?.api).toBe(
-    "https://fast.corp.example/v1",
-  )
-  expect(result.provider?.["company-llm"]?.options?.baseURL).toBeUndefined()
+  expect(result.provider?.["company-llm"]?.models?.["company-fast"]?.name).toBe("Company Fast")
+  expect(result.provider?.["company-llm"]?.options?.baseURL).toBe("https://llm.corp.example/v1")
   expect(result.provider?.["company-llm"]?.models?.rogue).toBeUndefined()
   expect(result.skills?.paths).toEqual(["C:/app/enterprise/skill-packs/ponytail/skills"])
 })
@@ -126,8 +309,7 @@ test("materializes verified enterprise skill paths without duplicating project c
       enabled: true,
       defaultsPath: "C:/app/enterprise/opencode.jsonc",
       allowedOrigins: new Set(["https://llm.corp.example"]),
-      models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
-      defaultModelID: "company-code",
+      catalog: { schemaVersion: 1, providers: [] },
       skillPaths: [skillPath],
     },
   )
@@ -143,40 +325,70 @@ test("accepts only absolute enterprise skill paths from the sidecar environment"
   expect(ConfigEnterprise.settings().skillPaths).toEqual([absolute])
 })
 
-test("enterprise enforcement rejects a provider when any model URL is outside policy", () => {
+test("loads the runtime provider catalog and default only in enterprise mode", () => {
+  const catalog = {
+    schemaVersion: 1,
+    default: { providerID: "internal", modelID: "code" },
+    providers: [
+      {
+        id: "internal",
+        name: "Internal",
+        baseURL: "https://internal.example/v1",
+        models: [{ id: "code", name: "Code" }],
+      },
+    ],
+  }
+  using runtimeCatalog = environment("OPENCODE_ENTERPRISE_PROVIDER_CATALOG", JSON.stringify(catalog))
+
+  expect(ConfigEnterprise.settings()).toMatchObject({
+    enabled: false,
+    catalog: { schemaVersion: 1, providers: [] },
+    defaultModel: undefined,
+  })
+  using offline = environment("OPENCODE_ENTERPRISE_OFFLINE", "1")
+  expect(ConfigEnterprise.settings()).toMatchObject({
+    enabled: true,
+    catalog,
+    defaultModel: "internal/code",
+  })
+})
+
+test("enterprise enforcement overwrites configured model identity and endpoint", () => {
   const policy = {
     enabled: true,
     defaultsPath: undefined,
-    allowedOrigins: new Set(["https://code.corp.example", "https://reasoning.corp.example"]),
+    allowedOrigins: new Set<string>(),
+    catalog: {
+      schemaVersion: 1 as const,
+      providers: [
+        {
+          id: "company-llm",
+          name: "Company",
+          baseURL: "https://code.corp.example/v1",
+          models: [{ id: "code", name: "Code" }],
+        },
+      ],
+    },
   }
   const provider = {
     "company-llm": {
-      npm: "@ai-sdk/openai-compatible",
+      npm: "untrusted-sdk",
       models: {
-        code: { provider: { api: "https://code.corp.example/v1" } },
-        reasoning: { provider: { api: "https://reasoning.corp.example/v1" } },
+        code: {
+          name: "Changed",
+          provider: { npm: "untrusted-sdk", api: "https://unapproved.example/v1" },
+          limit: { context: 123, output: 456 },
+        },
       },
     },
   }
 
-  expect(Object.keys(ConfigEnterprise.enforce({ provider }, policy).provider ?? {})).toEqual(["company-llm"])
-  expect(
-    ConfigEnterprise.enforce(
-      {
-        provider: {
-          ...provider,
-          "company-llm": {
-            ...provider["company-llm"],
-            models: {
-              ...provider["company-llm"].models,
-              reasoning: { provider: { api: "https://unapproved.example/v1" } },
-            },
-          },
-        },
-      },
-      policy,
-    ).provider,
-  ).toEqual({})
+  const result = ConfigEnterprise.enforce({ provider }, policy)
+  expect(result.provider?.["company-llm"]?.models?.code).toMatchObject({
+    name: "Code",
+    provider: { npm: "@ai-sdk/openai-compatible", api: "https://code.corp.example/v1" },
+    limit: { context: 123 },
+  })
 })
 
 function environment(key: string, value: string) {
@@ -193,34 +405,29 @@ function environment(key: string, value: string) {
   }
 }
 
-test("enterprise enforcement rejects provider and model URLs with queries or fragments", () => {
-  const policy = {
-    enabled: true,
-    defaultsPath: undefined,
-    allowedOrigins: new Set(["https://code.corp.example"]),
-  }
-  const provider = (api: string) => ({
-    "company-llm": {
-      npm: "@ai-sdk/openai-compatible",
-      models: { code: { provider: { api } } },
-    },
-  })
-
-  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1?api_key=secret") }, policy).provider).toEqual({})
-  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1#secret") }, policy).provider).toEqual({})
-  expect(
-    ConfigEnterprise.enforce(
-      {
-        provider: {
-          "company-llm": {
-            ...provider("https://code.corp.example/v1")["company-llm"],
-            options: { baseURL: "https://code.corp.example/v1?api_key=secret" },
-          },
+test("enterprise enforcement disables every provider for an empty catalog", () => {
+  const result = ConfigEnterprise.enforce(
+    {
+      provider: {
+        injected: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://injected.example/v1" },
+          models: { model: {} },
         },
       },
-      policy,
-    ).provider,
-  ).toEqual({})
+    },
+    {
+      enabled: true,
+      defaultsPath: undefined,
+      allowedOrigins: new Set<string>(),
+      catalog: { schemaVersion: 1, providers: [] },
+    },
+  )
+
+  expect(result.provider).toEqual({})
+  expect(result.enabled_providers).toEqual([])
+  expect(result.share).toBe("disabled")
+  expect(result.autoupdate).toBe(false)
 })
 
 test("enterprise enforcement removes company models outside the configured catalog", () => {
@@ -240,7 +447,17 @@ test("enterprise enforcement removes company models outside the configured catal
       enabled: true,
       defaultsPath: undefined,
       allowedOrigins: new Set(["https://code.corp.example"]),
-      models: [{ id: "code" }],
+      catalog: {
+        schemaVersion: 1,
+        providers: [
+          {
+            id: "company-llm",
+            name: "Company",
+            baseURL: "https://code.corp.example/v1",
+            models: [{ id: "code", name: "Code" }],
+          },
+        ],
+      },
     },
   )
 

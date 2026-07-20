@@ -1,0 +1,1410 @@
+# Working-tree review package
+
+## Base
+b6205a113c99853222ee844f2b597d2b77f0c0ab
+
+## Status
+ M packages/desktop/src/main/enterprise-sidecar-env.test.ts
+ M packages/desktop/src/main/index.ts
+ M packages/desktop/src/main/server.ts
+ M packages/desktop/src/main/sidecar-startup.ts
+ M packages/desktop/src/main/sidecar.ts
+ M packages/opencode/src/config/enterprise.ts
+ M packages/opencode/src/provider/enterprise.ts
+ M packages/opencode/test/config/enterprise.test.ts
+ M packages/opencode/test/provider/enterprise.test.ts
+?? packages/desktop/src/main/sidecar-startup.test.ts
+
+## Tracked diff stat
+ .../src/main/enterprise-sidecar-env.test.ts        |  13 +-
+ packages/desktop/src/main/index.ts                 |   2 +-
+ packages/desktop/src/main/server.ts                |   6 +-
+ packages/desktop/src/main/sidecar-startup.ts       |  19 +-
+ packages/desktop/src/main/sidecar.ts               |   9 +
+ packages/opencode/src/config/enterprise.ts         | 201 +++++++++--------
+ packages/opencode/src/provider/enterprise.ts       |  17 +-
+ packages/opencode/test/config/enterprise.test.ts   | 237 +++++++++++++++------
+ packages/opencode/test/provider/enterprise.test.ts |  90 ++++----
+ 9 files changed, 361 insertions(+), 233 deletions(-)
+
+## Tracked diff
+diff --git a/packages/desktop/src/main/enterprise-sidecar-env.test.ts b/packages/desktop/src/main/enterprise-sidecar-env.test.ts
+index 0170bd004..b7610af08 100644
+--- a/packages/desktop/src/main/enterprise-sidecar-env.test.ts
++++ b/packages/desktop/src/main/enterprise-sidecar-env.test.ts
+@@ -4,22 +4,22 @@ import { createSidecarEnv, createSidecarStartCommand, postSidecarStartCommand }
+ 
+ test("sidecar environment blocks shared plaintext credential sources", () => {
+   expect(enterpriseSidecarEnvironment()).toEqual({
+     OPENCODE_AUTH_CONTENT: "{}",
+     OPENCODE_CONFIG_CONTENT: "{}",
+   })
+ })
+ 
+ test("enterprise credentials travel by startup message and never by environment", () => {
+   const credentials = {
+-    schemaVersion: 2 as const,
+-    models: { code: { apiKey: "secret-key", headers: { "X-Company-Token": "secret-header" } } },
++    schemaVersion: 3 as const,
++    providers: { internal: { apiKey: "secret-key", headers: { "X-Company-Token": "secret-header" } } },
+   }
+   const env = createSidecarEnv(enterpriseSidecarEnvironment(), {
+     inherited: {
+       PATH: "C:\\Windows",
+       OPENCODE_AUTH_CONTENT: '{"legacy":"secret-key"}',
+       OPENCODE_CONFIG_CONTENT: '{"provider":"secret-header"}',
+       OPENCODE_ENTERPRISE_CREDENTIALS: "inherited-secret",
+     },
+     platform: "win32",
+     packaged: true,
+@@ -57,22 +57,22 @@ test("ordinary sidecar environment preserves standard auth and config overrides"
+     },
+   )
+ 
+   expect(env.OPENCODE_AUTH_CONTENT).toBe('{"provider":"ordinary-auth"}')
+   expect(env.OPENCODE_CONFIG_CONTENT).toBe('{"provider":"ordinary-config"}')
+   expect(env.OPENCODE_ENTERPRISE_CREDENTIALS).toBeUndefined()
+ })
+ 
+ test("successful sidecar post releases credentials from the long-lived owner", () => {
+   const credentials = {
+-    schemaVersion: 2 as const,
+-    models: { code: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
++    schemaVersion: 3 as const,
++    providers: { internal: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
+   }
+   const owner = { credentials }
+   let posted: ReturnType<typeof createSidecarStartCommand> | undefined
+ 
+   postSidecarStartCommand(
+     {
+       hostname: "127.0.0.1",
+       port: 4096,
+       password: "sidecar-password",
+       userDataPath: "C:\\OpenCode",
+@@ -81,21 +81,24 @@ test("successful sidecar post releases credentials from the long-lived owner", (
+     (command) => {
+       posted = structuredClone(command)
+     },
+   )
+ 
+   expect(posted?.credentials).toEqual(credentials)
+   expect(owner.credentials).toBeUndefined()
+ })
+ 
+ test("failed sidecar post does not report credentials as released", () => {
+-  const credentials = { schemaVersion: 2 as const, models: { code: { apiKey: "secret-key", headers: {} } } }
++  const credentials = {
++    schemaVersion: 3 as const,
++    providers: { internal: { apiKey: "secret-key", headers: {} } },
++  }
+   const owner = { credentials }
+ 
+   expect(() =>
+     postSidecarStartCommand(
+       {
+         hostname: "127.0.0.1",
+         port: 4096,
+         password: "sidecar-password",
+         userDataPath: "C:\\OpenCode",
+       },
+diff --git a/packages/desktop/src/main/index.ts b/packages/desktop/src/main/index.ts
+index cba7ee62f..2f9e62fd7 100644
+--- a/packages/desktop/src/main/index.ts
++++ b/packages/desktop/src/main/index.ts
+@@ -543,21 +543,21 @@ const main = Effect.gen(function* () {
+ 
+   const spawnSidecar = async (skillPacks: string[]) => {
+     const result = await spawnLocalServer(hostname, port, password, {
+       userDataPath: app.getPath("userData"),
+       env: ENTERPRISE_ENABLED
+         ? {
+             ...enterpriseSidecarEnvironment(),
+             OPENCODE_ENTERPRISE_SKILL_PATHS: JSON.stringify(skillPacks),
+           }
+         : undefined,
+-      credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.all() : undefined,
++      credentials: ENTERPRISE_ENABLED ? await enterpriseCredentials.read() : undefined,
+       onStdout: (message) => writeLog("server", "stdout", { message }),
+       onStderr: (message) => writeLog("server", "stderr", { message }, "warn"),
+       onExit: (code) => writeLog("utility", "sidecar exited", { code }, "warn"),
+     })
+     server = result.listener
+     return result
+   }
+   restartEnterpriseSidecar = async (skillPacks) => {
+     await killSidecar()
+     const result = await spawnSidecar(skillPacks)
+diff --git a/packages/desktop/src/main/server.ts b/packages/desktop/src/main/server.ts
+index 14635b4ed..c36aeb04f 100644
+--- a/packages/desktop/src/main/server.ts
++++ b/packages/desktop/src/main/server.ts
+@@ -1,38 +1,40 @@
+ import { dirname, join } from "node:path"
+ import { fileURLToPath } from "node:url"
+ import { app, utilityProcess } from "electron"
+ import type { Details } from "electron"
+ import { getLogger } from "./logging"
+ import { getUserShell, loadShellEnv } from "./shell-env"
+ import { getStore } from "./store"
+ import { DEFAULT_SERVER_URL_KEY } from "./store-keys"
+-import type { EnterpriseCredentials } from "./enterprise-credentials"
++import type { EnterpriseProviderCredentials } from "./enterprise-credentials"
++import type { EnterpriseProviderCatalog } from "./enterprise-providers"
+ import { createSidecarEnv, postSidecarStartCommand } from "./sidecar-startup"
+ 
+ export type HealthCheck = { wait: Promise<void> }
+ 
+ type SidecarMessage =
+   | { type: "ready" }
+   | { type: "stopped" }
+   | { type: "error"; error: { message: string; stack?: string } }
+ 
+ export type SidecarListener = { stop: () => Promise<void> }
+ 
+ const SIDECAR_SERVICE_NAME = "opencode server"
+ const SIDECAR_START_STALL_TIMEOUT = 60_000
+ const SIDECAR_STOP_TIMEOUT = 6_000
+ 
+ type SpawnLocalServerOptions = {
+   userDataPath: string
+   env?: Record<string, string>
+-  credentials?: EnterpriseCredentials
++  catalog?: EnterpriseProviderCatalog
++  credentials?: EnterpriseProviderCredentials
+   onStdout?: (message: string) => void
+   onStderr?: (message: string) => void
+   onExit?: (code: number) => void
+ }
+ 
+ export function getDefaultServerUrl(): string | null {
+   const value = getStore().get(DEFAULT_SERVER_URL_KEY)
+   return typeof value === "string" ? value : null
+ }
+ 
+diff --git a/packages/desktop/src/main/sidecar-startup.ts b/packages/desktop/src/main/sidecar-startup.ts
+index a01efbb07..e9f875ac7 100644
+--- a/packages/desktop/src/main/sidecar-startup.ts
++++ b/packages/desktop/src/main/sidecar-startup.ts
+@@ -1,46 +1,55 @@
+-import type { EnterpriseCredentials } from "./enterprise-credentials"
++import type { EnterpriseProviderCredentials } from "./enterprise-credentials"
++import type { EnterpriseProviderCatalog } from "./enterprise-providers"
+ 
+ type Runtime = {
+   inherited: Record<string, string | undefined>
+   platform: NodeJS.Platform
+   packaged: boolean
+ }
+ 
+ type StartInput = {
+   hostname: string
+   port: number
+   password: string
+   userDataPath: string
+-  credentials?: EnterpriseCredentials
++  catalog?: EnterpriseProviderCatalog
++  credentials?: EnterpriseProviderCredentials
+ }
+ 
+ export function createSidecarEnv(overrides: Record<string, string> = {}, runtime: Runtime) {
+   const env = {
+     ...Object.fromEntries(
+       Object.entries(runtime.inherited).flatMap(([key, value]) =>
+         value === undefined ? [] : ([[key, String(value)]] as const),
+       ),
+     ),
+     ...overrides,
+   }
+   delete env.DEBUG
++  delete env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG
+   delete env.OPENCODE_ENTERPRISE_CREDENTIALS
+   if (runtime.platform === "linux") delete env.LD_PRELOAD
+   if (!runtime.packaged) env.OPENCODE_DISABLE_CHANNEL_DB = "1"
+   return env
+ }
+ 
+ export function createSidecarStartCommand(input: StartInput) {
+   return { type: "start" as const, ...input }
+ }
+ 
+ export function postSidecarStartCommand(
+-  input: Omit<StartInput, "credentials">,
+-  owner: Pick<StartInput, "credentials">,
++  input: Omit<StartInput, "catalog" | "credentials">,
++  owner: Pick<StartInput, "catalog" | "credentials">,
+   postMessage: (command: ReturnType<typeof createSidecarStartCommand>) => void,
+ ) {
+-  const command = createSidecarStartCommand({ ...input, credentials: owner.credentials })
++  const command = createSidecarStartCommand({
++    ...input,
++    catalog: owner.catalog,
++    credentials: owner.credentials,
++  })
+   postMessage(command)
++  owner.catalog = undefined
+   owner.credentials = undefined
++  command.catalog = undefined
+   command.credentials = undefined
+ }
+diff --git a/packages/desktop/src/main/sidecar.ts b/packages/desktop/src/main/sidecar.ts
+index 16fc6f865..99ea0635c 100644
+--- a/packages/desktop/src/main/sidecar.ts
++++ b/packages/desktop/src/main/sidecar.ts
+@@ -1,28 +1,30 @@
+ import * as http from "node:http"
+ import * as tls from "node:tls"
++import { validateEnterpriseProviderCatalog } from "./enterprise-providers"
+ 
+ type NodeHttpWithEnvProxy = typeof http & {
+   setGlobalProxyFromEnv: () => void
+ }
+ 
+ type NodeTlsWithSystemCertificates = typeof tls & {
+   getCACertificates: (type: "default" | "system") => string[]
+   setDefaultCACertificates: (certificates: string[]) => void
+ }
+ 
+ type StartCommand = {
+   type: "start"
+   hostname: string
+   port: number
+   password: string
+   userDataPath: string
++  catalog?: unknown
+   credentials?: unknown
+ }
+ 
+ type StopCommand = { type: "stop" }
+ type SidecarCommand = StartCommand | StopCommand
+ 
+ type SidecarMessage =
+   | { type: "ready" }
+   | { type: "stopped" }
+   | { type: "error"; error: { message: string; stack?: string } }
+@@ -48,22 +50,28 @@ parentPort.on("message", (event) => {
+   }
+   void start(command)
+ })
+ 
+ async function start(command: StartCommand) {
+   try {
+     prepareSidecarEnv(command.password, command.userDataPath)
+     ensureLoopbackNoProxy()
+     useSystemCertificates()
+     useEnvProxy()
++    if (command.catalog !== undefined) {
++      process.env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG = JSON.stringify(
++        validateEnterpriseProviderCatalog(command.catalog),
++      )
++    }
+     const { ProviderEnterprise, Server } = await import("virtual:opencode-server")
+     ProviderEnterprise.setCredentials(command.credentials)
++    command.catalog = undefined
+     command.credentials = undefined
+ 
+     listener = await Server.listen({
+       port: command.port,
+       hostname: command.hostname,
+       username: "opencode",
+       password: command.password,
+       cors: ["oc://renderer"],
+     })
+     parentPort.postMessage({ type: "ready" })
+@@ -138,20 +146,21 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
+   if (typeof command.hostname !== "string") return
+   if (typeof command.port !== "number") return
+   if (typeof command.password !== "string") return
+   if (typeof command.userDataPath !== "string") return
+   return {
+     type: "start",
+     hostname: command.hostname,
+     port: command.port,
+     password: command.password,
+     userDataPath: command.userDataPath,
++    catalog: command.catalog,
+     credentials: command.credentials,
+   }
+ }
+ 
+ function serializeError(error: unknown) {
+   if (error instanceof Error) return { message: error.message, stack: error.stack }
+   return { message: String(error) }
+ }
+ 
+ function getParentPort() {
+diff --git a/packages/opencode/src/config/enterprise.ts b/packages/opencode/src/config/enterprise.ts
+index 8bf34812a..63633f9f3 100644
+--- a/packages/opencode/src/config/enterprise.ts
++++ b/packages/opencode/src/config/enterprise.ts
+@@ -1,40 +1,46 @@
+ export * as ConfigEnterprise from "./enterprise"
+ 
+ import type { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+ import path from "node:path"
+ import { mapValues, omit } from "remeda"
+ import { ConfigPlugin } from "./plugin"
+ 
+ const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
+ 
+ export type Policy = ReturnType<typeof settings>
+-export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins"> & {
+-  models?: { id: string }[]
+-}
++export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins" | "catalog">
+ export type DefaultsPolicy = Pick<
+   Policy,
+-  "enabled" | "defaultsPath" | "allowedOrigins" | "models" | "defaultModelID" | "skillPaths"
++  "enabled" | "defaultsPath" | "allowedOrigins" | "catalog" | "skillPaths"
+ > & { guidePath?: string }
+ type Info = ConfigV1.Info & { plugin_origins?: ConfigPlugin.Origin[] }
++type EnterpriseProviderCatalog = {
++  schemaVersion: 1
++  default?: { providerID: string; modelID: string }
++  providers: {
++    id: string
++    name: string
++    baseURL: string
++    models: { id: string; name: string }[]
++  }[]
++}
+ 
+ export function settings() {
+   const enabled = process.env.OPENCODE_ENTERPRISE_OFFLINE === "1"
+-  const models = enabled ? enterpriseModels() : []
++  const catalog = enabled ? enterpriseCatalog() : { schemaVersion: 1 as const, providers: [] }
+   return {
+     enabled,
+     defaultsPath: enabled ? process.env.OPENCODE_ENTERPRISE_DEFAULTS_PATH : undefined,
+     guidePath: enabled ? process.env.OPENCODE_ENTERPRISE_GUIDE_PATH : undefined,
+-    models,
+-    defaultModelID: enabled
+-      ? process.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID ?? models[0]?.id
+-      : undefined,
++    catalog,
++    defaultModel: catalog.default ? `${catalog.default.providerID}/${catalog.default.modelID}` : undefined,
+     skillPaths: enabled ? enterpriseSkillPaths() : [],
+     allowedOrigins: new Set(
+       (enabled ? process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS : undefined)
+         ?.split(",")
+         .map((item) => item.trim())
+         .filter(Boolean)
+         .map((item) => new URL(item).origin) ?? [],
+     ),
+   }
+ }
+@@ -62,166 +68,159 @@ export function sanitizeWrite(info: Info, policy: EnforcementPolicy = settings()
+               ...(model.options ? { options: omit(model.options, ["key", "apiKey", "headers"]) } : {}),
+             })),
+           }
+         : {}),
+     })),
+   }
+ }
+ 
+ export function materializeDefaults(info: Info, policy: DefaultsPolicy = settings()): Info {
+   if (!policy.enabled) return info
+-  if (!policy.models.length || !policy.defaultModelID || !policy.models.some((model) => model.id === policy.defaultModelID)) {
+-    throw new Error("Enterprise provider metadata is incomplete")
+-  }
+   const guidePath = policy.guidePath
+-  const current = info.provider?.["company-llm"]
+   return {
+     ...info,
+-    model: info.model ?? `company-llm/${policy.defaultModelID}`,
++    ...(info.model
++      ? {}
++      : policy.catalog.default
++        ? { model: `${policy.catalog.default.providerID}/${policy.catalog.default.modelID}` }
++        : {}),
+     ...(policy.skillPaths.length
+       ? {
+           skills: {
+             ...info.skills,
+             paths: [...new Set([...policy.skillPaths, ...(info.skills?.paths ?? [])])],
+           },
+         }
+       : {}),
+     ...(guidePath
+       ? { instructions: [guidePath, ...(info.instructions ?? []).filter((item) => item !== guidePath)] }
+       : {}),
+     provider: {
+       ...info.provider,
+-      "company-llm": {
+-        ...current,
+-        npm: OPENAI_COMPATIBLE,
+-        name: current?.name ?? "Company LLM",
+-        ...(current?.options ? { options: current.options } : {}),
+-        models: {
+-          ...Object.fromEntries(
+-            policy.models.map((model) => {
+-              const configured = current?.models?.[model.id]
+-              return [
+-                model.id,
+-                {
+-                  name: model.name,
+-                  ...configured,
+-                  provider: {
+-                    npm: OPENAI_COMPATIBLE,
+-                    api: model.baseURL,
+-                    ...configured?.provider,
+-                  },
+-                },
+-              ]
+-            }),
+-          ),
+-        },
+-      },
++      ...Object.fromEntries(
++        policy.catalog.providers.map((provider) => [
++          provider.id,
++          {
++            npm: OPENAI_COMPATIBLE,
++            name: provider.name,
++            options: { baseURL: provider.baseURL },
++            models: Object.fromEntries(provider.models.map((model) => [model.id, { name: model.name }])),
++          },
++        ]),
++      ),
+     },
+   }
+ }
+ 
+ function enterpriseSkillPaths() {
+   const value: unknown = (() => {
+     try {
+       return JSON.parse(process.env.OPENCODE_ENTERPRISE_SKILL_PATHS ?? "[]")
+     } catch {
+       return []
+     }
+   })()
+   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return []
+   return value.filter(path.isAbsolute)
+ }
+ 
+ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Info {
+   if (!policy.enabled) return info
+ 
+   const provider = Object.fromEntries(
+-    Object.entries(info.provider ?? {}).flatMap((entry) => {
+-      if (entry[1].npm !== OPENAI_COMPATIBLE) return []
+-      const providerURL = typeof entry[1].options?.baseURL === "string" ? entry[1].options.baseURL : undefined
+-      if (providerURL && !allowedURL(providerURL, policy.allowedOrigins)) return []
+-      const models = entry[1].models ?? {}
+-      if (
+-        !Object.keys(models).length ||
+-        Object.values(models).some((model) => {
+-          const url = typeof model.provider?.api === "string" ? model.provider.api : providerURL
+-          return !url || !allowedURL(url, policy.allowedOrigins)
+-        })
+-      ) {
+-        return []
+-      }
+-      const retainedModels =
+-        entry[0] === "company-llm" && policy.models
+-          ? Object.fromEntries(
+-              Object.entries(models).filter(([modelID]) => policy.models?.some((model) => model.id === modelID)),
+-            )
+-          : models
+-      if (!Object.keys(retainedModels).length) return []
++    policy.catalog.providers.map((item) => {
++      const current = info.provider?.[item.id]
+       return [
+-        [
+-          entry[0],
+-          {
+-            ...entry[1],
+-            env: Array<string>(),
+-            options: omit(entry[1].options ?? {}, ["key", "apiKey", "headers"]),
+-            models: mapValues(retainedModels, (model) => ({
+-              ...omit(model, ["headers"]),
+-              provider: { ...model.provider, npm: OPENAI_COMPATIBLE },
+-              options: omit(model.options ?? {}, ["key", "apiKey", "headers"]),
+-            })),
++        item.id,
++        {
++          ...current,
++          npm: OPENAI_COMPATIBLE,
++          name: item.name,
++          env: Array<string>(),
++          options: {
++            ...omit(current?.options ?? {}, ["key", "apiKey", "headers", "baseURL"]),
++            baseURL: item.baseURL,
+           },
+-        ],
++          models: Object.fromEntries(
++            item.models.map((model) => {
++              const configured = current?.models?.[model.id]
++              return [
++                model.id,
++                {
++                  ...omit(configured ?? {}, ["headers", "name"]),
++                  name: model.name,
++                  provider: {
++                    ...configured?.provider,
++                    npm: OPENAI_COMPATIBLE,
++                    api: item.baseURL,
++                  },
++                  options: omit(configured?.options ?? {}, ["key", "apiKey", "headers"]),
++                },
++              ]
++            }),
++          ),
++        },
+       ] as const
+     }),
+   )
+   const plugin_origins = (info.plugin_origins ?? []).filter((item) =>
+     ConfigPlugin.pluginSpecifier(item.spec).startsWith("file://"),
+   )
+   return {
+     ...info,
+     provider,
+     enabled_providers: Object.keys(provider),
+     plugin: plugin_origins.map((item) => item.spec),
+     plugin_origins,
+     share: "disabled",
+     autoupdate: false,
+   }
+ }
+ 
+-function enterpriseModels() {
+-  if (!process.env.OPENCODE_ENTERPRISE_MODELS) {
+-    const id = process.env.OPENCODE_ENTERPRISE_MODEL_ID
+-    const name = process.env.OPENCODE_ENTERPRISE_MODEL_NAME
+-    const baseURL = process.env.OPENCODE_ENTERPRISE_BASE_URL
+-    return id && name && baseURL ? [{ id, name, baseURL }] : []
+-  }
++function enterpriseCatalog(): EnterpriseProviderCatalog {
+   const value: unknown = (() => {
+     try {
+-      return JSON.parse(process.env.OPENCODE_ENTERPRISE_MODELS)
++      return JSON.parse(process.env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG ?? "")
+     } catch {
+-      return []
++      return undefined
+     }
+   })()
+-  if (!Array.isArray(value)) return []
+-  return value.flatMap((model) => {
+-    if (typeof model !== "object" || model === null || Array.isArray(model)) return []
+-    if (!("id" in model) || !("name" in model) || !("baseURL" in model)) return []
+-    if (typeof model.id !== "string" || typeof model.name !== "string" || typeof model.baseURL !== "string") return []
+-    return [{ id: model.id, name: model.name, baseURL: model.baseURL }]
++  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.providers)) {
++    return { schemaVersion: 1, providers: [] }
++  }
++  const providers = value.providers.flatMap((provider) => {
++    if (!isRecord(provider) || !Array.isArray(provider.models)) return []
++    if (typeof provider.id !== "string" || typeof provider.name !== "string" || typeof provider.baseURL !== "string") {
++      return []
++    }
++    const models = provider.models.flatMap((model) => {
++      if (!isRecord(model) || typeof model.id !== "string" || typeof model.name !== "string") return []
++      return [{ id: model.id, name: model.name }]
++    })
++    if (models.length !== provider.models.length) return []
++    return [{ id: provider.id, name: provider.name, baseURL: provider.baseURL, models }]
+   })
+-}
+-
+-function allowedURL(value: string, allowedOrigins: Set<string>) {
+-  try {
+-    const url = new URL(value)
+-    return (
+-      (url.protocol === "http:" || url.protocol === "https:") &&
+-      !url.username &&
+-      !url.password &&
+-      !url.search &&
+-      !url.hash &&
+-      allowedOrigins.has(url.origin)
++  if (providers.length !== value.providers.length) return { schemaVersion: 1, providers: [] }
++  if (value.default === undefined) return { schemaVersion: 1, providers }
++  if (!isRecord(value.default)) return { schemaVersion: 1, providers: [] }
++  if (typeof value.default.providerID !== "string" || typeof value.default.modelID !== "string") {
++    return { schemaVersion: 1, providers: [] }
++  }
++  if (
++    !providers.some(
++      (provider) =>
++        provider.id === value.default?.providerID &&
++        provider.models.some((model) => model.id === value.default?.modelID),
+     )
+-  } catch {
+-    return false
++  ) {
++    return { schemaVersion: 1, providers: [] }
++  }
++  return {
++    schemaVersion: 1,
++    default: { providerID: value.default.providerID, modelID: value.default.modelID },
++    providers,
+   }
+ }
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null && !Array.isArray(value)
++}
+diff --git a/packages/opencode/src/provider/enterprise.ts b/packages/opencode/src/provider/enterprise.ts
+index 0c6ebcea1..3cbf3c18c 100644
+--- a/packages/opencode/src/provider/enterprise.ts
++++ b/packages/opencode/src/provider/enterprise.ts
+@@ -1,44 +1,47 @@
+ import { ProviderV2 } from "@opencode-ai/core/provider"
+ import { Option, Schema } from "effect"
+ import { isRecord } from "@/util/record"
+ 
+ const Credentials = Schema.Struct({
+   apiKey: Schema.optional(Schema.String),
+   headers: Schema.Record(Schema.String, Schema.String),
+ })
+ const CredentialStore = Schema.Struct({
+-  schemaVersion: Schema.Literal(2),
+-  models: Schema.Record(Schema.String, Credentials),
++  schemaVersion: Schema.Literal(3),
++  providers: Schema.Record(Schema.String, Credentials),
+ })
+ const decode = Schema.decodeUnknownOption(CredentialStore)
+-let currentCredentials: typeof CredentialStore.Type = { schemaVersion: 2, models: {} }
++let currentCredentials: typeof CredentialStore.Type = { schemaVersion: 3, providers: {} }
++let enabled = false
+ const enterpriseFetch: typeof fetch = Object.assign(
+   async (request: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+     const response = await fetch(request, {
+       ...init,
+       redirect: "manual",
+     })
+     if (![301, 302, 303, 307, 308].includes(response.status)) return response
+     await response.body?.cancel().catch(() => undefined)
+     throw new Error("Company LLM redirects are disabled")
+   },
+   { preconnect: fetch.preconnect },
+ )
+ 
+ export function setCredentials(input: unknown) {
+-  currentCredentials = Option.getOrElse(decode(input), () => ({ schemaVersion: 2, models: {} }))
++  const credentials = decode(input)
++  enabled = Option.isSome(credentials)
++  currentCredentials = Option.getOrElse(credentials, () => ({ schemaVersion: 3, providers: {} }))
+ }
+ 
+-export function options(providerID: ProviderV2.ID, modelID: string, current: Record<string, unknown>) {
+-  if (providerID !== ProviderV2.ID.make("company-llm")) return current
+-  const credentials = currentCredentials.models[modelID] ?? { headers: {} }
++export function options(providerID: ProviderV2.ID, _modelID: string, current: Record<string, unknown>) {
++  if (!enabled) return current
++  const credentials = currentCredentials.providers[providerID] ?? { headers: {} }
+   const credentialHeaderNames = new Set(Object.keys(credentials.headers).map((name) => name.toLowerCase()))
+   return {
+     ...current,
+     fetch: enterpriseFetch,
+     ...(credentials.apiKey ? { apiKey: credentials.apiKey } : {}),
+     ...(Object.keys(credentials.headers).length
+       ? {
+           headers: {
+             ...(isRecord(current.headers)
+               ? Object.fromEntries(
+diff --git a/packages/opencode/test/config/enterprise.test.ts b/packages/opencode/test/config/enterprise.test.ts
+index c3a1b8d50..42b86eb22 100644
+--- a/packages/opencode/test/config/enterprise.test.ts
++++ b/packages/opencode/test/config/enterprise.test.ts
+@@ -11,20 +11,21 @@ test("enterprise enforcement keeps local plugins and removes registry plugins",
+   const registry = { spec: "public-plugin@latest", source: "project", scope: "local" as const }
+   const result = ConfigEnterprise.enforce(
+     {
+       plugin: [local.spec, registry.spec],
+       plugin_origins: [local, registry],
+     },
+     {
+       enabled: true,
+       defaultsPath: undefined,
+       allowedOrigins: new Set(["https://llm.corp.example"]),
++      catalog: { schemaVersion: 1, providers: [] },
+     },
+   )
+   expect(result.plugin).toEqual([local.spec])
+   expect(result.plugin_origins).toEqual([local])
+ })
+ 
+ test("enterprise enforcement overrides retained model SDKs", () => {
+   const result = ConfigEnterprise.enforce(
+     {
+       provider: {
+@@ -32,25 +33,79 @@ test("enterprise enforcement overrides retained model SDKs", () => {
+           npm: "@ai-sdk/openai-compatible",
+           options: { baseURL: "https://llm.corp.example/v1" },
+           models: { default: { provider: { npm: "untrusted-sdk" } } },
+         },
+       },
+     },
+     {
+       enabled: true,
+       defaultsPath: undefined,
+       allowedOrigins: new Set(["https://llm.corp.example"]),
++      catalog: {
++        schemaVersion: 1,
++        providers: [
++          {
++            id: "company",
++            name: "Company",
++            baseURL: "https://llm.corp.example/v1",
++            models: [{ id: "default", name: "Default" }],
++          },
++        ],
++      },
+     },
+   )
+   expect(result.provider?.company?.models?.default?.provider?.npm).toBe("@ai-sdk/openai-compatible")
+ })
+ 
++test("enterprise enforcement rebuilds registered providers from the runtime catalog", () => {
++  const policy = {
++    enabled: true,
++    defaultsPath: undefined,
++    guidePath: undefined,
++    skillPaths: [],
++    allowedOrigins: new Set<string>(),
++    catalog: {
++      schemaVersion: 1 as const,
++      default: { providerID: "internal", modelID: "code" },
++      providers: [
++        {
++          id: "internal",
++          name: "Internal",
++          baseURL: "https://arbitrary.example/v1",
++          models: [{ id: "code", name: "Code" }],
++        },
++      ],
++    },
++  }
++  const result = ConfigEnterprise.enforce(
++    {
++      provider: {
++        internal: {
++          npm: "other-package",
++          options: { baseURL: "https://attacker.example/v1" },
++          models: { code: { name: "Changed" } },
++        },
++        injected: {
++          npm: "@ai-sdk/openai-compatible",
++          options: { baseURL: "https://injected.example/v1" },
++          models: { model: {} },
++        },
++      },
++    },
++    policy,
++  )
++
++  expect(Object.keys(result.provider ?? {})).toEqual(["internal"])
++  expect(result.provider?.internal.npm).toBe("@ai-sdk/openai-compatible")
++  expect(result.provider?.internal.options?.baseURL).toBe("https://arbitrary.example/v1")
++})
++
+ test("enterprise enforcement clears provider credential env", () => {
+   const result = ConfigEnterprise.enforce(
+     {
+       provider: {
+         company: {
+           npm: "@ai-sdk/openai-compatible",
+           env: ["COMPANY_API_KEY"],
+           options: {
+             baseURL: "https://llm.corp.example/v1",
+             key: "provider-secret-key",
+@@ -67,187 +122,239 @@ test("enterprise enforcement clears provider credential env", () => {
+               },
+             },
+           },
+         },
+       },
+     },
+     {
+       enabled: true,
+       defaultsPath: undefined,
+       allowedOrigins: new Set(["https://llm.corp.example"]),
++      catalog: {
++        schemaVersion: 1,
++        providers: [
++          {
++            id: "company",
++            name: "Company",
++            baseURL: "https://llm.corp.example/v1",
++            models: [{ id: "default", name: "Default" }],
++          },
++        ],
++      },
+     },
+   )
+   expect(result.provider?.company?.env).toEqual([])
+   expect(result.provider?.company?.options).toEqual({ baseURL: "https://llm.corp.example/v1" })
+   expect(result.provider?.company?.models?.default?.headers).toBeUndefined()
+   expect(result.provider?.company?.models?.default?.options).toEqual({})
+ })
+ 
+-test("materializes only catalog company provider metadata as structured defaults", () => {
++test("materializes runtime provider catalog metadata as structured defaults", () => {
+   const result = ConfigEnterprise.materializeDefaults(
+     {
+       provider: {
+         "company-llm": {
+           models: {
+             rogue: { name: "Project Rogue", provider: { api: "https://llm.corp.example/rogue" } },
+           },
+         },
+       },
+     },
+     {
+       enabled: true,
+       defaultsPath: "C:/app/enterprise/opencode.jsonc",
+       allowedOrigins: new Set(["https://llm.corp.example"]),
+-      models: [
+-        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+-        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+-      ],
+-      defaultModelID: "company-code",
++      catalog: {
++        schemaVersion: 1,
++        default: { providerID: "company-llm", modelID: "company-code" },
++        providers: [
++          {
++            id: "company-llm",
++            name: "Company LLM",
++            baseURL: "https://llm.corp.example/v1",
++            models: [
++              { id: "company-code", name: "Company Code" },
++              { id: "company-fast", name: "Company Fast" },
++            ],
++          },
++        ],
++      },
++      defaultModel: "project-injected/model",
+       skillPaths: ["C:/app/enterprise/skill-packs/ponytail/skills"],
+     },
+   )
+   expect(result.model).toBe("company-llm/company-code")
+   expect(result.provider?.["company-llm"]?.models?.["company-code"]?.name).toBe("Company Code")
+-  expect(result.provider?.["company-llm"]?.models?.["company-code"]?.provider?.api).toBe(
+-    "https://llm.corp.example/v1",
+-  )
+-  expect(result.provider?.["company-llm"]?.models?.["company-fast"]?.provider?.api).toBe(
+-    "https://fast.corp.example/v1",
+-  )
+-  expect(result.provider?.["company-llm"]?.options?.baseURL).toBeUndefined()
++  expect(result.provider?.["company-llm"]?.models?.["company-fast"]?.name).toBe("Company Fast")
++  expect(result.provider?.["company-llm"]?.options?.baseURL).toBe("https://llm.corp.example/v1")
+   expect(result.provider?.["company-llm"]?.models?.rogue).toBeUndefined()
+   expect(result.skills?.paths).toEqual(["C:/app/enterprise/skill-packs/ponytail/skills"])
+ })
+ 
+ test("materializes verified enterprise skill paths without duplicating project configuration", () => {
+   const skillPath = "C:/app/enterprise/skill-packs/superpowers/skills"
+   const result = ConfigEnterprise.materializeDefaults(
+     { skills: { paths: ["project-skills"] } },
+     {
+       enabled: true,
+       defaultsPath: "C:/app/enterprise/opencode.jsonc",
+       allowedOrigins: new Set(["https://llm.corp.example"]),
+-      models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+-      defaultModelID: "company-code",
++      catalog: { schemaVersion: 1, providers: [] },
++      defaultModel: undefined,
+       skillPaths: [skillPath],
+     },
+   )
+ 
+   expect(result.skills?.paths).toEqual([skillPath, "project-skills"])
+ })
+ 
+ test("accepts only absolute enterprise skill paths from the sidecar environment", () => {
+   using offline = environment("OPENCODE_ENTERPRISE_OFFLINE", "1")
+   const absolute = path.resolve("enterprise-skills")
+   using skillPaths = environment("OPENCODE_ENTERPRISE_SKILL_PATHS", JSON.stringify([absolute, "relative-skills"]))
+ 
+   expect(ConfigEnterprise.settings().skillPaths).toEqual([absolute])
+ })
+ 
+-test("enterprise enforcement rejects a provider when any model URL is outside policy", () => {
++test("loads the runtime provider catalog and default only in enterprise mode", () => {
++  const catalog = {
++    schemaVersion: 1,
++    default: { providerID: "internal", modelID: "code" },
++    providers: [
++      {
++        id: "internal",
++        name: "Internal",
++        baseURL: "https://internal.example/v1",
++        models: [{ id: "code", name: "Code" }],
++      },
++    ],
++  }
++  using runtimeCatalog = environment("OPENCODE_ENTERPRISE_PROVIDER_CATALOG", JSON.stringify(catalog))
++
++  expect(ConfigEnterprise.settings()).toMatchObject({
++    enabled: false,
++    catalog: { schemaVersion: 1, providers: [] },
++    defaultModel: undefined,
++  })
++  using offline = environment("OPENCODE_ENTERPRISE_OFFLINE", "1")
++  expect(ConfigEnterprise.settings()).toMatchObject({
++    enabled: true,
++    catalog,
++    defaultModel: "internal/code",
++  })
++})
++
++test("enterprise enforcement overwrites configured model identity and endpoint", () => {
+   const policy = {
+     enabled: true,
+     defaultsPath: undefined,
+-    allowedOrigins: new Set(["https://code.corp.example", "https://reasoning.corp.example"]),
++    allowedOrigins: new Set<string>(),
++    catalog: {
++      schemaVersion: 1 as const,
++      providers: [
++        {
++          id: "company-llm",
++          name: "Company",
++          baseURL: "https://code.corp.example/v1",
++          models: [{ id: "code", name: "Code" }],
++        },
++      ],
++    },
+   }
+   const provider = {
+     "company-llm": {
+-      npm: "@ai-sdk/openai-compatible",
++      npm: "untrusted-sdk",
+       models: {
+-        code: { provider: { api: "https://code.corp.example/v1" } },
+-        reasoning: { provider: { api: "https://reasoning.corp.example/v1" } },
++        code: {
++          name: "Changed",
++          provider: { npm: "untrusted-sdk", api: "https://unapproved.example/v1" },
++          limit: { context: 123 },
++        },
+       },
+     },
+   }
+ 
+-  expect(Object.keys(ConfigEnterprise.enforce({ provider }, policy).provider ?? {})).toEqual(["company-llm"])
+-  expect(
+-    ConfigEnterprise.enforce(
+-      {
+-        provider: {
+-          ...provider,
+-          "company-llm": {
+-            ...provider["company-llm"],
+-            models: {
+-              ...provider["company-llm"].models,
+-              reasoning: { provider: { api: "https://unapproved.example/v1" } },
+-            },
+-          },
+-        },
+-      },
+-      policy,
+-    ).provider,
+-  ).toEqual({})
++  const result = ConfigEnterprise.enforce({ provider }, policy)
++  expect(result.provider?.["company-llm"]?.models?.code).toMatchObject({
++    name: "Code",
++    provider: { npm: "@ai-sdk/openai-compatible", api: "https://code.corp.example/v1" },
++    limit: { context: 123 },
++  })
+ })
+ 
+ function environment(key: string, value: string) {
+   const previous = process.env[key]
+   process.env[key] = value
+   return {
+     [Symbol.dispose]() {
+       if (previous === undefined) {
+         delete process.env[key]
+         return
+       }
+       process.env[key] = previous
+     },
+   }
+ }
+ 
+-test("enterprise enforcement rejects provider and model URLs with queries or fragments", () => {
+-  const policy = {
+-    enabled: true,
+-    defaultsPath: undefined,
+-    allowedOrigins: new Set(["https://code.corp.example"]),
+-  }
+-  const provider = (api: string) => ({
+-    "company-llm": {
+-      npm: "@ai-sdk/openai-compatible",
+-      models: { code: { provider: { api } } },
+-    },
+-  })
+-
+-  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1?api_key=secret") }, policy).provider).toEqual({})
+-  expect(ConfigEnterprise.enforce({ provider: provider("https://code.corp.example/v1#secret") }, policy).provider).toEqual({})
+-  expect(
+-    ConfigEnterprise.enforce(
+-      {
+-        provider: {
+-          "company-llm": {
+-            ...provider("https://code.corp.example/v1")["company-llm"],
+-            options: { baseURL: "https://code.corp.example/v1?api_key=secret" },
+-          },
++test("enterprise enforcement disables every provider for an empty catalog", () => {
++  const result = ConfigEnterprise.enforce(
++    {
++      provider: {
++        injected: {
++          npm: "@ai-sdk/openai-compatible",
++          options: { baseURL: "https://injected.example/v1" },
++          models: { model: {} },
+         },
+       },
+-      policy,
+-    ).provider,
+-  ).toEqual({})
++    },
++    {
++      enabled: true,
++      defaultsPath: undefined,
++      allowedOrigins: new Set<string>(),
++      catalog: { schemaVersion: 1, providers: [] },
++    },
++  )
++
++  expect(result.provider).toEqual({})
++  expect(result.enabled_providers).toEqual([])
++  expect(result.share).toBe("disabled")
++  expect(result.autoupdate).toBe(false)
+ })
+ 
+ test("enterprise enforcement removes company models outside the configured catalog", () => {
+   const result = ConfigEnterprise.enforce(
+     {
+       provider: {
+         "company-llm": {
+           npm: "@ai-sdk/openai-compatible",
+           models: {
+             code: { provider: { api: "https://code.corp.example/v1" } },
+             rogue: { provider: { api: "https://code.corp.example/rogue" } },
+           },
+         },
+       },
+     },
+     {
+       enabled: true,
+       defaultsPath: undefined,
+       allowedOrigins: new Set(["https://code.corp.example"]),
+-      models: [{ id: "code" }],
++      catalog: {
++        schemaVersion: 1,
++        providers: [
++          {
++            id: "company-llm",
++            name: "Company",
++            baseURL: "https://code.corp.example/v1",
++            models: [{ id: "code", name: "Code" }],
++          },
++        ],
++      },
+     },
+   )
+ 
+   expect(Object.keys(result.provider?.["company-llm"]?.models ?? {})).toEqual(["code"])
+ })
+ 
+ test("enterprise public config removes secret provider options without mutation", () => {
+   const info = {
+     provider: {
+       "company-llm": {
+diff --git a/packages/opencode/test/provider/enterprise.test.ts b/packages/opencode/test/provider/enterprise.test.ts
+index 202376625..bcf40ab41 100644
+--- a/packages/opencode/test/provider/enterprise.test.ts
++++ b/packages/opencode/test/provider/enterprise.test.ts
+@@ -1,78 +1,72 @@
+ import { afterEach, expect, test } from "bun:test"
+ import { ProviderEnterprise } from "@/provider/enterprise"
+ import { ProviderV2 } from "@opencode-ai/core/provider"
+ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+ import { generateText } from "ai"
+ 
+-afterEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 2, models: {} }))
++afterEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 3, providers: {} }))
+ 
+-test("applies enterprise credentials only to the company provider", () => {
++test("applies provider credentials to every model without crossing provider boundaries", () => {
+   ProviderEnterprise.setCredentials({
+-    schemaVersion: 2,
+-    models: {
+-      code: {
+-        apiKey: "secret-key",
+-        headers: { Authorization: "secret-authorization", "x-company-token": "secret-header" },
++    schemaVersion: 3,
++    providers: {
++      internal: {
++        apiKey: "provider-key",
++        headers: { Authorization: "provider-authorization", "x-company-token": "provider-header" },
+       },
+-      reasoning: { apiKey: "reasoning-key", headers: {} },
+     },
+   })
+-  expect(
+-    ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "code", {
+-      baseURL: "https://llm.corp.example/v1",
+-      headers: {
+-        authorization: "project-authorization",
+-        "X-COMPANY-Token": "project-header",
+-        "X-Project": "preserved",
+-      },
+-    }),
+-  ).toEqual({
+-    baseURL: "https://llm.corp.example/v1",
+-    fetch: expect.any(Function),
+-    apiKey: "secret-key",
++
++  const current = {
+     headers: {
+-      Authorization: "secret-authorization",
+-      "x-company-token": "secret-header",
++      authorization: "project-authorization",
++      "X-COMPANY-Token": "project-header",
++      "X-Project": "preserved",
++    },
++  }
++  expect(ProviderEnterprise.options(ProviderV2.ID.make("internal"), "code", current)).toMatchObject({
++    apiKey: "provider-key",
++    headers: {
++      Authorization: "provider-authorization",
++      "x-company-token": "provider-header",
+       "X-Project": "preserved",
+     },
+   })
+-  expect(ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "reasoning", {})).toMatchObject({
+-    apiKey: "reasoning-key",
+-  })
+-  expect(ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "missing", {})).toEqual({
+-    fetch: expect.any(Function),
++  expect(ProviderEnterprise.options(ProviderV2.ID.make("internal"), "reasoning", {})).toMatchObject({
++    apiKey: "provider-key",
++    headers: { Authorization: "provider-authorization", "x-company-token": "provider-header" },
+   })
+-  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "code", {})).toEqual({})
++  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "code", {})).toEqual({ fetch: expect.any(Function) })
+ })
+ 
+ test("credential headers replace mixed-case project headers on the OpenAI-compatible request path", async () => {
+   const request = Promise.withResolvers<Headers>()
+   using server = Bun.serve({
+     hostname: "127.0.0.1",
+     port: 0,
+     fetch(input) {
+       request.resolve(input.headers)
+       return Response.json({
+         id: "chatcmpl-enterprise",
+         object: "chat.completion",
+         created: 0,
+         model: "company-code",
+         choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+       })
+     },
+   })
+   ProviderEnterprise.setCredentials({
+-    schemaVersion: 2,
+-    models: {
+-      "company-code": {
++    schemaVersion: 3,
++    providers: {
++      "company-llm": {
+         headers: {
+           Authorization: "Bearer credential-secret",
+           "x-company-token": "credential-custom-secret",
+         },
+       },
+     },
+   })
+   const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "company-code", {
+     headers: {
+       authorization: "Bearer project-secret",
+@@ -89,21 +83,21 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
+   await generateText({ model: provider("company-code"), prompt: "hello" })
+ 
+   const headers = await request.promise
+   expect(headers.get("authorization")).toBe("Bearer credential-secret")
+   expect(headers.get("x-company-token")).toBe("credential-custom-secret")
+   expect(headers.get("authorization")).not.toContain("project-secret")
+   expect(headers.get("x-company-token")).not.toContain("project-custom-secret")
+   server.stop(true)
+ })
+ 
+-test("routes two models to distinct URLs and credentials without cross-model fallback", async () => {
++test("routes two providers to distinct URLs and credentials", async () => {
+   const codeRequests: Headers[] = []
+   const reasoningRequests: Headers[] = []
+   const serve = (requests: Headers[]) =>
+     Bun.serve({
+       hostname: "127.0.0.1",
+       port: 0,
+       fetch(input) {
+         requests.push(input.headers)
+         return Response.json({
+           id: "chatcmpl-enterprise",
+@@ -111,78 +105,80 @@ test("routes two models to distinct URLs and credentials without cross-model fal
+           created: 0,
+           model: "company-model",
+           choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+         })
+       },
+     })
+   using codeServer = serve(codeRequests)
+   using reasoningServer = serve(reasoningRequests)
+   ProviderEnterprise.setCredentials({
+-    schemaVersion: 2,
+-    models: {
+-      code: { apiKey: "code-key", headers: { "x-company-token": "code-header" } },
+-      reasoning: { apiKey: "reasoning-key", headers: { "x-company-token": "reasoning-header" } },
++    schemaVersion: 3,
++    providers: {
++      "code-provider": { apiKey: "code-key", headers: { "x-company-token": "code-header" } },
++      "reasoning-provider": { apiKey: "reasoning-key", headers: { "x-company-token": "reasoning-header" } },
+     },
+   })
+-  const model = (modelID: string, baseURL: string) => {
+-    const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), modelID, {})
++  const model = (providerID: string, modelID: string, baseURL: string) => {
++    const options = ProviderEnterprise.options(ProviderV2.ID.make(providerID), modelID, {})
+     return createOpenAICompatible({
+-      name: "company-llm",
++      name: providerID,
+       baseURL,
+       apiKey: options.apiKey as string,
+       headers: options.headers as Record<string, string>,
+       fetch: options.fetch as typeof fetch,
+     })(modelID)
+   }
+ 
+   await Promise.all([
+-    generateText({ model: model("code", `${codeServer.url}v1`), prompt: "hello" }),
+-    generateText({ model: model("reasoning", `${reasoningServer.url}v1`), prompt: "hello" }),
++    generateText({ model: model("code-provider", "code", `${codeServer.url}v1`), prompt: "hello" }),
++    generateText({ model: model("reasoning-provider", "reasoning", `${reasoningServer.url}v1`), prompt: "hello" }),
+   ])
+ 
+   expect(codeRequests).toHaveLength(1)
+   expect(codeRequests[0].get("authorization")).toBe("Bearer code-key")
+   expect(codeRequests[0].get("x-company-token")).toBe("code-header")
+   expect(reasoningRequests).toHaveLength(1)
+   expect(reasoningRequests[0].get("authorization")).toBe("Bearer reasoning-key")
+   expect(reasoningRequests[0].get("x-company-token")).toBe("reasoning-header")
+   codeServer.stop(true)
+   reasoningServer.stop(true)
+ })
+ 
+-test("rejects Company LLM redirects without contacting the redirect target", async () => {
++test("rejects enterprise provider redirects without contacting the redirect target", async () => {
+   let redirected = 0
+   using server = Bun.serve({
+     hostname: "127.0.0.1",
+     port: 0,
+     fetch(input) {
+       if (new URL(input.url).pathname === "/redirected") {
+         redirected++
+         return new Response("unexpected")
+       }
+       return Response.redirect(new URL("/redirected", input.url), 302)
+     },
+   })
+   const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "company-code", {})
+ 
+   await expect((options.fetch as typeof fetch)(`${server.url}v1`)).rejects.toThrow(
+     "Company LLM redirects are disabled",
+   )
+   expect(redirected).toBe(0)
+-  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "company-code", {})).toEqual({})
++  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "company-code", {})).toEqual({
++    fetch: expect.any(Function),
++  })
+   server.stop(true)
+ })
+ 
+ test("invalid enterprise credentials are discarded without exposing prior values", () => {
+   ProviderEnterprise.setCredentials({
+-    schemaVersion: 2,
+-    models: { code: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
++    schemaVersion: 3,
++    providers: { "company-llm": { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
+   })
+   ProviderEnterprise.setCredentials({ apiKey: 42, headers: { Authorization: false } })
+ 
+   expect(
+     ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "code", {
+       baseURL: "https://llm.corp.example/v1",
+     }),
+-  ).toEqual({ baseURL: "https://llm.corp.example/v1", fetch: expect.any(Function) })
++  ).toEqual({ baseURL: "https://llm.corp.example/v1" })
+ })
+
+## Untracked file: packages/desktop/src/main/sidecar-startup.test.ts
+diff --git a/packages/desktop/src/main/sidecar-startup.test.ts b/packages/desktop/src/main/sidecar-startup.test.ts
+new file mode 100644
+index 000000000..af8039560
+--- /dev/null
++++ b/packages/desktop/src/main/sidecar-startup.test.ts
+@@ -0,0 +1,58 @@
++import { expect, test } from "bun:test"
++import { createSidecarEnv, createSidecarStartCommand, postSidecarStartCommand } from "./sidecar-startup"
++
++test("sidecar startup transfers and releases the provider catalog and credentials", () => {
++  const catalog = {
++    schemaVersion: 1 as const,
++    default: { providerID: "internal", modelID: "code" },
++    providers: [
++      {
++        id: "internal",
++        name: "Internal",
++        baseURL: "https://internal.example/v1",
++        models: [{ id: "code", name: "Code" }],
++      },
++    ],
++  }
++  const credentials = {
++    schemaVersion: 3 as const,
++    providers: { internal: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
++  }
++  const owner = { catalog, credentials }
++  let posted: ReturnType<typeof createSidecarStartCommand> | undefined
++
++  postSidecarStartCommand(
++    {
++      hostname: "127.0.0.1",
++      port: 4096,
++      password: "sidecar-password",
++      userDataPath: "C:\\OpenCode",
++    },
++    owner,
++    (command) => {
++      posted = structuredClone(command)
++    },
++  )
++
++  expect(posted?.catalog).toEqual(catalog)
++  expect(posted?.credentials).toEqual(credentials)
++  expect(owner.catalog).toBeUndefined()
++  expect(owner.credentials).toBeUndefined()
++})
++
++test("sidecar environment discards inherited enterprise startup data", () => {
++  const env = createSidecarEnv(
++    {},
++    {
++      inherited: {
++        OPENCODE_ENTERPRISE_PROVIDER_CATALOG: '{"attacker":true}',
++        OPENCODE_ENTERPRISE_CREDENTIALS: "inherited-secret",
++      },
++      platform: "win32",
++      packaged: true,
++    },
++  )
++
++  expect(env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG).toBeUndefined()
++  expect(env.OPENCODE_ENTERPRISE_CREDENTIALS).toBeUndefined()
++})

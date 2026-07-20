@@ -1,21 +1,34 @@
 import "@/index.css"
-import { MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
+import { type BaseRouterProps, MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/solid-query"
 import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
-import { createSignal, ErrorBoundary, type JSX, Match, onMount, type ParentProps, Switch } from "solid-js"
+import {
+  type Component,
+  createSignal,
+  ErrorBoundary,
+  type JSX,
+  Match,
+  onMount,
+  type ParentProps,
+  Show,
+  Switch,
+  untrack,
+} from "solid-js"
 import { render } from "solid-js/web"
 import { createStore } from "solid-js/store"
-import { AppBaseProviders } from "@/app-base-providers"
+import { AppBaseProviders, AppInterface } from "@/app"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/components/dialog-connect-provider"
 import { useServerManagementController } from "@/components/dialog-select-server"
+import { SettingsProviders } from "@/components/settings-providers"
+import { SettingsProvidersV2 } from "@/components/settings-v2/providers"
 import { WindowsAppMenu } from "@/components/windows-app-menu"
 import { CommandProvider, useCommand } from "@/context/command"
 import { DesktopCommands } from "@/desktop-commands"
 import { GlobalProvider } from "@/context/global"
 import { LanguageProvider } from "@/context/language"
-import { type Platform, PlatformProvider, usePlatform } from "@/context/platform"
+import { type EnterpriseProviderCatalogView, type Platform, PlatformProvider, usePlatform } from "@/context/platform"
 import { ServerConnection, ServerProvider, useServer } from "@/context/server"
 import { ServerSDKProvider } from "@/context/server-sdk"
 import { ServerSyncProvider } from "@/context/server-sync"
@@ -53,8 +66,13 @@ type RequestRecord = {
   query: string
   body?: unknown
 }
-type CredentialInput = { modelID: string; apiKey?: string; headers?: Record<string, string> }
-type CredentialMode = "restart" | "no-restart" | "error"
+type CredentialInput = {
+  providerID: string
+  hasApiKey: boolean
+  headerNames: string[]
+}
+type ProviderUpdateInput = CredentialInput & { name: string; clearCredentials: boolean }
+type CredentialMode = "restart" | "no-restart" | "error" | "recovery" | "pending"
 type DiagnosticOutcome = "success" | "failure" | "network-error"
 
 function createHarness(scenario?: string | null) {
@@ -79,6 +97,8 @@ function createHarness(scenario?: string | null) {
     requests: [] as RequestRecord[],
     storageWrites: [] as Array<{ name: string; key: string; value: string | null }>,
     credentialInputs: [] as CredentialInput[],
+    providerUpdateInputs: [] as ProviderUpdateInput[],
+    standaloneCredentialInputs: [] as CredentialInput[],
     credentialStatusInputs: [] as string[],
     credentialClearInputs: [] as string[],
     credentialCatalogCalls: 0,
@@ -87,14 +107,64 @@ function createHarness(scenario?: string | null) {
     externalLinks: [] as string[],
   })
   const [diagnosticPending, setDiagnosticPending] = createSignal(false)
+  const [credentialPending, setCredentialPending] = createSignal(false)
+  const [providerPending, setProviderPending] = createSignal(0)
+  const providerResponses = {
+    deferred: false,
+    empty: false,
+    pending: [] as Array<(response: Response) => void>,
+  }
   const behavior = {
-    configured: { "company-code": false, "company-reasoning": false } as Record<string, boolean>,
     credentialMode: "restart" as CredentialMode,
     diagnosticOutcome: "success" as DiagnosticOutcome,
   }
+  const catalogState: { value: EnterpriseProviderCatalogView } = {
+    value: scenario?.startsWith("settings")
+      ? {
+          schemaVersion: 1,
+          default: { providerID: "company-llm", modelID: "company-code" },
+          providers: [
+            {
+              id: "company-llm",
+              name: "Company LLM",
+              baseURL: "https://llm.company.test/v1",
+              models: [{ id: "company-code", name: "Company Code" }],
+              credentials: { configured: false, headerNames: [] },
+            },
+          ],
+        }
+      : { schemaVersion: 1, providers: [] },
+  }
   const diagnostic = { resolve: undefined as ((value: unknown) => void) | undefined }
+  const credential = { resolve: undefined as (() => void) | undefined }
+  const globalEvent = {
+    resolve: undefined as ((response: Response) => void) | undefined,
+    connected: false,
+  }
   const history = createMemoryHistory()
-  history.set({ value: "/", scroll: false, replace: true })
+  history.set({
+    value: scenario?.startsWith("composer") ? "/new-session?draftId=company-composer" : "/",
+    scroll: false,
+    replace: true,
+  })
+  if (scenario?.startsWith("composer")) {
+    stores.set(
+      "opencode.window.company-llm-enterprise-fixture.dat",
+      new Map([
+        [
+          "tabs",
+          JSON.stringify([
+            {
+              type: "draft",
+              draftID: "company-composer",
+              server: ServerConnection.key(sidecar),
+              directory: "/repo",
+            },
+          ]),
+        ],
+      ]),
+    )
+  }
 
   const storage = (name = "default.dat") => {
     const values = stores.get(name) ?? new Map<string, string>()
@@ -102,18 +172,48 @@ function createHarness(scenario?: string | null) {
     return {
       getItem: async (key: string) => values.get(key) ?? null,
       setItem: async (key: string, value: string) => {
-        setObservations("storageWrites", observations.storageWrites.length, { name, key, value })
+        setObservations(
+          "storageWrites",
+          untrack(() => observations.storageWrites.length),
+          { name, key, value },
+        )
         values.set(key, value)
       },
       removeItem: async (key: string) => {
-        setObservations("storageWrites", observations.storageWrites.length, { name, key, value: null })
+        setObservations(
+          "storageWrites",
+          untrack(() => observations.storageWrites.length),
+          { name, key, value: null },
+        )
         values.delete(key)
       },
     }
   }
 
+  const credentialTransition = async () => {
+    if (behavior.credentialMode === "error") throw new Error("secure storage failed")
+    if (behavior.credentialMode === "recovery") {
+      throw Object.assign(new Error("restart_failed_recovery_failed"), { code: "restart_failed_recovery_failed" })
+    }
+    if (behavior.credentialMode !== "pending") return
+    await new Promise<void>((resolve) => {
+      credential.resolve = resolve
+      setCredentialPending(true)
+    })
+    credential.resolve = undefined
+    setCredentialPending(false)
+  }
+
   const json = (value: unknown) =>
     new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } })
+  const connectedEvent = () =>
+    new Response(
+      `data: ${JSON.stringify({
+        directory: "global",
+        payload: { id: "fixture-connected", type: "server.connected", properties: {} },
+      })}\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    )
   const fetch = (async (source: RequestInfo | URL, init?: RequestInit) => {
     const request = source instanceof Request ? source : new Request(source, init)
     const url = new URL(request.url)
@@ -141,12 +241,26 @@ function createHarness(scenario?: string | null) {
       return json({ $schema: "https://opencode.ai/config.json" })
     }
     if (url.pathname === "/provider") {
-      if (!scenario?.startsWith("company") && scenario !== "connect" && scenario !== "settings") {
+      if (scenario === "composer-enterprise-empty" && providerResponses.empty) {
         return json({ all: [], connected: [], default: {} })
       }
-      const model = (id: string, name: string, url: string) => ({
+      if (scenario === "composer-enterprise-empty" && providerResponses.deferred) {
+        return new Promise<Response>((resolve) => {
+          providerResponses.pending.push(resolve)
+          setProviderPending(providerResponses.pending.length)
+        })
+      }
+      if (
+        !scenario?.startsWith("company") &&
+        scenario !== "connect" &&
+        scenario !== "settings" &&
+        scenario !== "composer-enterprise-empty"
+      ) {
+        return json({ all: [], connected: [], default: {} })
+      }
+      const model = (providerID: string, id: string, name: string, url: string) => ({
         id,
-        providerID: "company-llm",
+        providerID,
         name,
         api: { id, url, npm: "@ai-sdk/openai-compatible" },
         status: "active",
@@ -160,22 +274,37 @@ function createHarness(scenario?: string | null) {
             env: [],
             options: {},
             models: {
-              "company-code": model("company-code", "Company Code", "https://llm.company.test/v1"),
-              "company-reasoning": model(
-                "company-reasoning",
-                "Company Reasoning",
-                "https://reasoning.company.test/v1",
-              ),
+              "company-code": model("company-llm", "company-code", "Company Code", "https://llm.company.test/v1"),
               ...(scenario === "company-mismatch"
                 ? {
-                    "pending-model": model("pending-model", "Pending Model", "https://pending.company.test/v1"),
+                    "pending-model": model(
+                      "company-llm",
+                      "pending-model",
+                      "Pending Model",
+                      "https://pending.company.test/v1",
+                    ),
                   }
                 : {}),
             },
           },
+          {
+            id: "company-llm-2",
+            name: "Company Reasoning",
+            source: "config",
+            env: [],
+            options: {},
+            models: {
+              "company-reasoning": model(
+                "company-llm-2",
+                "company-reasoning",
+                "Company Reasoning",
+                "https://reasoning.company.test/v1",
+              ),
+            },
+          },
         ],
-        connected: [],
-        default: { "company-llm": "company-code" },
+        connected: scenario === "composer-enterprise-empty" ? ["company-llm"] : [],
+        default: { "company-llm": "company-code", "company-llm-2": "company-reasoning" },
       })
     }
     if (url.pathname === "/path") {
@@ -187,8 +316,31 @@ function createHarness(scenario?: string | null) {
         directory: "/repo",
       })
     }
+    if (url.pathname === "/session") return json([])
+    if (url.pathname === "/agent") {
+      return json([
+        {
+          name: "build",
+          mode: "primary",
+          model:
+            scenario === "composer-enterprise-empty"
+              ? { providerID: "company-llm", modelID: "company-code" }
+              : undefined,
+        },
+      ])
+    }
+    if (url.pathname === "/config") return json({})
+    if (url.pathname === "/session/status") return json({})
+    if (url.pathname === "/project/current") return json({ id: "project", worktree: "/repo" })
+    if (url.pathname === "/vcs") return json(null)
+    if (url.pathname === "/api/reference") return json({ data: [] })
+    if (url.pathname === "/permission" || url.pathname === "/question" || url.pathname === "/command") {
+      return json([])
+    }
+    if (url.pathname === "/mcp") return json({})
+    if (url.pathname === "/experimental/resource" || url.pathname === "/lsp") return json([])
     if (url.pathname === "/project") return json([])
-    if (url.pathname === "/provider/company-llm/diagnostics") {
+    if (/^\/provider\/[^/]+\/diagnostics$/.test(url.pathname)) {
       if (behavior.diagnosticOutcome === "network-error") {
         throw new Error("transport failure with private detail")
       }
@@ -201,7 +353,12 @@ function createHarness(scenario?: string | null) {
       return json(value)
     }
     if (url.pathname === "/global/event") {
-      return new Promise<Response>((_resolve, reject) => {
+      if (globalEvent.connected) {
+        globalEvent.connected = false
+        return connectedEvent()
+      }
+      return new Promise<Response>((resolve, reject) => {
+        globalEvent.resolve = resolve
         const abort = () => reject(new DOMException("Aborted", "AbortError"))
         if (request.signal.aborted) {
           abort()
@@ -212,6 +369,7 @@ function createHarness(scenario?: string | null) {
     }
     return json({})
   }) as typeof globalThis.fetch
+  globalThis.fetch = fetch
 
   const inputValue = (label: string) =>
     [...document.querySelectorAll<HTMLElement>("[data-component=input]")]
@@ -247,40 +405,128 @@ function createHarness(scenario?: string | null) {
       setObservations("defaultWrites", observations.defaultWrites.length, key)
     },
     enterprise: {
-      async credentialCatalog() {
+      async providerCatalog() {
         setObservations("credentialCatalogCalls", (value) => value + 1)
-        return {
-          defaultModelID: "company-code",
-          models: [
-            {
-              id: "company-code",
-              name: "Company Code",
-              baseURL: "https://llm.company.test/v1",
-              credentialStatus: { configured: behavior.configured["company-code"] },
-            },
-            {
-              id: "company-reasoning",
-              name: "Company Reasoning",
-              baseURL: "https://reasoning.company.test/v1",
-              credentialStatus: { configured: behavior.configured["company-reasoning"] },
-            },
-          ],
+        return structuredClone(catalogState.value)
+      },
+      async createProvider(input) {
+        catalogState.value.providers.push({
+          ...input.provider,
+          models: input.provider.models.map((model) => ({ ...model })),
+          credentials: {
+            configured: Boolean(input.credentials?.apiKey || Object.keys(input.credentials?.headers ?? {}).length),
+            headerNames: Object.keys(input.credentials?.headers ?? {}),
+          },
+        })
+        return this.providerCatalog()
+      },
+      async updateProvider(input) {
+        setObservations("providerUpdateInputs", observations.providerUpdateInputs.length, {
+          providerID: input.providerID,
+          name: input.name,
+          hasApiKey: Boolean(input.credentials?.apiKey),
+          headerNames: Object.keys(input.credentials?.headers ?? {}),
+          clearCredentials: Boolean(input.clearCredentials),
+        })
+        if (input.credentials || input.clearCredentials) {
+          setObservations("credentialInputs", observations.credentialInputs.length, {
+            providerID: input.providerID,
+            hasApiKey: Boolean(input.credentials?.apiKey),
+            headerNames: Object.keys(input.credentials?.headers ?? {}),
+          })
+          await credentialTransition()
         }
+        catalogState.value.providers = catalogState.value.providers.map((provider) =>
+          provider.id === input.providerID
+            ? {
+                ...provider,
+                name: input.name,
+                baseURL: input.baseURL,
+                ...(input.credentials || input.clearCredentials
+                  ? {
+                      credentials: {
+                        configured: Boolean(
+                          input.credentials?.apiKey || Object.keys(input.credentials?.headers ?? {}).length,
+                        ),
+                        headerNames: Object.keys(input.credentials?.headers ?? {}),
+                      },
+                    }
+                  : {}),
+              }
+            : provider,
+        )
+        return this.providerCatalog()
       },
-      async credentialStatus(modelID) {
-        setObservations("credentialStatusInputs", observations.credentialStatusInputs.length, modelID)
-        return { configured: behavior.configured[modelID] ?? false }
+      async deleteProvider(providerID) {
+        catalogState.value.providers = catalogState.value.providers.filter((provider) => provider.id !== providerID)
+        if (catalogState.value.default?.providerID === providerID) {
+          const provider = catalogState.value.providers.find((item) => item.models.length)
+          catalogState.value.default = provider
+            ? { providerID: provider.id, modelID: provider.models[0].id }
+            : undefined
+        }
+        return this.providerCatalog()
       },
-      async setCredentials(input) {
-        setObservations("credentialInputs", observations.credentialInputs.length, input)
-        if (behavior.credentialMode === "error") throw new Error("secure storage failed")
-        behavior.configured[input.modelID] = true
-        return { restartRequired: behavior.credentialMode === "restart" }
+      async createModel(input) {
+        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
+        provider?.models.push({ ...input.model })
+        return this.providerCatalog()
       },
-      async clearCredentials(modelID) {
-        setObservations("credentialClearInputs", observations.credentialClearInputs.length, modelID)
-        behavior.configured[modelID] = false
-        return { restartRequired: behavior.credentialMode === "restart" }
+      async updateModel(input) {
+        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
+        if (provider)
+          provider.models = provider.models.map((model) =>
+            model.id === input.modelID ? { ...model, name: input.name } : model,
+          )
+        return this.providerCatalog()
+      },
+      async deleteModel(input) {
+        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
+        if (provider) provider.models = provider.models.filter((model) => model.id !== input.modelID)
+        if (
+          catalogState.value.default?.providerID === input.providerID &&
+          catalogState.value.default.modelID === input.modelID
+        ) {
+          const fallback = provider?.models[0]
+          const other = catalogState.value.providers.find((item) => item.models.length)
+          catalogState.value.default = fallback
+            ? { providerID: input.providerID, modelID: fallback.id }
+            : other
+              ? { providerID: other.id, modelID: other.models[0].id }
+              : undefined
+        }
+        return this.providerCatalog()
+      },
+      async setDefaultModel(input) {
+        catalogState.value.default = { ...input }
+        return this.providerCatalog()
+      },
+      async replaceProviderCredentials(input) {
+        setObservations("standaloneCredentialInputs", observations.standaloneCredentialInputs.length, {
+          providerID: input.providerID,
+          hasApiKey: Boolean(input.credentials.apiKey),
+          headerNames: Object.keys(input.credentials.headers),
+        })
+        setObservations("credentialInputs", observations.credentialInputs.length, {
+          providerID: input.providerID,
+          hasApiKey: Boolean(input.credentials.apiKey),
+          headerNames: Object.keys(input.credentials.headers),
+        })
+        await credentialTransition()
+        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
+        if (provider)
+          provider.credentials = {
+            configured: Boolean(input.credentials.apiKey || Object.keys(input.credentials.headers).length),
+            headerNames: Object.keys(input.credentials.headers),
+          }
+        return this.providerCatalog()
+      },
+      async clearProviderCredentials(providerID) {
+        setObservations("credentialClearInputs", observations.credentialClearInputs.length, providerID)
+        await credentialTransition()
+        const provider = catalogState.value.providers.find((item) => item.id === providerID)
+        if (provider) provider.credentials = { configured: false, headerNames: [] }
+        return this.providerCatalog()
       },
       async readGuide() {
         return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
@@ -294,11 +540,20 @@ function createHarness(scenario?: string | null) {
       async restoreStateBackup() {
         return { restartRequired: true as const }
       },
+      async skillPacks() {
+        return []
+      },
+      async setSkillPackEnabled() {
+        return []
+      },
+      async openSkillPackSource() {},
     },
   }
 
   return {
     behavior,
+    credentialPending,
+    providerPending,
     diagnosticPending,
     history,
     observations,
@@ -306,6 +561,28 @@ function createHarness(scenario?: string | null) {
     remote,
     resolveDiagnostic() {
       diagnostic.resolve?.(behavior.diagnosticOutcome === "success" ? DIAGNOSTIC_SUCCESS : DIAGNOSTIC_FAILURE)
+    },
+    resolveCredential() {
+      credential.resolve?.()
+    },
+    resolveProviders() {
+      providerResponses.deferred = false
+      providerResponses.empty = true
+      const response = json({ all: [], connected: [], default: {} })
+      providerResponses.pending.splice(0).forEach((resolve) => resolve(response.clone()))
+      setProviderPending(0)
+    },
+    refreshProviders() {
+      providerResponses.deferred = true
+      setTimeout(() => {
+        const resolve = globalEvent.resolve
+        globalEvent.resolve = undefined
+        if (resolve) {
+          resolve(connectedEvent())
+          return
+        }
+        globalEvent.connected = true
+      }, 1_600)
     },
     sidecar,
     persistedServers() {
@@ -375,6 +652,12 @@ function Observations(props: { harness: Harness }) {
       <output data-testid="requests">{JSON.stringify(props.harness.observations.requests)}</output>
       <output data-testid="storage-writes">{JSON.stringify(props.harness.observations.storageWrites)}</output>
       <output data-testid="credential-inputs">{JSON.stringify(props.harness.observations.credentialInputs)}</output>
+      <output data-testid="provider-update-inputs">
+        {JSON.stringify(props.harness.observations.providerUpdateInputs)}
+      </output>
+      <output data-testid="standalone-credential-inputs">
+        {JSON.stringify(props.harness.observations.standaloneCredentialInputs)}
+      </output>
       <output data-testid="credential-status-inputs">
         {JSON.stringify(props.harness.observations.credentialStatusInputs)}
       </output>
@@ -521,6 +804,15 @@ function CompanyControls(props: { harness: Harness }) {
         <button type="button" onClick={() => (props.harness.behavior.credentialMode = "error")}>
           Credentials error
         </button>
+        <button type="button" onClick={() => (props.harness.behavior.credentialMode = "recovery")}>
+          Credentials recovery failure
+        </button>
+        <button type="button" onClick={() => (props.harness.behavior.credentialMode = "pending")}>
+          Credentials pending
+        </button>
+        <button type="button" disabled={!props.harness.credentialPending()} onClick={props.harness.resolveCredential}>
+          Resolve credentials
+        </button>
         <button type="button" onClick={() => (props.harness.behavior.diagnosticOutcome = "success")}>
           Diagnostic success
         </button>
@@ -635,6 +927,62 @@ function SettingsScenario(props: { harness: Harness }) {
   )
 }
 
+function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
+  return (
+    <DialogTree harness={props.harness}>
+      <Show when={props.v2} fallback={<SettingsProviders />}>
+        <SettingsProvidersV2 />
+      </Show>
+    </DialogTree>
+  )
+}
+
+function ComposerScenario(props: { harness: Harness; enterprise: boolean }) {
+  const Router: Component<BaseRouterProps> = (routerProps) => (
+    <MemoryRouter history={props.harness.history} root={routerProps.root} base={routerProps.base}>
+      {routerProps.children}
+    </MemoryRouter>
+  )
+  const platform = props.enterprise ? props.harness.platform : { ...props.harness.platform, enterprise: undefined }
+  return (
+    <PlatformProvider value={platform}>
+      <AppBaseProviders locale="en">
+        <AppInterface
+          router={Router}
+          defaultServer={ServerConnection.key(props.harness.sidecar)}
+          canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
+          servers={[props.harness.sidecar]}
+          disableHealthCheck
+          serverScoped={<ComposerControls harness={props.harness} />}
+        />
+        <Observations harness={props.harness} />
+      </AppBaseProviders>
+    </PlatformProvider>
+  )
+}
+
+function ComposerControls(props: { harness: Harness }) {
+  const queryClient = useQueryClient()
+  return (
+    <div class="fixed left-2 top-2 z-[10000]">
+      <button
+        type="button"
+        onClick={() => {
+          props.harness.refreshProviders()
+          void queryClient.invalidateQueries({
+            predicate: (query) => query.queryKey[2] === "providers",
+          })
+        }}
+      >
+        Refresh providers
+      </button>
+      <button type="button" disabled={props.harness.providerPending() < 2} onClick={props.harness.resolveProviders}>
+        Resolve providers
+      </button>
+    </div>
+  )
+}
+
 function Fixture() {
   const scenario = new URLSearchParams(window.location.search).get("scenario")
   const harness = createHarness(scenario)
@@ -657,6 +1005,18 @@ function Fixture() {
       </Match>
       <Match when={scenario === "settings"}>
         <SettingsScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "settings-layout"}>
+        <SettingsLayoutScenario harness={harness} />
+      </Match>
+      <Match when={scenario === "settings-v2-layout"}>
+        <SettingsLayoutScenario harness={harness} v2 />
+      </Match>
+      <Match when={scenario === "composer-enterprise-empty"}>
+        <ComposerScenario harness={harness} enterprise />
+      </Match>
+      <Match when={scenario === "composer-ordinary-empty"}>
+        <ComposerScenario harness={harness} enterprise={false} />
       </Match>
       <Match when={scenario === "guide"}>
         <GuideScenario harness={harness} />

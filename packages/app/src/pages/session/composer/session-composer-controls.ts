@@ -47,7 +47,7 @@ export function createPromptInputController(input: {
     model: {
       selection: input.model ?? local.model,
       paid: providers.paid().length > 0,
-      loading: agentsQuery.isLoading || providersQuery.isLoading || globalProvidersQuery.isLoading,
+      loading: agentsQuery.isFetching || providersQuery.isFetching || globalProvidersQuery.isFetching,
     },
     session: {
       id: input.sessionID(),

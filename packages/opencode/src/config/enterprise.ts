@@ -8,26 +8,32 @@ import { ConfigPlugin } from "./plugin"
 const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
 
 export type Policy = ReturnType<typeof settings>
-export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins"> & {
-  models?: { id: string }[]
-}
+export type EnforcementPolicy = Pick<Policy, "enabled" | "defaultsPath" | "allowedOrigins" | "catalog">
 export type DefaultsPolicy = Pick<
   Policy,
-  "enabled" | "defaultsPath" | "allowedOrigins" | "models" | "defaultModelID" | "skillPaths"
+  "enabled" | "defaultsPath" | "allowedOrigins" | "catalog" | "skillPaths"
 > & { guidePath?: string }
 type Info = ConfigV1.Info & { plugin_origins?: ConfigPlugin.Origin[] }
+type EnterpriseProviderCatalog = {
+  schemaVersion: 1
+  default?: { providerID: string; modelID: string }
+  providers: {
+    id: string
+    name: string
+    baseURL: string
+    models: { id: string; name: string }[]
+  }[]
+}
 
 export function settings() {
   const enabled = process.env.OPENCODE_ENTERPRISE_OFFLINE === "1"
-  const models = enabled ? enterpriseModels() : []
+  const catalog = enabled ? enterpriseCatalog() : { schemaVersion: 1 as const, providers: [] }
   return {
     enabled,
     defaultsPath: enabled ? process.env.OPENCODE_ENTERPRISE_DEFAULTS_PATH : undefined,
     guidePath: enabled ? process.env.OPENCODE_ENTERPRISE_GUIDE_PATH : undefined,
-    models,
-    defaultModelID: enabled
-      ? process.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID ?? models[0]?.id
-      : undefined,
+    catalog,
+    defaultModel: catalog.default ? `${catalog.default.providerID}/${catalog.default.modelID}` : undefined,
     skillPaths: enabled ? enterpriseSkillPaths() : [],
     allowedOrigins: new Set(
       (enabled ? process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS : undefined)
@@ -43,11 +49,11 @@ export function upgradeAllowed(policy: Pick<Policy, "enabled"> = settings()) {
   return !policy.enabled
 }
 
-export function publicInfo(info: Info, policy: EnforcementPolicy = settings()): Info {
+export function publicInfo(info: Info, policy: Pick<Policy, "enabled"> = settings()): Info {
   return sanitizeWrite(info, policy)
 }
 
-export function sanitizeWrite(info: Info, policy: EnforcementPolicy = settings()): Info {
+export function sanitizeWrite(info: Info, policy: Pick<Policy, "enabled"> = settings()): Info {
   if (!policy.enabled) return info
   if (!info.provider) return { ...info }
   return {
@@ -69,14 +75,14 @@ export function sanitizeWrite(info: Info, policy: EnforcementPolicy = settings()
 
 export function materializeDefaults(info: Info, policy: DefaultsPolicy = settings()): Info {
   if (!policy.enabled) return info
-  if (!policy.models.length || !policy.defaultModelID || !policy.models.some((model) => model.id === policy.defaultModelID)) {
-    throw new Error("Enterprise provider metadata is incomplete")
-  }
   const guidePath = policy.guidePath
-  const current = info.provider?.["company-llm"]
   return {
     ...info,
-    model: info.model ?? `company-llm/${policy.defaultModelID}`,
+    ...(info.model
+      ? {}
+      : policy.catalog.default
+        ? { model: `${policy.catalog.default.providerID}/${policy.catalog.default.modelID}` }
+        : {}),
     ...(policy.skillPaths.length
       ? {
           skills: {
@@ -90,31 +96,17 @@ export function materializeDefaults(info: Info, policy: DefaultsPolicy = setting
       : {}),
     provider: {
       ...info.provider,
-      "company-llm": {
-        ...current,
-        npm: OPENAI_COMPATIBLE,
-        name: current?.name ?? "Company LLM",
-        ...(current?.options ? { options: current.options } : {}),
-        models: {
-          ...Object.fromEntries(
-            policy.models.map((model) => {
-              const configured = current?.models?.[model.id]
-              return [
-                model.id,
-                {
-                  name: model.name,
-                  ...configured,
-                  provider: {
-                    npm: OPENAI_COMPATIBLE,
-                    api: model.baseURL,
-                    ...configured?.provider,
-                  },
-                },
-              ]
-            }),
-          ),
-        },
-      },
+      ...Object.fromEntries(
+        policy.catalog.providers.map((provider) => [
+          provider.id,
+          {
+            npm: OPENAI_COMPATIBLE,
+            name: provider.name,
+            options: { baseURL: provider.baseURL },
+            models: Object.fromEntries(provider.models.map((model) => [model.id, { name: model.name }])),
+          },
+        ]),
+      ),
     },
   }
 }
@@ -135,49 +127,56 @@ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Inf
   if (!policy.enabled) return info
 
   const provider = Object.fromEntries(
-    Object.entries(info.provider ?? {}).flatMap((entry) => {
-      if (entry[1].npm !== OPENAI_COMPATIBLE) return []
-      const providerURL = typeof entry[1].options?.baseURL === "string" ? entry[1].options.baseURL : undefined
-      if (providerURL && !allowedURL(providerURL, policy.allowedOrigins)) return []
-      const models = entry[1].models ?? {}
-      if (
-        !Object.keys(models).length ||
-        Object.values(models).some((model) => {
-          const url = typeof model.provider?.api === "string" ? model.provider.api : providerURL
-          return !url || !allowedURL(url, policy.allowedOrigins)
-        })
-      ) {
-        return []
-      }
-      const retainedModels =
-        entry[0] === "company-llm" && policy.models
-          ? Object.fromEntries(
-              Object.entries(models).filter(([modelID]) => policy.models?.some((model) => model.id === modelID)),
-            )
-          : models
-      if (!Object.keys(retainedModels).length) return []
+    policy.catalog.providers.map((item) => {
+      const current = info.provider?.[item.id]
       return [
-        [
-          entry[0],
-          {
-            ...entry[1],
-            env: Array<string>(),
-            options: omit(entry[1].options ?? {}, ["key", "apiKey", "headers"]),
-            models: mapValues(retainedModels, (model) => ({
-              ...omit(model, ["headers"]),
-              provider: { ...model.provider, npm: OPENAI_COMPATIBLE },
-              options: omit(model.options ?? {}, ["key", "apiKey", "headers"]),
-            })),
+        item.id,
+        {
+          ...current,
+          api: item.baseURL,
+          npm: OPENAI_COMPATIBLE,
+          name: item.name,
+          env: Array<string>(),
+          options: {
+            ...omit(current?.options ?? {}, ["key", "apiKey", "headers", "baseURL"]),
+            baseURL: item.baseURL,
           },
-        ],
+          models: Object.fromEntries(
+            item.models.map((model) => {
+              const configured = current?.models?.[model.id]
+              return [
+                model.id,
+                {
+                  ...omit(configured ?? {}, ["headers", "name"]),
+                  id: model.id,
+                  name: model.name,
+                  provider: {
+                    ...configured?.provider,
+                    npm: OPENAI_COMPATIBLE,
+                    api: item.baseURL,
+                  },
+                  options: omit(configured?.options ?? {}, ["key", "apiKey", "headers"]),
+                },
+              ]
+            }),
+          ),
+        },
       ] as const
     }),
   )
   const plugin_origins = (info.plugin_origins ?? []).filter((item) =>
     ConfigPlugin.pluginSpecifier(item.spec).startsWith("file://"),
   )
+  const model = policy.catalog.providers.some((item) =>
+    item.models.some((candidate) => info.model === `${item.id}/${candidate.id}`),
+  )
+    ? info.model
+    : policy.catalog.default
+      ? `${policy.catalog.default.providerID}/${policy.catalog.default.modelID}`
+      : undefined
   return {
     ...info,
+    model,
     provider,
     enabled_providers: Object.keys(provider),
     plugin: plugin_origins.map((item) => item.spec),
@@ -187,41 +186,52 @@ export function enforce(info: Info, policy: EnforcementPolicy = settings()): Inf
   }
 }
 
-function enterpriseModels() {
-  if (!process.env.OPENCODE_ENTERPRISE_MODELS) {
-    const id = process.env.OPENCODE_ENTERPRISE_MODEL_ID
-    const name = process.env.OPENCODE_ENTERPRISE_MODEL_NAME
-    const baseURL = process.env.OPENCODE_ENTERPRISE_BASE_URL
-    return id && name && baseURL ? [{ id, name, baseURL }] : []
-  }
+function enterpriseCatalog(): EnterpriseProviderCatalog {
   const value: unknown = (() => {
     try {
-      return JSON.parse(process.env.OPENCODE_ENTERPRISE_MODELS)
+      return JSON.parse(process.env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG ?? "")
     } catch {
-      return []
+      return undefined
     }
   })()
-  if (!Array.isArray(value)) return []
-  return value.flatMap((model) => {
-    if (typeof model !== "object" || model === null || Array.isArray(model)) return []
-    if (!("id" in model) || !("name" in model) || !("baseURL" in model)) return []
-    if (typeof model.id !== "string" || typeof model.name !== "string" || typeof model.baseURL !== "string") return []
-    return [{ id: model.id, name: model.name, baseURL: model.baseURL }]
+  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.providers)) {
+    return { schemaVersion: 1, providers: [] }
+  }
+  const providers = value.providers.flatMap((provider) => {
+    if (!isRecord(provider) || !Array.isArray(provider.models)) return []
+    if (typeof provider.id !== "string" || typeof provider.name !== "string" || typeof provider.baseURL !== "string") {
+      return []
+    }
+    const models = provider.models.flatMap((model) => {
+      if (!isRecord(model) || typeof model.id !== "string" || typeof model.name !== "string") return []
+      return [{ id: model.id, name: model.name }]
+    })
+    if (models.length !== provider.models.length) return []
+    return [{ id: provider.id, name: provider.name, baseURL: provider.baseURL, models }]
   })
+  if (providers.length !== value.providers.length) return { schemaVersion: 1, providers: [] }
+  if (value.default === undefined) return { schemaVersion: 1, providers }
+  if (!isRecord(value.default)) return { schemaVersion: 1, providers: [] }
+  if (typeof value.default.providerID !== "string" || typeof value.default.modelID !== "string") {
+    return { schemaVersion: 1, providers: [] }
+  }
+  const catalogDefault = { providerID: value.default.providerID, modelID: value.default.modelID }
+  if (
+    !providers.some(
+      (provider) =>
+        provider.id === catalogDefault.providerID &&
+        provider.models.some((model) => model.id === catalogDefault.modelID),
+    )
+  ) {
+    return { schemaVersion: 1, providers: [] }
+  }
+  return {
+    schemaVersion: 1,
+    default: { providerID: catalogDefault.providerID, modelID: catalogDefault.modelID },
+    providers,
+  }
 }
 
-function allowedURL(value: string, allowedOrigins: Set<string>) {
-  try {
-    const url = new URL(value)
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      !url.hash &&
-      allowedOrigins.has(url.origin)
-    )
-  } catch {
-    return false
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

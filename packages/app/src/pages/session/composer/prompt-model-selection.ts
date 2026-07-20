@@ -1,16 +1,26 @@
-import { batch, createMemo, startTransition } from "solid-js"
+import { batch, createEffect, createMemo, startTransition } from "solid-js"
 import { useModels } from "@/context/models"
 import type { ModelKey, ModelSelection } from "@/context/local"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "@/context/model-variant"
+import { usePlatform } from "@/context/platform"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
+import {
+  parseModelSelection,
+  promptModelRecoveryNotice,
+  resolveModelCandidate,
+  resolveModelRecovery,
+} from "@/context/model-selection"
+
+export { enterpriseModelState, resolveModelCandidate } from "@/context/model-selection"
 
 export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
   const sdk = useSDK()
   const sync = useSync()
   const models = useModels()
+  const platform = usePlatform()
   const prompt = usePrompt()
   const providers = useProviders(() => sdk().directory)
   const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
@@ -21,25 +31,31 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const configured = () => {
-    const value = sync().data.config.model
-    if (!value) return
-    const [providerID, modelID] = value.split("/")
-    const model = { providerID, modelID }
+    const model = parseModelSelection(sync().data.config.model)
+    if (!model) return
     if (valid(model)) return model
   }
 
   const recent = () => models.recent.list().find(valid)
   const fallback = () => {
     const defaults = providers.default()
-    return providers.connected().flatMap((provider) => {
-      const modelID = defaults[provider.id] ?? Object.values(provider.models)[0]?.id
-      return modelID ? [{ providerID: provider.id, modelID }] : []
-    })[0]
+    return resolveModelCandidate(
+      providers.connected().flatMap((provider) => {
+        const configured = defaults[provider.id]
+        const first = Object.values(provider.models)[0]?.id
+        return [
+          configured ? { providerID: provider.id, modelID: configured } : undefined,
+          first ? { providerID: provider.id, modelID: first } : undefined,
+        ]
+      }),
+      valid,
+    )
   }
 
   const current = () => {
-    const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
-      (item): item is ModelKey => !!item && valid(item),
+    const key = resolveModelCandidate(
+      [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()],
+      valid,
     )
     if (!key) return
     return models.find(key)
@@ -128,6 +144,22 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
       },
     },
   } satisfies ModelSelection
+
+  createEffect(() => {
+    if (!platform.enterprise) return
+    const selected = prompt.model.current()
+    const previous = selected ? { providerID: selected.providerID, modelID: selected.modelID } : undefined
+    const recovery = resolveModelRecovery({
+      ready: models.ready() && sync().status === "complete" && sync().data.provider_ready,
+      previous,
+      candidates: [previous, input.agent()?.model, configured(), recent(), fallback()],
+      valid,
+    })
+    if (!recovery) return
+
+    selection.set(recovery.next)
+    void import("@/utils/toast").then(({ showToast }) => showToast(promptModelRecoveryNotice(recovery)))
+  })
 
   return selection
 }

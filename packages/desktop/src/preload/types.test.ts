@@ -53,23 +53,97 @@ test("maps provider diagnostics to the enterprise readiness IPC channel", async 
   expect(invocations).toEqual([{ channel: "enterprise-readiness", args: [diagnostic] }])
 })
 
-test("maps credential operations with an explicit model ID", async () => {
+test("preserves provider recovery error codes across the IPC boundary", async () => {
+  const enterprise = createEnterpriseAPI(true, () =>
+    Promise.reject(new Error("Error invoking remote method: Error: restart_failed_recovery_failed")),
+  )
+
+  await expect(
+    enterprise.updateProvider({
+      providerID: "provider",
+      name: "Updated",
+      baseURL: "https://updated.example/v1",
+    }),
+  ).rejects.toMatchObject({
+    code: "restart_failed_recovery_failed",
+    message: "restart_failed_recovery_failed",
+  })
+})
+
+test("maps provider management operations to explicit private IPC channels", async () => {
   const invocations: { channel: string; args: unknown[] }[] = []
   const enterprise = createEnterpriseAPI(true, (channel, ...args) => {
     invocations.push({ channel, args })
-    return Promise.resolve({ configured: true, restartRequired: true })
+    return Promise.resolve({ schemaVersion: 1, providers: [] })
   })
+  const provider = {
+    id: "provider",
+    name: "Provider",
+    baseURL: "https://provider.example/v1",
+    models: [{ id: "model", name: "Model" }],
+  }
+  const credentials = { apiKey: "secret", headers: { Authorization: "header-secret" } }
 
-  await enterprise.credentialCatalog()
-  await enterprise.credentialStatus("reasoning")
-  await enterprise.setCredentials({ modelID: "reasoning", apiKey: "secret" })
-  await enterprise.clearCredentials("reasoning")
+  await enterprise.providerCatalog()
+  await enterprise.createProvider({ provider, credentials })
+  await enterprise.updateProvider({
+    providerID: "provider",
+    name: "Updated",
+    baseURL: "https://updated.example/v1",
+    credentials,
+  })
+  await enterprise.updateProvider({
+    providerID: "provider",
+    name: "Cleared",
+    baseURL: "https://cleared.example/v1",
+    clearCredentials: true,
+  })
+  await enterprise.deleteProvider("provider")
+  await enterprise.createModel({ providerID: "provider", model: { id: "second", name: "Second" } })
+  await enterprise.updateModel({ providerID: "provider", modelID: "second", name: "Updated second" })
+  await enterprise.deleteModel({ providerID: "provider", modelID: "second" })
+  await enterprise.setDefaultModel({ providerID: "provider", modelID: "model" })
+  await enterprise.replaceProviderCredentials({ providerID: "provider", credentials })
+  await enterprise.clearProviderCredentials("provider")
 
   expect(invocations).toEqual([
-    { channel: "enterprise-credential-catalog", args: [] },
-    { channel: "enterprise-credential-status", args: ["reasoning"] },
-    { channel: "enterprise-set-credentials", args: [{ modelID: "reasoning", apiKey: "secret" }] },
-    { channel: "enterprise-clear-credentials", args: ["reasoning"] },
+    { channel: "enterprise-provider-catalog", args: [] },
+    { channel: "enterprise-provider-create", args: [{ provider, credentials }] },
+    {
+      channel: "enterprise-provider-update",
+      args: [
+        {
+          providerID: "provider",
+          name: "Updated",
+          baseURL: "https://updated.example/v1",
+          credentials,
+        },
+      ],
+    },
+    {
+      channel: "enterprise-provider-update",
+      args: [
+        {
+          providerID: "provider",
+          name: "Cleared",
+          baseURL: "https://cleared.example/v1",
+          clearCredentials: true,
+        },
+      ],
+    },
+    { channel: "enterprise-provider-delete", args: ["provider"] },
+    {
+      channel: "enterprise-model-create",
+      args: [{ providerID: "provider", model: { id: "second", name: "Second" } }],
+    },
+    {
+      channel: "enterprise-model-update",
+      args: [{ providerID: "provider", modelID: "second", name: "Updated second" }],
+    },
+    { channel: "enterprise-model-delete", args: [{ providerID: "provider", modelID: "second" }] },
+    { channel: "enterprise-model-default", args: [{ providerID: "provider", modelID: "model" }] },
+    { channel: "enterprise-provider-credentials-replace", args: [{ providerID: "provider", credentials }] },
+    { channel: "enterprise-provider-credentials-clear", args: ["provider"] },
   ])
 })
 
@@ -94,10 +168,16 @@ test("maps skill pack reads and updates to private enterprise IPC channels", asy
 test("maps the preload enterprise API to the app platform contract", () => {
   const enterprise = {
     enabled: true,
-    credentialCatalog: async () => ({ defaultModelID: "code", models: [] }),
-    credentialStatus: async () => ({ configured: true }),
-    setCredentials: async () => ({ restartRequired: false as const }),
-    clearCredentials: async () => ({ restartRequired: false as const }),
+    providerCatalog: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    createProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
+    clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
     readGuide: async () => ({ version: "2026.07", markdown: "# Company guide" }),
     readiness: async () => ({ schemaVersion: 1 as const, generatedAt: "now", overall: "pass" as const, checks: [] }),
     stateBackups: async () => [],
@@ -110,10 +190,16 @@ test("maps the preload enterprise API to the app platform contract", () => {
   const platform = mapEnterpriseAPI(enterprise)
 
   expect(platform).toEqual({
-    credentialCatalog: enterprise.credentialCatalog,
-    credentialStatus: enterprise.credentialStatus,
-    setCredentials: enterprise.setCredentials,
-    clearCredentials: enterprise.clearCredentials,
+    providerCatalog: enterprise.providerCatalog,
+    createProvider: enterprise.createProvider,
+    updateProvider: enterprise.updateProvider,
+    deleteProvider: enterprise.deleteProvider,
+    createModel: enterprise.createModel,
+    updateModel: enterprise.updateModel,
+    deleteModel: enterprise.deleteModel,
+    setDefaultModel: enterprise.setDefaultModel,
+    replaceProviderCredentials: enterprise.replaceProviderCredentials,
+    clearProviderCredentials: enterprise.clearProviderCredentials,
     readGuide: enterprise.readGuide,
     readiness: enterprise.readiness,
     stateBackups: enterprise.stateBackups,

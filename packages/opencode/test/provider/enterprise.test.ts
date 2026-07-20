@@ -4,45 +4,39 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { generateText } from "ai"
 
-afterEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 2, models: {} }))
+afterEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 3, providers: {} }))
 
-test("applies enterprise credentials only to the company provider", () => {
+test("applies provider credentials to every model without crossing provider boundaries", () => {
   ProviderEnterprise.setCredentials({
-    schemaVersion: 2,
-    models: {
-      code: {
-        apiKey: "secret-key",
-        headers: { Authorization: "secret-authorization", "x-company-token": "secret-header" },
+    schemaVersion: 3,
+    providers: {
+      internal: {
+        apiKey: "provider-key",
+        headers: { Authorization: "provider-authorization", "x-company-token": "provider-header" },
       },
-      reasoning: { apiKey: "reasoning-key", headers: {} },
     },
   })
-  expect(
-    ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "code", {
-      baseURL: "https://llm.corp.example/v1",
-      headers: {
-        authorization: "project-authorization",
-        "X-COMPANY-Token": "project-header",
-        "X-Project": "preserved",
-      },
-    }),
-  ).toEqual({
-    baseURL: "https://llm.corp.example/v1",
-    fetch: expect.any(Function),
-    apiKey: "secret-key",
+
+  const current = {
     headers: {
-      Authorization: "secret-authorization",
-      "x-company-token": "secret-header",
+      authorization: "project-authorization",
+      "X-COMPANY-Token": "project-header",
+      "X-Project": "preserved",
+    },
+  }
+  expect(ProviderEnterprise.options(ProviderV2.ID.make("internal"), "code", current)).toMatchObject({
+    apiKey: "provider-key",
+    headers: {
+      Authorization: "provider-authorization",
+      "x-company-token": "provider-header",
       "X-Project": "preserved",
     },
   })
-  expect(ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "reasoning", {})).toMatchObject({
-    apiKey: "reasoning-key",
+  expect(ProviderEnterprise.options(ProviderV2.ID.make("internal"), "reasoning", {})).toMatchObject({
+    apiKey: "provider-key",
+    headers: { Authorization: "provider-authorization", "x-company-token": "provider-header" },
   })
-  expect(ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "missing", {})).toEqual({
-    fetch: expect.any(Function),
-  })
-  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "code", {})).toEqual({})
+  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "code", {})).toEqual({ fetch: expect.any(Function) })
 })
 
 test("credential headers replace mixed-case project headers on the OpenAI-compatible request path", async () => {
@@ -63,9 +57,9 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
     },
   })
   ProviderEnterprise.setCredentials({
-    schemaVersion: 2,
-    models: {
-      "company-code": {
+    schemaVersion: 3,
+    providers: {
+      "company-llm": {
         headers: {
           Authorization: "Bearer credential-secret",
           "x-company-token": "credential-custom-secret",
@@ -96,7 +90,7 @@ test("credential headers replace mixed-case project headers on the OpenAI-compat
   server.stop(true)
 })
 
-test("routes two models to distinct URLs and credentials without cross-model fallback", async () => {
+test("routes two providers to distinct URLs and credentials", async () => {
   const codeRequests: Headers[] = []
   const reasoningRequests: Headers[] = []
   const serve = (requests: Headers[]) =>
@@ -118,16 +112,16 @@ test("routes two models to distinct URLs and credentials without cross-model fal
   using codeServer = serve(codeRequests)
   using reasoningServer = serve(reasoningRequests)
   ProviderEnterprise.setCredentials({
-    schemaVersion: 2,
-    models: {
-      code: { apiKey: "code-key", headers: { "x-company-token": "code-header" } },
-      reasoning: { apiKey: "reasoning-key", headers: { "x-company-token": "reasoning-header" } },
+    schemaVersion: 3,
+    providers: {
+      "code-provider": { apiKey: "code-key", headers: { "x-company-token": "code-header" } },
+      "reasoning-provider": { apiKey: "reasoning-key", headers: { "x-company-token": "reasoning-header" } },
     },
   })
-  const model = (modelID: string, baseURL: string) => {
-    const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), modelID, {})
+  const model = (providerID: string, modelID: string, baseURL: string) => {
+    const options = ProviderEnterprise.options(ProviderV2.ID.make(providerID), modelID, {})
     return createOpenAICompatible({
-      name: "company-llm",
+      name: providerID,
       baseURL,
       apiKey: options.apiKey as string,
       headers: options.headers as Record<string, string>,
@@ -136,8 +130,8 @@ test("routes two models to distinct URLs and credentials without cross-model fal
   }
 
   await Promise.all([
-    generateText({ model: model("code", `${codeServer.url}v1`), prompt: "hello" }),
-    generateText({ model: model("reasoning", `${reasoningServer.url}v1`), prompt: "hello" }),
+    generateText({ model: model("code-provider", "code", `${codeServer.url}v1`), prompt: "hello" }),
+    generateText({ model: model("reasoning-provider", "reasoning", `${reasoningServer.url}v1`), prompt: "hello" }),
   ])
 
   expect(codeRequests).toHaveLength(1)
@@ -150,7 +144,7 @@ test("routes two models to distinct URLs and credentials without cross-model fal
   reasoningServer.stop(true)
 })
 
-test("rejects Company LLM redirects without contacting the redirect target", async () => {
+test("rejects enterprise provider redirects without contacting the redirect target", async () => {
   let redirected = 0
   using server = Bun.serve({
     hostname: "127.0.0.1",
@@ -166,17 +160,19 @@ test("rejects Company LLM redirects without contacting the redirect target", asy
   const options = ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "company-code", {})
 
   await expect((options.fetch as typeof fetch)(`${server.url}v1`)).rejects.toThrow(
-    "Company LLM redirects are disabled",
+    "Enterprise provider redirects are disabled",
   )
   expect(redirected).toBe(0)
-  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "company-code", {})).toEqual({})
+  expect(ProviderEnterprise.options(ProviderV2.ID.make("other"), "company-code", {})).toEqual({
+    fetch: expect.any(Function),
+  })
   server.stop(true)
 })
 
 test("invalid enterprise credentials are discarded without exposing prior values", () => {
   ProviderEnterprise.setCredentials({
-    schemaVersion: 2,
-    models: { code: { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
+    schemaVersion: 3,
+    providers: { "company-llm": { apiKey: "secret-key", headers: { Authorization: "secret-header" } } },
   })
   ProviderEnterprise.setCredentials({ apiKey: 42, headers: { Authorization: false } })
 
@@ -184,5 +180,5 @@ test("invalid enterprise credentials are discarded without exposing prior values
     ProviderEnterprise.options(ProviderV2.ID.make("company-llm"), "code", {
       baseURL: "https://llm.corp.example/v1",
     }),
-  ).toEqual({ baseURL: "https://llm.corp.example/v1", fetch: expect.any(Function) })
+  ).toEqual({ baseURL: "https://llm.corp.example/v1" })
 })

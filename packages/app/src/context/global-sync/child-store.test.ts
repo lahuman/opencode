@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test"
-import { createRoot, getOwner, type Owner } from "solid-js"
+import { createRoot, createSignal, getOwner, type Owner } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import type { State } from "./types"
@@ -8,6 +8,7 @@ import { ServerScope } from "@/utils/server-scope"
 
 let createChildStoreManager: typeof import("./child-store").createChildStoreManager
 const querySingles: Array<() => { queryKey?: unknown[]; enabled?: boolean }> = []
+let providerFetching = false
 const persist: typeof import("@/utils/persist").persisted = (_target, store) => [
   store[0],
   store[1],
@@ -65,6 +66,9 @@ beforeAll(async () => {
           if (options().queryKey?.[1] === "providers") return provider
           return undefined
         },
+        get isFetching() {
+          return options().queryKey?.[1] === "providers" && providerFetching
+        },
       }
     },
   }))
@@ -92,7 +96,7 @@ describe("createChildStoreManager", () => {
       onDispose() {},
       translate: (key) => key,
       queryOptions: queryOptionsApi,
-      global: { provider },
+      global: { provider: () => provider },
     })
 
     Array.from({ length: 30 }, (_, index) => `/pinned-${index}`).forEach((directory) => {
@@ -125,7 +129,7 @@ describe("createChildStoreManager", () => {
         onDispose() {},
         translate: (key) => key,
         queryOptions: queryOptionsApi,
-        global: { provider },
+        global: { provider: () => provider },
       })
     })
 
@@ -157,7 +161,7 @@ describe("createChildStoreManager", () => {
         onDispose() {},
         translate: (key) => key,
         queryOptions: queryOptionsApi,
-        global: { provider },
+        global: { provider: () => provider },
       })
     })
 
@@ -192,7 +196,7 @@ describe("createChildStoreManager", () => {
         onDispose() {},
         translate: (key) => key,
         queryOptions: queryOptionsApi,
-        global: { provider },
+        global: { provider: () => provider },
       })
     })
 
@@ -241,7 +245,7 @@ describe("createChildStoreManager", () => {
         onDispose() {},
         translate: (key) => key,
         queryOptions: queryOptionsApi,
-        global: { provider },
+        global: { provider: () => provider },
       })
     })
 
@@ -269,6 +273,76 @@ describe("createChildStoreManager", () => {
 
       manager.child("/project", { bootstrap: false })
       expect(queries[0]?.().enabled).toBe(true)
+    } finally {
+      dispose()
+    }
+  })
+
+  test("marks cached providers unready while their query refetches", () => {
+    let manager: ReturnType<typeof createChildStoreManager> | undefined
+    const dispose = createOwner((owner) => {
+      manager = createChildStoreManager({
+        owner,
+        scope: ServerScope.local,
+        persist,
+        isBooting: () => false,
+        isLoadingSessions: () => false,
+        onBootstrap() {},
+        onMcp() {},
+        onDispose() {},
+        translate: (key) => key,
+        queryOptions: queryOptionsApi,
+        global: { provider: () => provider },
+      })
+    })
+
+    try {
+      if (!manager) throw new Error("manager required")
+      const [store] = manager.child("/project")
+      expect(store.provider_ready).toBe(true)
+
+      providerFetching = true
+      expect(store.provider_ready).toBe(false)
+
+      providerFetching = false
+      expect(store.provider_ready).toBe(true)
+    } finally {
+      providerFetching = false
+      dispose()
+    }
+  })
+
+  test("stops falling back to a stale global provider after the global catalog changes", () => {
+    const full = {
+      all: new Map([["company", { id: "company", models: {} }]]),
+      connected: ["company"],
+      default: {},
+    } as unknown as NormalizedProviderListResponse
+    const [globalProvider, setGlobalProvider] = createSignal(full)
+    let manager: ReturnType<typeof createChildStoreManager> | undefined
+    const dispose = createOwner((owner) => {
+      manager = createChildStoreManager({
+        owner,
+        scope: ServerScope.local,
+        persist,
+        isBooting: () => false,
+        isLoadingSessions: () => false,
+        onBootstrap() {},
+        onMcp() {},
+        onDispose() {},
+        translate: (key) => key,
+        queryOptions: queryOptionsApi,
+        global: { provider: globalProvider },
+      })
+    })
+
+    try {
+      if (!manager) throw new Error("manager required")
+      const [store] = manager.child("/project")
+      expect(store.provider).toBe(full)
+
+      setGlobalProvider(provider)
+      expect(store.provider).toBe(provider)
     } finally {
       dispose()
     }

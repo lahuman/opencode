@@ -7,7 +7,14 @@ import { forwardInitializationFailure } from "./initialization"
 import { desktopRuntimeFeatures } from "./runtime-features"
 
 async function runMain(
-  mode: "identity" | "enterprise" | "enterprise-credential-restart" | "ordinary-packaged" | "ordinary-unpackaged",
+  mode:
+    | "identity"
+    | "enterprise"
+    | "enterprise-provider-restart"
+    | "enterprise-credentials-corrupt"
+    | "enterprise-credentials-unavailable"
+    | "ordinary-packaged"
+    | "ordinary-unpackaged",
   env?: Record<string, string>,
 ) {
   const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/main-index-entrypoint.ts`, mode], {
@@ -78,15 +85,97 @@ test("real enterprise main entrypoint applies isolated identity without claiming
   expect(stdout).not.toContain("user:secret")
 })
 
-test("enterprise credential save restarts only the sidecar", async () => {
-  const { result } = await runMain("enterprise-credential-restart")
+test("enterprise provider mutation restarts the sidecar with the complete current state", async () => {
+  const { result, stdout } = await runMain("enterprise-provider-restart")
 
   expect(result).toEqual({
-    mutation: { restartRequired: false },
+    mutation: {
+      schemaVersion: 1,
+      default: { providerID: "company-llm", modelID: "company-code" },
+      providers: [
+        {
+          id: "company-llm",
+          name: "Company Code",
+          baseURL: "https://llm.corp.example/v1",
+          models: [{ id: "company-code", name: "Company Code" }],
+          credentials: { configured: true, headerNames: ["Authorization"] },
+        },
+      ],
+    },
     sidecarStarts: 2,
     sidecarStops: 1,
     relaunches: 0,
+    sidecarStates: [
+      {
+        default: { providerID: "company-llm", modelID: "company-code" },
+        providers: ["company-llm"],
+        credentialProviders: [],
+      },
+      {
+        default: { providerID: "company-llm", modelID: "company-code" },
+        providers: ["company-llm"],
+        credentialProviders: ["company-llm"],
+      },
+    ],
   })
+  expect(stdout).not.toContain("entrypoint-secret")
+  expect(stdout).not.toContain("header-secret")
+})
+
+test("unhealthy enterprise credentials preserve startup, redaction, and mutation isolation", async () => {
+  for (const input of [
+    {
+      mode: "enterprise-credentials-corrupt" as const,
+      errorCode: "credential_decryption_failed",
+      providerID: "existing",
+      providerName: "Existing Provider",
+    },
+    {
+      mode: "enterprise-credentials-unavailable" as const,
+      errorCode: "credential_encryption_unavailable",
+      providerID: "company-llm",
+      providerName: "Company Code",
+    },
+  ]) {
+    const { result, stdout } = await runMain(input.mode)
+
+    expect(result.providerCatalog).toEqual({
+      schemaVersion: 1,
+      default: { providerID: input.providerID, modelID: "company-code" },
+      providers: [
+        {
+          id: input.providerID,
+          name: input.providerName,
+          baseURL:
+            input.mode === "enterprise-credentials-corrupt"
+              ? "https://existing.example/v1"
+              : "https://llm.corp.example/v1",
+          models: [
+            {
+              id: "company-code",
+              name: input.mode === "enterprise-credentials-corrupt" ? "Existing Code" : "Company Code",
+            },
+          ],
+          credentials: { configured: false, headerNames: [], errorCode: input.errorCode },
+        },
+      ],
+    })
+    expect(result.mutationError).toBe(input.errorCode)
+    expect(result.sidecarStarts).toBe(1)
+    expect(result.sidecarStates).toEqual([
+      {
+        default: { providerID: input.providerID, modelID: "company-code" },
+        providers: [input.providerID],
+        credentialProviders: [],
+      },
+    ])
+    expect(result.credentialUnchanged).toBe(true)
+    expect(result.credentialTimestampUnchanged).toBe(true)
+    expect(stdout).not.toContain("unreadable-encrypted-main-index-secret")
+    expect(stdout).not.toContain("unavailable-main-index-secret")
+    expect(stdout).not.toContain("replacement-main-index-secret")
+    expect(stdout).not.toContain("secret-header")
+  }
 })
 
 test("ordinary packaged and unpackaged main entrypoints preserve their identities and protocol", async () => {
