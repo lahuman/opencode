@@ -407,6 +407,7 @@ function view(state: State, health: CredentialHealth): EnterpriseProviderCatalog
   const errorCode = credentialHealthError(health)
   return {
     ...state.catalog,
+    default: state.catalog.default,
     providers: state.catalog.providers.map((provider) => {
       const credentials = errorCode ? undefined : state.credentials.providers[provider.id]
       return {

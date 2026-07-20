@@ -21,7 +21,76 @@ function enabledProfile() {
   })
 }
 
+const emptyCatalog = {
+  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE_MODELS: "[]",
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
+}
+
+const nonEmptyCatalog = {
+  ...emptyCatalog,
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+  ]),
+}
+
 describe("enterprise profile", () => {
+  test("accepts an explicit empty Enterprise catalog", () => {
+    const profile = parseEnterpriseProfile({
+      ...emptyCatalog,
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+    })
+
+    expect(profile).toMatchObject({ enabled: true, models: [], defaultModelID: "", allowedOrigins: [] })
+    expect(enterpriseEnvironment(profile, { defaults: "C:/defaults", guide: "C:/guide" })).toMatchObject({
+      OPENCODE_ENTERPRISE_MODELS: "[]",
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+    })
+  })
+
+  test("rejects mixed empty-catalog default states", () => {
+    expect(() =>
+      parseEnterpriseProfile({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" }),
+    ).toThrow(
+      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
+    )
+    expect(() => parseEnterpriseProfile({ ...nonEmptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
+      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
+    )
+  })
+
+  test.each([
+    ["empty catalog with omitted default", emptyCatalog, undefined, ""],
+    ["empty catalog with empty default", emptyCatalog, "", ""],
+    ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
+    ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
+  ])("default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
+    const profile = parseEnterpriseProfile(
+      defaultModelID === undefined
+        ? catalog
+        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
+    )
+
+    expect(profile).toMatchObject({ enabled: true, defaultModelID: expectedDefaultModelID })
+  })
+
+  test.each([
+    ["empty catalog with nonblank default", emptyCatalog, "ghost"],
+    ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
+    ["non-empty catalog with empty default", nonEmptyCatalog, ""],
+    ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
+  ])("default matrix rejects %s", (_name, catalog, defaultModelID) => {
+    expect(() =>
+      parseEnterpriseProfile(
+        defaultModelID === undefined
+          ? catalog
+          : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
+      ),
+    ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+  })
+
   test("parses multiple models and derives the allowed origins", () => {
     const profile = parseEnterpriseProfile({
       OPENCODE_ENTERPRISE: "1",
@@ -60,7 +129,6 @@ describe("enterprise profile", () => {
     }
 
     for (const models of [
-      [],
       [{ id: "code", name: "Company Code", baseURL: "file:///private" }],
       [{ id: "code", name: "Company Code", baseURL: "https://user:secret@code.corp.example/v1" }],
       [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1?secret=value" }],

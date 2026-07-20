@@ -1,0 +1,433 @@
+# Working-tree review package
+
+## Base
+077115271eacd420ca02286ebb404fd64a9cf9b8
+
+## Status
+ M packages/desktop/electron.vite.config.test.ts
+ M packages/desktop/scripts/enterprise-build.test.ts
+ M packages/desktop/scripts/enterprise-build.ts
+ M packages/desktop/src/enterprise-profile.ts
+ M packages/desktop/src/enterprise.test.ts
+
+## Tracked diff stat
+ packages/desktop/electron.vite.config.test.ts     | 27 ++++++++-
+ packages/desktop/scripts/enterprise-build.test.ts | 66 ++++++++++++++++++++-
+ packages/desktop/scripts/enterprise-build.ts      | 13 +++--
+ packages/desktop/src/enterprise-profile.ts        | 13 +++--
+ packages/desktop/src/enterprise.test.ts           | 70 ++++++++++++++++++++++-
+ 5 files changed, 177 insertions(+), 12 deletions(-)
+
+## Tracked diff
+diff --git a/packages/desktop/electron.vite.config.test.ts b/packages/desktop/electron.vite.config.test.ts
+index 5065dbda6..52711221a 100644
+--- a/packages/desktop/electron.vite.config.test.ts
++++ b/packages/desktop/electron.vite.config.test.ts
+@@ -5,21 +5,21 @@ const enabledProfile = {
+   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+     { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+     { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+   ]),
+   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+ }
+ 
+-function evaluateConfig(env: Record<string, string> = {}) {
++function evaluateConfig(env: Record<string, string | undefined> = {}) {
+   const result = Bun.spawnSync(
+     [
+       "node",
+       "--input-type=module",
+       "--eval",
+       `
+         import { loadConfigFromFile } from "electron-vite"
+         const loaded = await loadConfigFromFile(
+           { command: "build", mode: "production" },
+           "./electron.vite.config.ts",
+@@ -71,20 +71,45 @@ describe("enterprise Vite configuration", () => {
+         },
+         renderer: {
+           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
+         },
+       },
+     })
+   })
+ 
++  test.each([
++    ["blank", ""],
++    ["omitted", undefined],
++  ])("defines an explicit empty Enterprise catalog with %s default for main and renderer", (_name, defaultModelID) => {
++    expect(
++      evaluateConfig({
++        ...enabledProfile,
++        OPENCODE_ENTERPRISE_MODELS: "[]",
++        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID,
++      }),
++    ).toMatchObject({
++      exitCode: 0,
++      defines: {
++        main: {
++          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
++          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
++        },
++        renderer: {
++          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
++          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
++        },
++      },
++    })
++  })
++
+   test("rejects a credentialed model URL before producing defines", () => {
+     const result = evaluateConfig({
+       ...enabledProfile,
+       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+         { id: "company-code", name: "Company Code", baseURL: "https://user:secret@llm.corp.example/v1" },
+       ]),
+     })
+ 
+     expect(result.exitCode).not.toBe(0)
+     expect(result.stderr).toContain("OPENCODE_ENTERPRISE_MODELS model URLs must not contain credentials")
+diff --git a/packages/desktop/scripts/enterprise-build.test.ts b/packages/desktop/scripts/enterprise-build.test.ts
+index fb18af93f..82a306df0 100644
+--- a/packages/desktop/scripts/enterprise-build.test.ts
++++ b/packages/desktop/scripts/enterprise-build.test.ts
+@@ -6,33 +6,95 @@ const valid = {
+   OPENCODE_ENTERPRISE: "1",
+   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+ }
+ 
+-const multiModel = {
++const nonEmptyCatalog = {
+   OPENCODE_ENTERPRISE: "1",
+   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+     { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+     { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+   ]),
+-  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+ }
+ 
++const multiModel = {
++  ...nonEmptyCatalog,
++  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
++}
++
++const emptyCatalog = {
++  OPENCODE_ENTERPRISE: "1",
++  OPENCODE_ENTERPRISE_MODELS: "[]",
++  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++}
++
++test("accepts an empty Enterprise catalog", () => {
++  expect(validateEnterpriseBuild(emptyCatalog)).toEqual({
++    models: [],
++    defaultModelID: "",
++    defaultsVersion: "dev-1",
++    guideVersion: "pilot-1",
++    catalogVersion: "dev-1",
++    allowedOrigins: [],
++  })
++})
++
++test("rejects mixed empty-catalog package default states", () => {
++  expect(() => validateEnterpriseBuild({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++  expect(() => validateEnterpriseBuild({ ...multiModel, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++})
++
++test.each([
++  ["empty catalog with omitted default", emptyCatalog, undefined, ""],
++  ["empty catalog with empty default", emptyCatalog, "", ""],
++  ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
++  ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
++])("package default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
++  const metadata = validateEnterpriseBuild(
++    defaultModelID === undefined
++      ? catalog
++      : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++  )
++
++  expect(metadata.defaultModelID).toBe(expectedDefaultModelID)
++})
++
++test.each([
++  ["empty catalog with nonblank default", emptyCatalog, "ghost"],
++  ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
++  ["non-empty catalog with empty default", nonEmptyCatalog, ""],
++  ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
++])("package default matrix rejects %s", (_name, catalog, defaultModelID) => {
++  expect(() =>
++    validateEnterpriseBuild(
++      defaultModelID === undefined
++        ? catalog
++        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++    ),
++  ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++})
++
+ test("validates normalized multi-model build metadata", () => {
+   expect(validateEnterpriseBuild(multiModel)).toEqual({
+     models: [
+       { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+       { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+     ],
+     defaultModelID: "code",
+     defaultsVersion: "pilot-1",
+     guideVersion: "kernexa-1",
+     catalogVersion: "catalog-1",
+diff --git a/packages/desktop/scripts/enterprise-build.ts b/packages/desktop/scripts/enterprise-build.ts
+index 32da36c9b..6784cf459 100644
+--- a/packages/desktop/scripts/enterprise-build.ts
++++ b/packages/desktop/scripts/enterprise-build.ts
+@@ -18,23 +18,28 @@ export function enterprisePackageEnvironment(env: Env) {
+       return !upper.startsWith("CSC_") && !upper.startsWith("WIN_CSC_")
+     }),
+   )
+ }
+ 
+ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
+   if (env.OPENCODE_ENTERPRISE !== "1") throw new Error("OPENCODE_ENTERPRISE must be 1")
+ 
+   const models = parseModels(env)
+   const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
+-    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++    ? models.length
++      ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++      : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
+     : models[0].id
+-  if (!models.some((model) => model.id === defaultModelID)) {
++  if (
++    (models.length === 0 && defaultModelID) ||
++    (models.length > 0 && !models.some((model) => model.id === defaultModelID))
++  ) {
+     throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
+   }
+   const allowedOrigins = Array.from(
+     new Set(
+       [
+         ...models.map((model) => new URL(model.baseURL).origin),
+         ...(env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "")
+           .split(",")
+           .map((value) => value.trim())
+           .filter(Boolean)
+@@ -64,22 +69,22 @@ function parseModels(env: Env) {
+     ]
+   }
+ 
+   const value: unknown = (() => {
+     try {
+       return JSON.parse(env.OPENCODE_ENTERPRISE_MODELS)
+     } catch {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+     }
+   })()
+-  if (!Array.isArray(value) || value.length === 0) {
+-    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
++  if (!Array.isArray(value)) {
++    throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+   }
+   const models = value.map((item) => {
+     if (!isRecord(item) || !hasExactKeys(item, ["baseURL", "id", "name"])) {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must contain only id, name, and baseURL")
+     }
+     const id = typeof item.id === "string" ? item.id.trim() : ""
+     const name = typeof item.name === "string" ? item.name.trim() : ""
+     const baseURL = typeof item.baseURL === "string" ? item.baseURL.trim() : ""
+     if (!id || !name || !baseURL) throw new Error("OPENCODE_ENTERPRISE_MODELS contains incomplete model metadata")
+     return { id, name, baseURL: parseModelURL(baseURL, "OPENCODE_ENTERPRISE_MODELS") }
+diff --git a/packages/desktop/src/enterprise-profile.ts b/packages/desktop/src/enterprise-profile.ts
+index e2e5eb660..d24f4a01e 100644
+--- a/packages/desktop/src/enterprise-profile.ts
++++ b/packages/desktop/src/enterprise-profile.ts
+@@ -16,23 +16,28 @@ export type EnterpriseProfile =
+       allowedOrigins: string[]
+     }
+ 
+ type BuildEnv = Record<string, string | undefined>
+ 
+ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
+   if (env.OPENCODE_ENTERPRISE !== "1") return { enabled: false }
+ 
+   const models = parseModels(env)
+   const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
+-    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++    ? models.length
++      ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++      : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
+     : models[0].id
+-  if (!models.some((model) => model.id === defaultModelID)) {
++  if (
++    (models.length === 0 && defaultModelID) ||
++    (models.length > 0 && !models.some((model) => model.id === defaultModelID))
++  ) {
+     throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
+   }
+   const defaultsVersion = requireValue(env, "OPENCODE_ENTERPRISE_DEFAULTS_VERSION")
+   const guideVersion = requireValue(env, "OPENCODE_ENTERPRISE_GUIDE_VERSION")
+   const catalogVersion = env.OPENCODE_ENTERPRISE_CATALOG_VERSION?.trim() || defaultsVersion
+   const allowedOrigins = Array.from(
+     new Set([
+       ...models.map((model) => new URL(model.baseURL).origin),
+       ...(env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "")
+         .split(",")
+@@ -97,22 +102,22 @@ function parseModels(env: BuildEnv) {
+     ]
+   }
+ 
+   const value: unknown = (() => {
+     try {
+       return JSON.parse(env.OPENCODE_ENTERPRISE_MODELS)
+     } catch {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+     }
+   })()
+-  if (!Array.isArray(value) || value.length === 0) {
+-    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
++  if (!Array.isArray(value)) {
++    throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+   }
+   const models = value.map((model) => parseModel(model, "OPENCODE_ENTERPRISE_MODELS"))
+   if (new Set(models.map((model) => model.id)).size !== models.length) {
+     throw new Error("OPENCODE_ENTERPRISE_MODELS must contain unique model IDs")
+   }
+   return models
+ }
+ 
+ function parseModel(value: unknown, key: string): EnterpriseModel {
+   if (!isRecord(value) || !hasExactKeys(value, ["baseURL", "id", "name"])) {
+diff --git a/packages/desktop/src/enterprise.test.ts b/packages/desktop/src/enterprise.test.ts
+index 036f29381..19c936996 100644
+--- a/packages/desktop/src/enterprise.test.ts
++++ b/packages/desktop/src/enterprise.test.ts
+@@ -14,21 +14,90 @@ function enabledProfile() {
+     OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+     OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+     OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+     OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+     OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+   })
+ }
+ 
++const emptyCatalog = {
++  OPENCODE_ENTERPRISE: "1",
++  OPENCODE_ENTERPRISE_MODELS: "[]",
++  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++}
++
++const nonEmptyCatalog = {
++  ...emptyCatalog,
++  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
++    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
++  ]),
++}
++
+ describe("enterprise profile", () => {
++  test("accepts an explicit empty Enterprise catalog", () => {
++    const profile = parseEnterpriseProfile({
++      ...emptyCatalog,
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++    })
++
++    expect(profile).toMatchObject({ enabled: true, models: [], defaultModelID: "", allowedOrigins: [] })
++    expect(enterpriseEnvironment(profile, { defaults: "C:/defaults", guide: "C:/guide" })).toMatchObject({
++      OPENCODE_ENTERPRISE_MODELS: "[]",
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++    })
++  })
++
++  test("rejects mixed empty-catalog default states", () => {
++    expect(() =>
++      parseEnterpriseProfile({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" }),
++    ).toThrow(
++      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++    )
++    expect(() => parseEnterpriseProfile({ ...nonEmptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
++      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++    )
++  })
++
++  test.each([
++    ["empty catalog with omitted default", emptyCatalog, undefined, ""],
++    ["empty catalog with empty default", emptyCatalog, "", ""],
++    ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
++    ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
++  ])("default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
++    const profile = parseEnterpriseProfile(
++      defaultModelID === undefined
++        ? catalog
++        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++    )
++
++    expect(profile).toMatchObject({ enabled: true, defaultModelID: expectedDefaultModelID })
++  })
++
++  test.each([
++    ["empty catalog with nonblank default", emptyCatalog, "ghost"],
++    ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
++    ["non-empty catalog with empty default", nonEmptyCatalog, ""],
++    ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
++  ])("default matrix rejects %s", (_name, catalog, defaultModelID) => {
++    expect(() =>
++      parseEnterpriseProfile(
++        defaultModelID === undefined
++          ? catalog
++          : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++      ),
++    ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++  })
++
+   test("parses multiple models and derives the allowed origins", () => {
+     const profile = parseEnterpriseProfile({
+       OPENCODE_ENTERPRISE: "1",
+       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+         { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+         { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+       ]),
+       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+@@ -53,21 +122,20 @@ describe("enterprise profile", () => {
+   test("rejects invalid multi-model catalogs", () => {
+     const env = {
+       OPENCODE_ENTERPRISE: "1",
+       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+     }
+ 
+     for (const models of [
+-      [],
+       [{ id: "code", name: "Company Code", baseURL: "file:///private" }],
+       [{ id: "code", name: "Company Code", baseURL: "https://user:secret@code.corp.example/v1" }],
+       [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1?secret=value" }],
+       [
+         { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+         { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+       ],
+       [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", token: "secret" }],
+     ]) {
+       expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_MODELS: JSON.stringify(models) })).toThrow(

@@ -1,0 +1,293 @@
+# Working-tree review package
+
+## Base
+077115271eacd420ca02286ebb404fd64a9cf9b8
+
+## Status
+ M packages/desktop/scripts/enterprise-manifest.test.ts
+ M packages/desktop/src/main/enterprise-preflight.test.ts
+ M packages/desktop/src/main/enterprise-preflight.ts
+
+## Tracked diff stat
+ .../desktop/scripts/enterprise-manifest.test.ts    | 26 ++++++++++
+ .../desktop/src/main/enterprise-preflight.test.ts  | 57 ++++++++++++++++++++++
+ packages/desktop/src/main/enterprise-preflight.ts  | 18 ++++---
+ 3 files changed, 94 insertions(+), 7 deletions(-)
+
+## Tracked diff
+diff --git a/packages/desktop/scripts/enterprise-manifest.test.ts b/packages/desktop/scripts/enterprise-manifest.test.ts
+index 5653e43a2..8ef9ab540 100644
+--- a/packages/desktop/scripts/enterprise-manifest.test.ts
++++ b/packages/desktop/scripts/enterprise-manifest.test.ts
+@@ -41,20 +41,46 @@ test("generates the packaged manifest from validated enterprise build inputs", a
+     },
+   })
+ 
+   expect(manifest.catalogVersion).toBe("catalog-4")
+   expect(manifest.allowedOrigins).toEqual(["https://fast.corp.example", "https://llm.corp.example"])
+   expect(await Bun.file(fixture.output).json()).toEqual(manifest)
+   expect(await Bun.file(fixture.output).text()).not.toContain("secret-marker")
+   expect(await Bun.file(fixture.output).text()).not.toContain("/v1")
+ })
+ 
++test("generates an empty Enterprise model manifest", async () => {
++  await using fixture = await manifestFixture()
++  const manifest = await generateEnterpriseManifest({
++    appVersion: "1.2.3",
++    output: fixture.output,
++    resources: fixture.resources,
++    env: {
++      OPENCODE_ENTERPRISE: "1",
++      OPENCODE_ENTERPRISE_MODELS: "[]",
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++      OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++    },
++  })
++
++  expect(manifest).toMatchObject({
++    schemaVersion: 2,
++    defaultModelID: "",
++    modelIDs: [],
++    modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++    allowedOrigins: [],
++  })
++  expect(await Bun.file(fixture.output).json()).toEqual(manifest)
++})
++
+ test("prepares a manifest only for enterprise builds", async () => {
+   await using fixture = await manifestFixture()
+   expect(
+     await prepareEnterpriseManifest({
+       appVersion: "1.2.3",
+       env: {},
+       output: fixture.output,
+       resources: fixture.resources,
+     }),
+   ).toBeUndefined()
+diff --git a/packages/desktop/src/main/enterprise-preflight.test.ts b/packages/desktop/src/main/enterprise-preflight.test.ts
+index 24a8ed534..10569fc19 100644
+--- a/packages/desktop/src/main/enterprise-preflight.test.ts
++++ b/packages/desktop/src/main/enterprise-preflight.test.ts
+@@ -17,20 +17,29 @@ const profile = {
+     { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+     { id: "company-fast", name: "Company Fast", baseURL: "https://llm-dr.corp.example/v1" },
+   ],
+   defaultModelID: "company-code",
+   defaultsVersion: "defaults-2",
+   guideVersion: "guide-3",
+   catalogVersion: "catalog-4",
+   allowedOrigins: ["https://llm.corp.example", "https://llm-dr.corp.example"],
+ }
+ 
++const emptyProfile = {
++  models: [],
++  defaultModelID: "",
++  defaultsVersion: "dev-1",
++  guideVersion: "pilot-1",
++  catalogVersion: "dev-1",
++  allowedOrigins: [],
++}
++
+ test("creates and verifies a deterministic non-secret enterprise manifest", async () => {
+   await using fixture = await enterpriseFixture()
+   const manifest = await createEnterpriseManifest({
+     appVersion: "1.2.3",
+     profile,
+     resources: fixture.resources,
+   })
+ 
+   expect(manifest).toEqual({
+     schemaVersion: 2,
+@@ -57,20 +66,68 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
+   expect(
+     await verifyEnterpriseManifest({
+       manifest: fixture.manifest,
+       appVersion: "1.2.3",
+       profile,
+       resources: fixture.resources,
+     }),
+   ).toEqual(manifest)
+ })
+ 
++test("creates and verifies an empty Enterprise model manifest", async () => {
++  await using fixture = await enterpriseFixture()
++  const manifest = await createEnterpriseManifest({
++    appVersion: "1.2.3",
++    profile: emptyProfile,
++    resources: fixture.resources,
++  })
++  expect(manifest).toMatchObject({ defaultModelID: "", modelIDs: [], allowedOrigins: [] })
++  await writeEnterpriseManifest(fixture.manifest, manifest)
++  expect(
++    await verifyEnterpriseManifest({
++      manifest: fixture.manifest,
++      appVersion: "1.2.3",
++      profile: emptyProfile,
++      resources: fixture.resources,
++    }),
++  ).toEqual(manifest)
++})
++
++test("rejects mismatched model catalogs with an empty default", async () => {
++  await using fixture = await enterpriseFixture()
++  const manifest = await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources })
++
++  await writeEnterpriseManifest(fixture.manifest, { ...manifest, modelIDs: [] })
++  expect(
++    (
++      await verifyFailure({
++        manifest: fixture.manifest,
++        appVersion: "1.2.3",
++        profile,
++        resources: fixture.resources,
++      })
++    ).kind,
++  ).toBe("manifest_invalid")
++
++  await writeEnterpriseManifest(fixture.manifest, { ...manifest, defaultModelID: "" })
++  expect(
++    (
++      await verifyFailure({
++        manifest: fixture.manifest,
++        appVersion: "1.2.3",
++        profile,
++        resources: fixture.resources,
++      })
++    ).kind,
++  ).toBe("manifest_invalid")
++})
++
+ test("fails closed when an enterprise resource changes after manifest creation", async () => {
+   await using fixture = await enterpriseFixture()
+   await writeEnterpriseManifest(
+     fixture.manifest,
+     await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources }),
+   )
+   await Bun.write(fixture.resources["company-guide.md"], "tampered secret-marker")
+ 
+   const error = await verifyFailure({
+     manifest: fixture.manifest,
+diff --git a/packages/desktop/src/main/enterprise-preflight.ts b/packages/desktop/src/main/enterprise-preflight.ts
+index 7b400c570..5bd58f3a0 100644
+--- a/packages/desktop/src/main/enterprise-preflight.ts
++++ b/packages/desktop/src/main/enterprise-preflight.ts
+@@ -48,30 +48,28 @@ export class EnterprisePreflightError extends Error {
+     readonly kind: EnterprisePreflightFailure,
+     message: string,
+   ) {
+     super(message)
+     this.name = "EnterprisePreflightError"
+   }
+ }
+ 
+ export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV2> {
+   const catalog = enterpriseModelCatalogIdentity(input.profile.models)
+-  if (!catalog.modelIDs.includes(input.profile.defaultModelID)) {
+-    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+-  }
++  if (!validDefaultModel(catalog.modelIDs, input.profile.defaultModelID)) invalidManifest()
+   return {
+     schemaVersion: 2,
+     appVersion: requireText(input.appVersion),
+     defaultsVersion: requireText(input.profile.defaultsVersion),
+     guideVersion: requireText(input.profile.guideVersion),
+     catalogVersion: requireText(input.profile.catalogVersion),
+-    defaultModelID: requireText(input.profile.defaultModelID),
++    defaultModelID: input.profile.defaultModelID,
+     modelIDs: catalog.modelIDs,
+     modelCatalogSHA256: catalog.sha256,
+     allowedOrigins: normalizeOrigins(input.profile.allowedOrigins),
+     resources: Object.fromEntries(
+       await Promise.all(
+         resourceNames.map(async (name) => [name, hash(await readFile(input.resources[name]))] as const),
+       ),
+     ) as Record<ResourceName, string>,
+   }
+ }
+@@ -187,36 +185,37 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
+   if (!Array.isArray(value.allowedOrigins) || value.allowedOrigins.some((origin) => typeof origin !== "string"))
+     invalidManifest()
+   const allowedOrigins = value.allowedOrigins as string[]
+   if (!isRecord(value.resources) || !hasExactKeys(value.resources, [...resourceNames])) invalidManifest()
+   const resources = value.resources
+   if (
+     !isText(value.appVersion) ||
+     !isText(value.defaultsVersion) ||
+     !isText(value.guideVersion) ||
+     !isText(value.catalogVersion) ||
+-    !isText(value.defaultModelID) ||
++    typeof value.defaultModelID !== "string" ||
++    value.defaultModelID.trim() !== value.defaultModelID ||
+     !Array.isArray(value.modelIDs) ||
+     value.modelIDs.some((modelID) => !isText(modelID)) ||
+     new Set(value.modelIDs).size !== value.modelIDs.length ||
+     !isHash(value.modelCatalogSHA256) ||
+     resourceNames.some((name) => typeof resources[name] !== "string" || !/^[a-f0-9]{64}$/.test(resources[name]))
+   ) {
+     invalidManifest()
+   }
+   const origins = normalizeOrigins(allowedOrigins)
+   if (origins.length !== allowedOrigins.length || origins.some((origin, index) => origin !== allowedOrigins[index])) {
+     invalidManifest()
+   }
+   const modelIDs = value.modelIDs as string[]
+   if (
+-    !modelIDs.includes(value.defaultModelID) ||
++    !validDefaultModel(modelIDs, value.defaultModelID) ||
+     modelIDs.some((modelID, index) => modelID !== [...modelIDs].sort()[index])
+   ) {
+     invalidManifest()
+   }
+   return {
+     schemaVersion: 2,
+     appVersion: value.appVersion,
+     defaultsVersion: value.defaultsVersion,
+     guideVersion: value.guideVersion,
+     catalogVersion: value.catalogVersion,
+@@ -255,38 +254,43 @@ function normalizeOrigins(origins: string[]) {
+     return url.origin
+   })
+   return Array.from(new Set(normalized)).sort()
+ }
+ 
+ function requireText(value: string) {
+   if (!isText(value)) throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+   return value
+ }
+ 
++function validDefaultModel(modelIDs: string[], defaultModelID: string) {
++  if (modelIDs.length === 0) return defaultModelID === ""
++  return isText(defaultModelID) && modelIDs.includes(defaultModelID)
++}
++
+ function isText(value: unknown): value is string {
+   return typeof value === "string" && value.trim() === value && value.length > 0
+ }
+ 
+ function hash(value: Uint8Array) {
+   return createHash("sha256").update(value).digest("hex")
+ }
+ 
+ export function enterpriseModelCatalogIdentity(models: { id: string; name: string; baseURL: string }[]) {
+   const normalized = models
+     .map((model) => ({
+       id: requireText(model.id),
+       name: requireText(model.name),
+       baseURL: requireModelURL(model.baseURL),
+     }))
+     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+   const modelIDs = normalized.map((model) => model.id)
+-  if (!modelIDs.length || new Set(modelIDs).size !== modelIDs.length) {
++  if (new Set(modelIDs).size !== modelIDs.length) {
+     throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+   }
+   return { modelIDs, sha256: hash(Buffer.from(JSON.stringify(normalized))) }
+ }
+ 
+ function requireModelURL(value: string) {
+   const text = requireText(value)
+   const url = (() => {
+     try {
+       return new URL(text)

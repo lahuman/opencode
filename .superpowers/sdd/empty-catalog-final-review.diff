@@ -1,0 +1,1701 @@
+# Working-tree review package
+
+## Base
+077115271eacd420ca02286ebb404fd64a9cf9b8
+
+## Status
+ M docs/enterprise/windows-portable-kernexa-release.md
+ M packages/desktop/.env.enterprise.example
+ M packages/desktop/electron.vite.config.test.ts
+ M packages/desktop/scripts/enterprise-build.test.ts
+ M packages/desktop/scripts/enterprise-build.ts
+ M packages/desktop/scripts/enterprise-manifest.test.ts
+ M packages/desktop/scripts/enterprise-release.test.ts
+ M packages/desktop/scripts/enterprise-release.ts
+ M packages/desktop/scripts/windows-portable-smoke.ps1
+ M packages/desktop/scripts/windows-portable-smoke.test.ts
+ M packages/desktop/src/enterprise-profile.ts
+ M packages/desktop/src/enterprise.test.ts
+ M packages/desktop/src/main/enterprise-preflight.test.ts
+ M packages/desktop/src/main/enterprise-preflight.ts
+ M packages/desktop/src/main/enterprise-provider-runtime.test.ts
+ M packages/desktop/src/main/enterprise-provider-runtime.ts
+ M packages/desktop/src/main/enterprise-providers.test.ts
+?? docs/superpowers/plans/2026-07-20-empty-enterprise-catalog.md
+?? docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md
+
+## Tracked diff stat
+ .../enterprise/windows-portable-kernexa-release.md | 17 ++++--
+ packages/desktop/.env.enterprise.example           | 10 ++--
+ packages/desktop/electron.vite.config.test.ts      | 27 ++++++++-
+ packages/desktop/scripts/enterprise-build.test.ts  | 66 +++++++++++++++++++-
+ packages/desktop/scripts/enterprise-build.ts       | 13 ++--
+ .../desktop/scripts/enterprise-manifest.test.ts    | 26 ++++++++
+ .../desktop/scripts/enterprise-release.test.ts     | 51 ++++++++++++++++
+ packages/desktop/scripts/enterprise-release.ts     |  7 ++-
+ .../desktop/scripts/windows-portable-smoke.ps1     | 11 +++-
+ .../desktop/scripts/windows-portable-smoke.test.ts | 59 ++++++++++++++++++
+ packages/desktop/src/enterprise-profile.ts         | 13 ++--
+ packages/desktop/src/enterprise.test.ts            | 70 +++++++++++++++++++++-
+ .../desktop/src/main/enterprise-preflight.test.ts  | 57 ++++++++++++++++++
+ packages/desktop/src/main/enterprise-preflight.ts  | 18 +++---
+ .../src/main/enterprise-provider-runtime.test.ts   | 60 +++++++++++++++++++
+ .../src/main/enterprise-provider-runtime.ts        |  1 +
+ .../desktop/src/main/enterprise-providers.test.ts  | 38 ++++++++++++
+ 17 files changed, 511 insertions(+), 33 deletions(-)
+
+## Tracked diff
+diff --git a/docs/enterprise/windows-portable-kernexa-release.md b/docs/enterprise/windows-portable-kernexa-release.md
+index 9b217d43d..23e1dc112 100644
+--- a/docs/enterprise/windows-portable-kernexa-release.md
++++ b/docs/enterprise/windows-portable-kernexa-release.md
+@@ -174,31 +174,40 @@ function Read-VerifiedPortableReleaseMetadata {
+   param([string] $Path)
+ 
+   $metadata = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+   $expectedFields = @(
+     "appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion",
+     "modelCatalogSHA256", "modelIDs", "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
+   ) | Sort-Object
+   if ($metadata -isnot [PSCustomObject] -or (@($metadata.PSObject.Properties.Name | Sort-Object) -join ",") -ne ($expectedFields -join ",")) {
+     throw "Release metadata shape is invalid"
+   }
+-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
++  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
+     if ($metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($metadata.$field)) {
+       throw "Release metadata shape is invalid"
+     }
+   }
++  if ($metadata.defaultModelID -isnot [string]) { throw "Release metadata model catalog is invalid" }
+   if ($metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
+-  if ($metadata.modelIDs -isnot [System.Array] -or $metadata.modelIDs.Count -eq 0) { throw "Release metadata model catalog is invalid" }
++  if ($metadata.modelIDs -isnot [System.Array]) { throw "Release metadata model catalog is invalid" }
+   $modelIDs = @($metadata.modelIDs)
+   if (@($modelIDs | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) { throw "Release metadata model catalog is invalid" }
+-  if (($modelIDs -join ",") -ne (@($modelIDs | Sort-Object -Unique) -join ",")) { throw "Release metadata model catalog is invalid" }
+-  if ($modelIDs -notcontains $metadata.defaultModelID) { throw "Release metadata model catalog is invalid" }
++  $modelIDSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
++  if (@($modelIDs | Where-Object { -not $modelIDSet.Add($_) }).Count -ne 0) { throw "Release metadata model catalog is invalid" }
++  $sortedModelIDs = [string[]]$modelIDs.Clone()
++  [Array]::Sort($sortedModelIDs, [System.StringComparer]::Ordinal)
++  if (($modelIDs -join "`0") -cne ($sortedModelIDs -join "`0")) { throw "Release metadata model catalog is invalid" }
++  if ($modelIDs.Count -eq 0) {
++    if ($metadata.defaultModelID -cne "") { throw "Release metadata model catalog is invalid" }
++  } elseif ([string]::IsNullOrWhiteSpace($metadata.defaultModelID) -or -not $modelIDSet.Contains($metadata.defaultModelID)) {
++    throw "Release metadata model catalog is invalid"
++  }
+   if ($metadata.schemaVersion -is [string] -or $metadata.schemaVersion -is [bool] -or $metadata.schemaVersion -isnot [System.IConvertible]) {
+     throw "Release metadata schema version is invalid"
+   }
+   try {
+     $schemaVersion = [decimal]$metadata.schemaVersion
+   } catch {
+     throw "Release metadata schema version is invalid"
+   }
+   if ([decimal]::Truncate($schemaVersion) -ne $schemaVersion -or $schemaVersion -ne 3) {
+     throw "Release metadata schema version is invalid"
+diff --git a/packages/desktop/.env.enterprise.example b/packages/desktop/.env.enterprise.example
+index 621e3fd7a..ae2a5882a 100644
+--- a/packages/desktop/.env.enterprise.example
++++ b/packages/desktop/.env.enterprise.example
+@@ -1,7 +1,7 @@
+-# Copy these values into packages/desktop/.env before running bun run dev:enterprise.
+-OPENCODE_ENTERPRISE_MODELS=[{"id":"company-code","name":"Company Code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","name":"Company Reasoning","baseURL":"https://reasoning.corp.example/v1"}]
+-OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=company-code
+-OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=https://llm-dr.corp.example
++OPENCODE_ENTERPRISE=1
++OPENCODE_ENTERPRISE_MODELS=[]
++OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
++OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
+ OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
+-OPENCODE_ENTERPRISE_GUIDE_VERSION=dev-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
+ OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
+diff --git a/packages/desktop/electron.vite.config.test.ts b/packages/desktop/electron.vite.config.test.ts
+index 5065dbda6..52711221a 100644
+--- a/packages/desktop/electron.vite.config.test.ts
++++ b/packages/desktop/electron.vite.config.test.ts
+@@ -5,21 +5,21 @@ const enabledProfile = {
+   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+     { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+     { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+   ]),
+   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+ }
+ 
+-function evaluateConfig(env: Record<string, string> = {}) {
++function evaluateConfig(env: Record<string, string | undefined> = {}) {
+   const result = Bun.spawnSync(
+     [
+       "node",
+       "--input-type=module",
+       "--eval",
+       `
+         import { loadConfigFromFile } from "electron-vite"
+         const loaded = await loadConfigFromFile(
+           { command: "build", mode: "production" },
+           "./electron.vite.config.ts",
+@@ -71,20 +71,45 @@ describe("enterprise Vite configuration", () => {
+         },
+         renderer: {
+           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
+         },
+       },
+     })
+   })
+ 
++  test.each([
++    ["blank", ""],
++    ["omitted", undefined],
++  ])("defines an explicit empty Enterprise catalog with %s default for main and renderer", (_name, defaultModelID) => {
++    expect(
++      evaluateConfig({
++        ...enabledProfile,
++        OPENCODE_ENTERPRISE_MODELS: "[]",
++        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID,
++      }),
++    ).toMatchObject({
++      exitCode: 0,
++      defines: {
++        main: {
++          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
++          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
++        },
++        renderer: {
++          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
++          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
++        },
++      },
++    })
++  })
++
+   test("rejects a credentialed model URL before producing defines", () => {
+     const result = evaluateConfig({
+       ...enabledProfile,
+       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+         { id: "company-code", name: "Company Code", baseURL: "https://user:secret@llm.corp.example/v1" },
+       ]),
+     })
+ 
+     expect(result.exitCode).not.toBe(0)
+     expect(result.stderr).toContain("OPENCODE_ENTERPRISE_MODELS model URLs must not contain credentials")
+diff --git a/packages/desktop/scripts/enterprise-build.test.ts b/packages/desktop/scripts/enterprise-build.test.ts
+index fb18af93f..82a306df0 100644
+--- a/packages/desktop/scripts/enterprise-build.test.ts
++++ b/packages/desktop/scripts/enterprise-build.test.ts
+@@ -6,33 +6,95 @@ const valid = {
+   OPENCODE_ENTERPRISE: "1",
+   OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+ }
+ 
+-const multiModel = {
++const nonEmptyCatalog = {
+   OPENCODE_ENTERPRISE: "1",
+   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+     { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+     { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+   ]),
+-  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+ }
+ 
++const multiModel = {
++  ...nonEmptyCatalog,
++  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
++}
++
++const emptyCatalog = {
++  OPENCODE_ENTERPRISE: "1",
++  OPENCODE_ENTERPRISE_MODELS: "[]",
++  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++}
++
++test("accepts an empty Enterprise catalog", () => {
++  expect(validateEnterpriseBuild(emptyCatalog)).toEqual({
++    models: [],
++    defaultModelID: "",
++    defaultsVersion: "dev-1",
++    guideVersion: "pilot-1",
++    catalogVersion: "dev-1",
++    allowedOrigins: [],
++  })
++})
++
++test("rejects mixed empty-catalog package default states", () => {
++  expect(() => validateEnterpriseBuild({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++  expect(() => validateEnterpriseBuild({ ...multiModel, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++})
++
++test.each([
++  ["empty catalog with omitted default", emptyCatalog, undefined, ""],
++  ["empty catalog with empty default", emptyCatalog, "", ""],
++  ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
++  ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
++])("package default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
++  const metadata = validateEnterpriseBuild(
++    defaultModelID === undefined
++      ? catalog
++      : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++  )
++
++  expect(metadata.defaultModelID).toBe(expectedDefaultModelID)
++})
++
++test.each([
++  ["empty catalog with nonblank default", emptyCatalog, "ghost"],
++  ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
++  ["non-empty catalog with empty default", nonEmptyCatalog, ""],
++  ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
++])("package default matrix rejects %s", (_name, catalog, defaultModelID) => {
++  expect(() =>
++    validateEnterpriseBuild(
++      defaultModelID === undefined
++        ? catalog
++        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++    ),
++  ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++})
++
+ test("validates normalized multi-model build metadata", () => {
+   expect(validateEnterpriseBuild(multiModel)).toEqual({
+     models: [
+       { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+       { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+     ],
+     defaultModelID: "code",
+     defaultsVersion: "pilot-1",
+     guideVersion: "kernexa-1",
+     catalogVersion: "catalog-1",
+diff --git a/packages/desktop/scripts/enterprise-build.ts b/packages/desktop/scripts/enterprise-build.ts
+index 32da36c9b..6784cf459 100644
+--- a/packages/desktop/scripts/enterprise-build.ts
++++ b/packages/desktop/scripts/enterprise-build.ts
+@@ -18,23 +18,28 @@ export function enterprisePackageEnvironment(env: Env) {
+       return !upper.startsWith("CSC_") && !upper.startsWith("WIN_CSC_")
+     }),
+   )
+ }
+ 
+ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
+   if (env.OPENCODE_ENTERPRISE !== "1") throw new Error("OPENCODE_ENTERPRISE must be 1")
+ 
+   const models = parseModels(env)
+   const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
+-    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++    ? models.length
++      ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++      : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
+     : models[0].id
+-  if (!models.some((model) => model.id === defaultModelID)) {
++  if (
++    (models.length === 0 && defaultModelID) ||
++    (models.length > 0 && !models.some((model) => model.id === defaultModelID))
++  ) {
+     throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
+   }
+   const allowedOrigins = Array.from(
+     new Set(
+       [
+         ...models.map((model) => new URL(model.baseURL).origin),
+         ...(env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "")
+           .split(",")
+           .map((value) => value.trim())
+           .filter(Boolean)
+@@ -64,22 +69,22 @@ function parseModels(env: Env) {
+     ]
+   }
+ 
+   const value: unknown = (() => {
+     try {
+       return JSON.parse(env.OPENCODE_ENTERPRISE_MODELS)
+     } catch {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+     }
+   })()
+-  if (!Array.isArray(value) || value.length === 0) {
+-    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
++  if (!Array.isArray(value)) {
++    throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+   }
+   const models = value.map((item) => {
+     if (!isRecord(item) || !hasExactKeys(item, ["baseURL", "id", "name"])) {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must contain only id, name, and baseURL")
+     }
+     const id = typeof item.id === "string" ? item.id.trim() : ""
+     const name = typeof item.name === "string" ? item.name.trim() : ""
+     const baseURL = typeof item.baseURL === "string" ? item.baseURL.trim() : ""
+     if (!id || !name || !baseURL) throw new Error("OPENCODE_ENTERPRISE_MODELS contains incomplete model metadata")
+     return { id, name, baseURL: parseModelURL(baseURL, "OPENCODE_ENTERPRISE_MODELS") }
+diff --git a/packages/desktop/scripts/enterprise-manifest.test.ts b/packages/desktop/scripts/enterprise-manifest.test.ts
+index 5653e43a2..8ef9ab540 100644
+--- a/packages/desktop/scripts/enterprise-manifest.test.ts
++++ b/packages/desktop/scripts/enterprise-manifest.test.ts
+@@ -41,20 +41,46 @@ test("generates the packaged manifest from validated enterprise build inputs", a
+     },
+   })
+ 
+   expect(manifest.catalogVersion).toBe("catalog-4")
+   expect(manifest.allowedOrigins).toEqual(["https://fast.corp.example", "https://llm.corp.example"])
+   expect(await Bun.file(fixture.output).json()).toEqual(manifest)
+   expect(await Bun.file(fixture.output).text()).not.toContain("secret-marker")
+   expect(await Bun.file(fixture.output).text()).not.toContain("/v1")
+ })
+ 
++test("generates an empty Enterprise model manifest", async () => {
++  await using fixture = await manifestFixture()
++  const manifest = await generateEnterpriseManifest({
++    appVersion: "1.2.3",
++    output: fixture.output,
++    resources: fixture.resources,
++    env: {
++      OPENCODE_ENTERPRISE: "1",
++      OPENCODE_ENTERPRISE_MODELS: "[]",
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++      OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++    },
++  })
++
++  expect(manifest).toMatchObject({
++    schemaVersion: 2,
++    defaultModelID: "",
++    modelIDs: [],
++    modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++    allowedOrigins: [],
++  })
++  expect(await Bun.file(fixture.output).json()).toEqual(manifest)
++})
++
+ test("prepares a manifest only for enterprise builds", async () => {
+   await using fixture = await manifestFixture()
+   expect(
+     await prepareEnterpriseManifest({
+       appVersion: "1.2.3",
+       env: {},
+       output: fixture.output,
+       resources: fixture.resources,
+     }),
+   ).toBeUndefined()
+diff --git a/packages/desktop/scripts/enterprise-release.test.ts b/packages/desktop/scripts/enterprise-release.test.ts
+index a2c1ad0b7..bddbafa1a 100644
+--- a/packages/desktop/scripts/enterprise-release.test.ts
++++ b/packages/desktop/scripts/enterprise-release.test.ts
+@@ -12,20 +12,26 @@ const valid = {
+   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+     { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+     { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+   ]),
+   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
+   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
+ }
++const empty = {
++  ...valid,
++  OPENCODE_ENTERPRISE_MODELS: "[]",
++  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++  OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "",
++}
+ 
+ const acceptance = {
+   windowsVersion: "Windows 11 Enterprise",
+   windowsBuild: "10.0.26100.1",
+   testedAt: "2026-07-15T00:00:00.000Z",
+   tester: "pilot-tester",
+   result: "pass",
+ } satisfies EnterpriseWindowsAcceptance
+ 
+ afterEach(async () => {
+@@ -75,16 +81,61 @@ test("writes checksum and non-secret release metadata", async () => {
+ 
+   const metadata = await Bun.file(archive.replace(/\.zip$/, ".release.json")).text()
+   expect(JSON.parse(metadata)).toEqual(result)
+   expect(result.windowsAcceptance).toEqual([])
+   expect(Object.keys(acceptance)).toEqual(["windowsVersion", "windowsBuild", "testedAt", "tester", "result"])
+   for (const value of ["https://llm.corp.example", "credential-secret", "Authorization", "CSC_LINK"]) {
+     expect(metadata).not.toContain(value)
+   }
+ })
+ 
++test("writes an empty release model catalog with no default", async () => {
++  const input = await releaseInput(validateEnterpriseBuild(empty))
++  const result = await writeEnterpriseRelease(input)
++
++  expect(result).toMatchObject({
++    defaultModelID: "",
++    modelIDs: [],
++    modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++  })
++})
++
++test.each([
++  ["empty catalog with a nonempty default", [], "ghost"],
++  [
++    "nonempty catalog with an empty default",
++    [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
++    "",
++  ],
++] as const)("rejects an invalid release model/default pair: %s", async (_name, models, defaultModelID) => {
++  const profile = { ...validateEnterpriseBuild(valid), models: [...models], defaultModelID }
++
++  await expect(writeEnterpriseRelease(await releaseInput(profile))).rejects.toThrow(
++    "Enterprise release model catalog is invalid",
++  )
++})
++
+ test("declares structured Windows acceptance records", async () => {
+   const source = await Bun.file(new URL("./enterprise-release.ts", import.meta.url)).text()
+ 
+   expect(source).toContain("export type EnterpriseWindowsAcceptance")
+   expect(source).toContain("windowsAcceptance: EnterpriseWindowsAcceptance[]")
+ })
++
++async function releaseInput(profile: ReturnType<typeof validateEnterpriseBuild>) {
++  const root = await mkdtemp(path.join(tmpdir(), "enterprise-release-pair-"))
++  roots.push(root)
++  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
++  const sbom = archive.replace(/\.zip$/, ".sbom.cdx.json")
++  const licenses = archive.replace(/\.zip$/, ".third-party-licenses.txt")
++  await Promise.all([Bun.write(archive, "portable archive"), Bun.write(sbom, "sbom"), Bun.write(licenses, "licenses")])
++  return {
++    archive,
++    version: "1.17.18",
++    gitCommit: "0123456789abcdef",
++    builtAt: new Date("2026-07-15T00:00:00.000Z"),
++    profile,
++    sbom,
++    licenses,
++    authenticode: "NotSigned" as const,
++  }
++}
+diff --git a/packages/desktop/scripts/enterprise-release.ts b/packages/desktop/scripts/enterprise-release.ts
+index 5723c9bc9..f52b34e08 100644
+--- a/packages/desktop/scripts/enterprise-release.ts
++++ b/packages/desktop/scripts/enterprise-release.ts
+@@ -1,14 +1,14 @@
+ import path from "node:path"
+ 
+ import type { EnterpriseBuildMetadata } from "./enterprise-build"
+-import { enterpriseModelCatalogIdentity } from "../src/main/enterprise-preflight"
++import { enterpriseModelCatalogIdentity, validEnterpriseModelDefault } from "../src/main/enterprise-preflight"
+ 
+ export type EnterpriseReleaseInput = {
+   archive: string
+   version: string
+   gitCommit: string
+   builtAt: Date
+   profile: EnterpriseBuildMetadata
+   sbom: string
+   licenses: string
+   authenticode: "NotSigned"
+@@ -35,23 +35,26 @@ export type EnterpriseReleaseMetadataV3 = {
+   modelCatalogSHA256: string
+   target: { os: "win32"; arch: "x64" }
+   builtAt: string
+   authenticode: "NotSigned"
+   windowsAcceptance: EnterpriseWindowsAcceptance[]
+   sbom: { file: string; sha256: string }
+   thirdPartyLicenses: { file: string; sha256: string }
+ }
+ 
+ export async function writeEnterpriseRelease(input: EnterpriseReleaseInput): Promise<EnterpriseReleaseMetadataV3> {
++  const models = enterpriseModelCatalogIdentity(input.profile.models)
++  if (!validEnterpriseModelDefault(models.modelIDs, input.profile.defaultModelID)) {
++    throw new Error("Enterprise release model catalog is invalid")
++  }
+   const sha256 = await hash(input.archive)
+   const artifact = path.basename(input.archive)
+-  const models = enterpriseModelCatalogIdentity(input.profile.models)
+   const metadata = {
+     schemaVersion: 3,
+     appVersion: input.version,
+     gitCommit: input.gitCommit,
+     artifact,
+     sha256,
+     defaultsVersion: input.profile.defaultsVersion,
+     guideVersion: input.profile.guideVersion,
+     defaultModelID: input.profile.defaultModelID,
+     modelCatalogSHA256: models.sha256,
+diff --git a/packages/desktop/scripts/windows-portable-smoke.ps1 b/packages/desktop/scripts/windows-portable-smoke.ps1
+index a8d5df975..ab2bd0dd9 100644
+--- a/packages/desktop/scripts/windows-portable-smoke.ps1
++++ b/packages/desktop/scripts/windows-portable-smoke.ps1
+@@ -77,41 +77,46 @@ function Assert-EnterpriseReleaseMetadata {
+ 
+   if ($Metadata -isnot [PSCustomObject]) { throw "Release metadata shape is invalid" }
+ 
+   $requiredFields = @(
+     "appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion",
+     "modelCatalogSHA256", "modelIDs", "sbom", "schemaVersion", "sha256", "target", "thirdPartyLicenses", "windowsAcceptance"
+   )
+   $metadataFields = @($Metadata.PSObject.Properties.Name | Sort-Object)
+   if (($metadataFields -join ",") -ne ($requiredFields -join ",")) { throw "Release metadata shape is invalid" }
+ 
+-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
++  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
+     if ($Metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($Metadata.$field)) {
+       throw "Release metadata shape is invalid"
+     }
+   }
++  if ($Metadata.defaultModelID -isnot [string]) { throw "Release metadata model catalog is invalid" }
+   if ($Metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
+-  if ($Metadata.modelIDs -isnot [System.Array] -or $Metadata.modelIDs.Count -eq 0) {
++  if ($Metadata.modelIDs -isnot [System.Array]) {
+     throw "Release metadata model catalog is invalid"
+   }
+   $modelIDs = @($Metadata.modelIDs)
+   if (@($modelIDs | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) {
+     throw "Release metadata model catalog is invalid"
+   }
+   $modelIDSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+   if (@($modelIDs | Where-Object { -not $modelIDSet.Add($_) }).Count -ne 0) {
+     throw "Release metadata model catalog is invalid"
+   }
+   $sortedModelIDs = [string[]]$modelIDs.Clone()
+   [Array]::Sort($sortedModelIDs, [System.StringComparer]::Ordinal)
+   if (($modelIDs -join "`0") -cne ($sortedModelIDs -join "`0")) { throw "Release metadata model catalog is invalid" }
+-  if (-not $modelIDSet.Contains($Metadata.defaultModelID)) { throw "Release metadata model catalog is invalid" }
++  if ($modelIDs.Count -eq 0) {
++    if ($Metadata.defaultModelID -cne "") { throw "Release metadata model catalog is invalid" }
++  } elseif ([string]::IsNullOrWhiteSpace($Metadata.defaultModelID) -or -not $modelIDSet.Contains($Metadata.defaultModelID)) {
++    throw "Release metadata model catalog is invalid"
++  }
+ 
+   $schemaVersion = $Metadata.schemaVersion
+   if ($null -eq $schemaVersion -or $schemaVersion -is [string] -or $schemaVersion -is [bool] -or $schemaVersion -isnot [System.IConvertible]) {
+     throw "Release metadata schema version is invalid"
+   }
+   try {
+     $numericSchemaVersion = [decimal]$schemaVersion
+   } catch {
+     throw "Release metadata schema version is invalid"
+   }
+diff --git a/packages/desktop/scripts/windows-portable-smoke.test.ts b/packages/desktop/scripts/windows-portable-smoke.test.ts
+index 799c1607b..4827335cd 100644
+--- a/packages/desktop/scripts/windows-portable-smoke.test.ts
++++ b/packages/desktop/scripts/windows-portable-smoke.test.ts
+@@ -214,20 +214,79 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
+ 
+   expect(metadataLoad.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata")).toBeGreaterThan(-1)
+   expect(metadataLoad.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata")).toBeLessThan(
+     metadataLoad.indexOf("$metadata.sha256"),
+   )
+   expect(script.indexOf("$metadata.windowsAcceptance =")).toBeGreaterThan(
+     script.indexOf("Assert-EnterpriseReleaseMetadata -Metadata $metadata"),
+   )
+ })
+ 
++test.if(process.platform === "win32")(
++  "PowerShell enforces the exact release model/default pair",
++  async () => {
++    const script = await Bun.file(scriptPath).text()
++    const validation = script.slice(
++      script.indexOf("function Assert-WindowsAcceptanceRecords"),
++      script.indexOf("function Assert-EnterpriseCatalogIdentity"),
++    )
++    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-release-pair-"))
++    const harness = join(temp, "validate-release.ps1")
++    const metadataPath = join(temp, "release.json")
++    const metadata = {
++      schemaVersion: 3,
++      appVersion: "1.0.0",
++      gitCommit: "0123456789abcdef",
++      artifact: "kernexa-1.0.0-win-x64.zip",
++      sha256: "a".repeat(64),
++      defaultsVersion: "defaults-1",
++      guideVersion: "kernexa-1",
++      defaultModelID: "code",
++      modelIDs: ["code", "reasoning"],
++      modelCatalogSHA256: "b".repeat(64),
++      target: { os: "win32", arch: "x64" },
++      builtAt: "2026-07-15T00:00:00.000Z",
++      authenticode: "NotSigned",
++      windowsAcceptance: [],
++      sbom: { file: "kernexa-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
++      thirdPartyLicenses: {
++        file: "kernexa-1.0.0-win-x64.third-party-licenses.txt",
++        sha256: "d".repeat(64),
++      },
++    }
++
++    try {
++      await Bun.write(
++        harness,
++        `${validation}\n$metadata = Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json\nAssert-EnterpriseReleaseMetadata -Metadata $metadata`,
++      )
++      const verify = async (value: typeof metadata) => {
++        await Bun.write(metadataPath, JSON.stringify(value))
++        const process = Bun.spawn(
++          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, metadataPath],
++          { stdout: "pipe", stderr: "pipe" },
++        )
++        return { code: await process.exited, stderr: await new Response(process.stderr).text() }
++      }
++
++      expect(await verify(metadata)).toEqual({ code: 0, stderr: "" })
++      expect(await verify({ ...metadata, defaultModelID: "", modelIDs: [] })).toEqual({ code: 0, stderr: "" })
++      expect((await verify({ ...metadata, defaultModelID: "ghost", modelIDs: [] })).code).not.toBe(0)
++      expect((await verify({ ...metadata, defaultModelID: "", modelIDs: ["code"] })).code).not.toBe(0)
++      expect((await verify({ ...metadata, defaultModelID: "ghost", modelIDs: ["code"] })).code).not.toBe(0)
++    } finally {
++      await rm(temp, { recursive: true, force: true })
++    }
++  },
++  30_000,
++)
++
+ test("portable smoke compares release catalog identity with the extracted manifest", async () => {
+   const script = await Bun.file(scriptPath).text()
+   const validation = script.slice(
+     script.indexOf("function Assert-EnterpriseCatalogIdentity"),
+     script.indexOf("function Read-EnterpriseReleaseMetadata"),
+   )
+ 
+   for (const token of [
+     "enterprise-manifest.json",
+     "$manifest.defaultModelID -cne $Metadata.defaultModelID",
+diff --git a/packages/desktop/src/enterprise-profile.ts b/packages/desktop/src/enterprise-profile.ts
+index e2e5eb660..d24f4a01e 100644
+--- a/packages/desktop/src/enterprise-profile.ts
++++ b/packages/desktop/src/enterprise-profile.ts
+@@ -16,23 +16,28 @@ export type EnterpriseProfile =
+       allowedOrigins: string[]
+     }
+ 
+ type BuildEnv = Record<string, string | undefined>
+ 
+ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
+   if (env.OPENCODE_ENTERPRISE !== "1") return { enabled: false }
+ 
+   const models = parseModels(env)
+   const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
+-    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++    ? models.length
++      ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++      : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
+     : models[0].id
+-  if (!models.some((model) => model.id === defaultModelID)) {
++  if (
++    (models.length === 0 && defaultModelID) ||
++    (models.length > 0 && !models.some((model) => model.id === defaultModelID))
++  ) {
+     throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
+   }
+   const defaultsVersion = requireValue(env, "OPENCODE_ENTERPRISE_DEFAULTS_VERSION")
+   const guideVersion = requireValue(env, "OPENCODE_ENTERPRISE_GUIDE_VERSION")
+   const catalogVersion = env.OPENCODE_ENTERPRISE_CATALOG_VERSION?.trim() || defaultsVersion
+   const allowedOrigins = Array.from(
+     new Set([
+       ...models.map((model) => new URL(model.baseURL).origin),
+       ...(env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS ?? "")
+         .split(",")
+@@ -97,22 +102,22 @@ function parseModels(env: BuildEnv) {
+     ]
+   }
+ 
+   const value: unknown = (() => {
+     try {
+       return JSON.parse(env.OPENCODE_ENTERPRISE_MODELS)
+     } catch {
+       throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+     }
+   })()
+-  if (!Array.isArray(value) || value.length === 0) {
+-    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
++  if (!Array.isArray(value)) {
++    throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
+   }
+   const models = value.map((model) => parseModel(model, "OPENCODE_ENTERPRISE_MODELS"))
+   if (new Set(models.map((model) => model.id)).size !== models.length) {
+     throw new Error("OPENCODE_ENTERPRISE_MODELS must contain unique model IDs")
+   }
+   return models
+ }
+ 
+ function parseModel(value: unknown, key: string): EnterpriseModel {
+   if (!isRecord(value) || !hasExactKeys(value, ["baseURL", "id", "name"])) {
+diff --git a/packages/desktop/src/enterprise.test.ts b/packages/desktop/src/enterprise.test.ts
+index 036f29381..19c936996 100644
+--- a/packages/desktop/src/enterprise.test.ts
++++ b/packages/desktop/src/enterprise.test.ts
+@@ -14,21 +14,90 @@ function enabledProfile() {
+     OPENCODE_ENTERPRISE_BASE_URL: "https://llm.corp.example/v1",
+     OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
+     OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
+     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+     OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+     OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
+   })
+ }
+ 
++const emptyCatalog = {
++  OPENCODE_ENTERPRISE: "1",
++  OPENCODE_ENTERPRISE_MODELS: "[]",
++  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
++  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++}
++
++const nonEmptyCatalog = {
++  ...emptyCatalog,
++  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
++    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
++  ]),
++}
++
+ describe("enterprise profile", () => {
++  test("accepts an explicit empty Enterprise catalog", () => {
++    const profile = parseEnterpriseProfile({
++      ...emptyCatalog,
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++    })
++
++    expect(profile).toMatchObject({ enabled: true, models: [], defaultModelID: "", allowedOrigins: [] })
++    expect(enterpriseEnvironment(profile, { defaults: "C:/defaults", guide: "C:/guide" })).toMatchObject({
++      OPENCODE_ENTERPRISE_MODELS: "[]",
++      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++    })
++  })
++
++  test("rejects mixed empty-catalog default states", () => {
++    expect(() =>
++      parseEnterpriseProfile({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" }),
++    ).toThrow(
++      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++    )
++    expect(() => parseEnterpriseProfile({ ...nonEmptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
++      "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++    )
++  })
++
++  test.each([
++    ["empty catalog with omitted default", emptyCatalog, undefined, ""],
++    ["empty catalog with empty default", emptyCatalog, "", ""],
++    ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
++    ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
++  ])("default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
++    const profile = parseEnterpriseProfile(
++      defaultModelID === undefined
++        ? catalog
++        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++    )
++
++    expect(profile).toMatchObject({ enabled: true, defaultModelID: expectedDefaultModelID })
++  })
++
++  test.each([
++    ["empty catalog with nonblank default", emptyCatalog, "ghost"],
++    ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
++    ["non-empty catalog with empty default", nonEmptyCatalog, ""],
++    ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
++  ])("default matrix rejects %s", (_name, catalog, defaultModelID) => {
++    expect(() =>
++      parseEnterpriseProfile(
++        defaultModelID === undefined
++          ? catalog
++          : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
++      ),
++    ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++  })
++
+   test("parses multiple models and derives the allowed origins", () => {
+     const profile = parseEnterpriseProfile({
+       OPENCODE_ENTERPRISE: "1",
+       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+         { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+         { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+       ]),
+       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+@@ -53,21 +122,20 @@ describe("enterprise profile", () => {
+   test("rejects invalid multi-model catalogs", () => {
+     const env = {
+       OPENCODE_ENTERPRISE: "1",
+       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
+     }
+ 
+     for (const models of [
+-      [],
+       [{ id: "code", name: "Company Code", baseURL: "file:///private" }],
+       [{ id: "code", name: "Company Code", baseURL: "https://user:secret@code.corp.example/v1" }],
+       [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1?secret=value" }],
+       [
+         { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+         { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+       ],
+       [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", token: "secret" }],
+     ]) {
+       expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_MODELS: JSON.stringify(models) })).toThrow(
+diff --git a/packages/desktop/src/main/enterprise-preflight.test.ts b/packages/desktop/src/main/enterprise-preflight.test.ts
+index 24a8ed534..10569fc19 100644
+--- a/packages/desktop/src/main/enterprise-preflight.test.ts
++++ b/packages/desktop/src/main/enterprise-preflight.test.ts
+@@ -17,20 +17,29 @@ const profile = {
+     { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+     { id: "company-fast", name: "Company Fast", baseURL: "https://llm-dr.corp.example/v1" },
+   ],
+   defaultModelID: "company-code",
+   defaultsVersion: "defaults-2",
+   guideVersion: "guide-3",
+   catalogVersion: "catalog-4",
+   allowedOrigins: ["https://llm.corp.example", "https://llm-dr.corp.example"],
+ }
+ 
++const emptyProfile = {
++  models: [],
++  defaultModelID: "",
++  defaultsVersion: "dev-1",
++  guideVersion: "pilot-1",
++  catalogVersion: "dev-1",
++  allowedOrigins: [],
++}
++
+ test("creates and verifies a deterministic non-secret enterprise manifest", async () => {
+   await using fixture = await enterpriseFixture()
+   const manifest = await createEnterpriseManifest({
+     appVersion: "1.2.3",
+     profile,
+     resources: fixture.resources,
+   })
+ 
+   expect(manifest).toEqual({
+     schemaVersion: 2,
+@@ -57,20 +66,68 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
+   expect(
+     await verifyEnterpriseManifest({
+       manifest: fixture.manifest,
+       appVersion: "1.2.3",
+       profile,
+       resources: fixture.resources,
+     }),
+   ).toEqual(manifest)
+ })
+ 
++test("creates and verifies an empty Enterprise model manifest", async () => {
++  await using fixture = await enterpriseFixture()
++  const manifest = await createEnterpriseManifest({
++    appVersion: "1.2.3",
++    profile: emptyProfile,
++    resources: fixture.resources,
++  })
++  expect(manifest).toMatchObject({ defaultModelID: "", modelIDs: [], allowedOrigins: [] })
++  await writeEnterpriseManifest(fixture.manifest, manifest)
++  expect(
++    await verifyEnterpriseManifest({
++      manifest: fixture.manifest,
++      appVersion: "1.2.3",
++      profile: emptyProfile,
++      resources: fixture.resources,
++    }),
++  ).toEqual(manifest)
++})
++
++test("rejects mismatched model catalogs with an empty default", async () => {
++  await using fixture = await enterpriseFixture()
++  const manifest = await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources })
++
++  await writeEnterpriseManifest(fixture.manifest, { ...manifest, modelIDs: [] })
++  expect(
++    (
++      await verifyFailure({
++        manifest: fixture.manifest,
++        appVersion: "1.2.3",
++        profile,
++        resources: fixture.resources,
++      })
++    ).kind,
++  ).toBe("manifest_invalid")
++
++  await writeEnterpriseManifest(fixture.manifest, { ...manifest, defaultModelID: "" })
++  expect(
++    (
++      await verifyFailure({
++        manifest: fixture.manifest,
++        appVersion: "1.2.3",
++        profile,
++        resources: fixture.resources,
++      })
++    ).kind,
++  ).toBe("manifest_invalid")
++})
++
+ test("fails closed when an enterprise resource changes after manifest creation", async () => {
+   await using fixture = await enterpriseFixture()
+   await writeEnterpriseManifest(
+     fixture.manifest,
+     await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources }),
+   )
+   await Bun.write(fixture.resources["company-guide.md"], "tampered secret-marker")
+ 
+   const error = await verifyFailure({
+     manifest: fixture.manifest,
+diff --git a/packages/desktop/src/main/enterprise-preflight.ts b/packages/desktop/src/main/enterprise-preflight.ts
+index 7b400c570..0097173fb 100644
+--- a/packages/desktop/src/main/enterprise-preflight.ts
++++ b/packages/desktop/src/main/enterprise-preflight.ts
+@@ -48,30 +48,28 @@ export class EnterprisePreflightError extends Error {
+     readonly kind: EnterprisePreflightFailure,
+     message: string,
+   ) {
+     super(message)
+     this.name = "EnterprisePreflightError"
+   }
+ }
+ 
+ export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV2> {
+   const catalog = enterpriseModelCatalogIdentity(input.profile.models)
+-  if (!catalog.modelIDs.includes(input.profile.defaultModelID)) {
+-    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+-  }
++  if (!validEnterpriseModelDefault(catalog.modelIDs, input.profile.defaultModelID)) invalidManifest()
+   return {
+     schemaVersion: 2,
+     appVersion: requireText(input.appVersion),
+     defaultsVersion: requireText(input.profile.defaultsVersion),
+     guideVersion: requireText(input.profile.guideVersion),
+     catalogVersion: requireText(input.profile.catalogVersion),
+-    defaultModelID: requireText(input.profile.defaultModelID),
++    defaultModelID: input.profile.defaultModelID,
+     modelIDs: catalog.modelIDs,
+     modelCatalogSHA256: catalog.sha256,
+     allowedOrigins: normalizeOrigins(input.profile.allowedOrigins),
+     resources: Object.fromEntries(
+       await Promise.all(
+         resourceNames.map(async (name) => [name, hash(await readFile(input.resources[name]))] as const),
+       ),
+     ) as Record<ResourceName, string>,
+   }
+ }
+@@ -187,36 +185,37 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
+   if (!Array.isArray(value.allowedOrigins) || value.allowedOrigins.some((origin) => typeof origin !== "string"))
+     invalidManifest()
+   const allowedOrigins = value.allowedOrigins as string[]
+   if (!isRecord(value.resources) || !hasExactKeys(value.resources, [...resourceNames])) invalidManifest()
+   const resources = value.resources
+   if (
+     !isText(value.appVersion) ||
+     !isText(value.defaultsVersion) ||
+     !isText(value.guideVersion) ||
+     !isText(value.catalogVersion) ||
+-    !isText(value.defaultModelID) ||
++    typeof value.defaultModelID !== "string" ||
++    value.defaultModelID.trim() !== value.defaultModelID ||
+     !Array.isArray(value.modelIDs) ||
+     value.modelIDs.some((modelID) => !isText(modelID)) ||
+     new Set(value.modelIDs).size !== value.modelIDs.length ||
+     !isHash(value.modelCatalogSHA256) ||
+     resourceNames.some((name) => typeof resources[name] !== "string" || !/^[a-f0-9]{64}$/.test(resources[name]))
+   ) {
+     invalidManifest()
+   }
+   const origins = normalizeOrigins(allowedOrigins)
+   if (origins.length !== allowedOrigins.length || origins.some((origin, index) => origin !== allowedOrigins[index])) {
+     invalidManifest()
+   }
+   const modelIDs = value.modelIDs as string[]
+   if (
+-    !modelIDs.includes(value.defaultModelID) ||
++    !validEnterpriseModelDefault(modelIDs, value.defaultModelID) ||
+     modelIDs.some((modelID, index) => modelID !== [...modelIDs].sort()[index])
+   ) {
+     invalidManifest()
+   }
+   return {
+     schemaVersion: 2,
+     appVersion: value.appVersion,
+     defaultsVersion: value.defaultsVersion,
+     guideVersion: value.guideVersion,
+     catalogVersion: value.catalogVersion,
+@@ -255,38 +254,43 @@ function normalizeOrigins(origins: string[]) {
+     return url.origin
+   })
+   return Array.from(new Set(normalized)).sort()
+ }
+ 
+ function requireText(value: string) {
+   if (!isText(value)) throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+   return value
+ }
+ 
++export function validEnterpriseModelDefault(modelIDs: string[], defaultModelID: string) {
++  if (modelIDs.length === 0) return defaultModelID === ""
++  return isText(defaultModelID) && modelIDs.includes(defaultModelID)
++}
++
+ function isText(value: unknown): value is string {
+   return typeof value === "string" && value.trim() === value && value.length > 0
+ }
+ 
+ function hash(value: Uint8Array) {
+   return createHash("sha256").update(value).digest("hex")
+ }
+ 
+ export function enterpriseModelCatalogIdentity(models: { id: string; name: string; baseURL: string }[]) {
+   const normalized = models
+     .map((model) => ({
+       id: requireText(model.id),
+       name: requireText(model.name),
+       baseURL: requireModelURL(model.baseURL),
+     }))
+     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+   const modelIDs = normalized.map((model) => model.id)
+-  if (!modelIDs.length || new Set(modelIDs).size !== modelIDs.length) {
++  if (new Set(modelIDs).size !== modelIDs.length) {
+     throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
+   }
+   return { modelIDs, sha256: hash(Buffer.from(JSON.stringify(normalized))) }
+ }
+ 
+ function requireModelURL(value: string) {
+   const text = requireText(value)
+   const url = (() => {
+     try {
+       return new URL(text)
+diff --git a/packages/desktop/src/main/enterprise-provider-runtime.test.ts b/packages/desktop/src/main/enterprise-provider-runtime.test.ts
+index e123dcc1d..3371f2da8 100644
+--- a/packages/desktop/src/main/enterprise-provider-runtime.test.ts
++++ b/packages/desktop/src/main/enterprise-provider-runtime.test.ts
+@@ -413,20 +413,80 @@ test("catalog snapshots reject credentials for providers outside the catalog", a
+     expect(runtime.readCredentials()).toEqual(state.credentials)
+     expect({ catalogWrites, credentialReads, credentialWrites, restarts }).toEqual({
+       catalogWrites: 0,
+       credentialReads: 0,
+       credentialWrites: 0,
+       restarts: 0,
+     })
+   })
+ })
+ 
++test("startup with an empty packaged profile has no default until the first model is created", async () => {
++  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-empty-"))
++  try {
++    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
++    const credentials = createEnterpriseCredentialStore({
++      file: join(root, "credentials.bin"),
++      encryptionAvailable: () => true,
++      encrypt: Buffer.from,
++      decrypt: (value) => value.toString("utf8"),
++    })
++    await initializeEnterpriseProviderStores({
++      catalog,
++      credentials,
++      profile: { models: [], defaultModelID: "" },
++    })
++    const runtime = createEnterpriseProviderRuntime({
++      catalog,
++      credentials,
++      restart: async () => undefined,
++    })
++
++    expect(await runtime.providerCatalog()).toMatchObject({ providers: [], default: undefined })
++
++    await runtime.createProvider({
++      provider: { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
++    })
++    expect(
++      await runtime.createModel({ providerID: "provider", model: { id: "first", name: "First" } }),
++    ).toMatchObject({ default: { providerID: "provider", modelID: "first" } })
++  } finally {
++    await rm(root, { recursive: true, force: true })
++  }
++})
++
++test("startup preserves an existing on-disk catalog under an empty packaged profile", async () => {
++  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-existing-"))
++  try {
++    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
++    const existing = initial().catalog
++    await catalog.write(existing)
++    const credentials = createEnterpriseCredentialStore({
++      file: join(root, "credentials.bin"),
++      encryptionAvailable: () => true,
++      encrypt: Buffer.from,
++      decrypt: (value) => value.toString("utf8"),
++    })
++
++    expect(
++      await initializeEnterpriseProviderStores({
++        catalog,
++        credentials,
++        profile: { models: [], defaultModelID: "" },
++      }),
++    ).toEqual(existing)
++    expect(await catalog.read()).toEqual(existing)
++  } finally {
++    await rm(root, { recursive: true, force: true })
++  }
++})
++
+ test("startup migration writes schema v3 once and is retry-safe", async () => {
+   const root = await mkdtemp(join(tmpdir(), "enterprise-provider-startup-"))
+   try {
+     const file = join(root, "credentials.bin")
+     await writeFile(
+       file,
+       JSON.stringify({ schemaVersion: 2, models: { code: { apiKey: "legacy-secret", headers: {} } } }),
+     )
+     let writes = 0
+     const credentials = createEnterpriseCredentialStore({
+diff --git a/packages/desktop/src/main/enterprise-provider-runtime.ts b/packages/desktop/src/main/enterprise-provider-runtime.ts
+index db19f49a7..ecc019226 100644
+--- a/packages/desktop/src/main/enterprise-provider-runtime.ts
++++ b/packages/desktop/src/main/enterprise-provider-runtime.ts
+@@ -400,20 +400,21 @@ function requireCredentialMembership(
+   if (Object.keys(credentials.providers).some((providerID) => !providerIDs.has(providerID))) {
+     throw new EnterpriseProviderRuntimeError("credential_provider_not_configured")
+   }
+   return credentials
+ }
+ 
+ function view(state: State, health: CredentialHealth): EnterpriseProviderCatalogView {
+   const errorCode = credentialHealthError(health)
+   return {
+     ...state.catalog,
++    default: state.catalog.default,
+     providers: state.catalog.providers.map((provider) => {
+       const credentials = errorCode ? undefined : state.credentials.providers[provider.id]
+       return {
+         ...provider,
+         credentials: {
+           configured: Boolean(credentials?.apiKey || Object.keys(credentials?.headers ?? {}).length),
+           headerNames: Object.keys(credentials?.headers ?? {}),
+           ...(errorCode ? { errorCode } : {}),
+         },
+       }
+diff --git a/packages/desktop/src/main/enterprise-providers.test.ts b/packages/desktop/src/main/enterprise-providers.test.ts
+index b7e14d732..3d2d874f0 100644
+--- a/packages/desktop/src/main/enterprise-providers.test.ts
++++ b/packages/desktop/src/main/enterprise-providers.test.ts
+@@ -205,20 +205,58 @@ test("allows empty catalogs and normalizes provider URLs", () => {
+       schemaVersion: 1,
+       providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
+     }),
+   ).toEqual({
+     schemaVersion: 1,
+     providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
+   })
+   expect(validateEnterpriseProviderCatalog({ schemaVersion: 1, providers: [] })).toEqual({ schemaVersion: 1, providers: [] })
+ })
+ 
++test("seeds an empty catalog for a new user with no packaged models", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
++
++    const result = await store.initialize({ models: [], defaultModelID: "" })
++
++    expect(result.catalog).toEqual({ schemaVersion: 1, providers: [] })
++    expect(await store.read()).toEqual(result.catalog)
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
++test("preserves an existing user catalog when packaged models are empty", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
++    const existing = {
++      schemaVersion: 1 as const,
++      default: { providerID: "existing", modelID: "model" },
++      providers: [
++        {
++          id: "existing",
++          name: "Existing",
++          baseURL: "https://existing.example/v1",
++          models: [{ id: "model", name: "Model" }],
++        },
++      ],
++    }
++    await store.write(existing)
++
++    expect((await store.initialize({ models: [], defaultModelID: "" })).catalog).toEqual(existing)
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
+ test("preserves an existing catalog and cleans up temp files after failed writes", async () => {
+   const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
+   try {
+     const file = join(dir, "providers.json")
+     const store = createEnterpriseProviderStore({ file })
+     const catalog = {
+       schemaVersion: 1 as const,
+       default: { providerID: "existing", modelID: "model" },
+       providers: [
+         {
+
+## Untracked file: packages/desktop/.env
+diff --git a/packages/desktop/.env b/packages/desktop/.env
+new file mode 100644
+index 000000000..b0530eed8
+--- /dev/null
++++ b/packages/desktop/.env
+@@ -0,0 +1,8 @@
++LOCAL_TEST=1
++OPENCODE_ENTERPRISE=1
++OPENCODE_ENTERPRISE_MODELS=[]
++OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
++OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
++OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
+
+## Untracked file: packages/desktop/resources/enterprise/enterprise-manifest.json
+diff --git a/packages/desktop/resources/enterprise/enterprise-manifest.json b/packages/desktop/resources/enterprise/enterprise-manifest.json
+new file mode 100644
+index 000000000..8513c98cd
+--- /dev/null
++++ b/packages/desktop/resources/enterprise/enterprise-manifest.json
+@@ -0,0 +1,17 @@
++{
++  "schemaVersion": 2,
++  "appVersion": "1.18.2",
++  "defaultsVersion": "dev-1",
++  "guideVersion": "kernexa-1",
++  "catalogVersion": "dev-1",
++  "defaultModelID": "",
++  "modelIDs": [],
++  "modelCatalogSHA256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
++  "allowedOrigins": [],
++  "resources": {
++    "company-guide.md": "81273150d1f297c40a404e33665ac03ca6824cc5b38b412ef6c9d82c2200ffca",
++    "models.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
++    "opencode.jsonc": "2bfee77d8564afca69a01aa3ed087c2ff67fabac8888b494258a5ff3665bf828",
++    "skill-packs.json": "d1a11f97faef56c1cfa1c6b08b622dad188f1bee2d1729f5672d6892d208b10e"
++  }
++}
+
+## Untracked file: docs/superpowers/plans/2026-07-20-empty-enterprise-catalog.md
+diff --git a/docs/superpowers/plans/2026-07-20-empty-enterprise-catalog.md b/docs/superpowers/plans/2026-07-20-empty-enterprise-catalog.md
+new file mode 100644
+index 000000000..24021e9c3
+--- /dev/null
++++ b/docs/superpowers/plans/2026-07-20-empty-enterprise-catalog.md
+@@ -0,0 +1,317 @@
++# Empty Enterprise Catalog Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Allow a Kernexa Enterprise desktop package to start new users with zero providers and models while preserving every existing Windows user-global catalog.
++
++**Architecture:** Treat `OPENCODE_ENTERPRISE_MODELS=[]` plus a blank or omitted default model ID as one valid packaged-profile state. Keep the existing profile and manifest fields stable by representing “no default” as `""`, conditionally validate the model/default pair, and retain catalog read-before-seed behavior so only a missing catalog is initialized empty.
++
++**Tech Stack:** TypeScript, Bun test, Electron Vite, Electron Builder, Windows user-global JSON/DPAPI persistence.
++
++## Global Constraints
++
++- Existing valid user-global provider catalogs remain authoritative and are never cleared by an empty packaged profile.
++- Non-empty JSON catalogs still require `OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID` to reference a packaged model.
++- Legacy single-model variables retain their current required-field behavior.
++- Manifest schema versions and public Protocol/Server `HttpApi` remain unchanged.
++- Do not edit generated SDK files.
++- Run tests from `packages/desktop` with `bun.cmd`; run `bun.cmd typecheck`, never `tsc`.
++- Do not commit or push; the user will commit.
++
++---
++
++### Task 1: Accept an Explicit Empty Enterprise Build Profile
++
++**Files:**
++
++- Modify: `packages/desktop/src/enterprise-profile.ts`
++- Modify: `packages/desktop/src/enterprise.test.ts`
++- Modify: `packages/desktop/scripts/enterprise-build.ts`
++- Modify: `packages/desktop/scripts/enterprise-build.test.ts`
++- Modify: `packages/desktop/electron.vite.config.test.ts`
++
++**Interfaces:**
++
++- Consumes: `OPENCODE_ENTERPRISE_MODELS` JSON and `OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID`.
++- Produces: an enabled profile/build metadata value with `models: []`, `defaultModelID: ""`, and `allowedOrigins: []` for the explicit empty state.
++
++- [ ] **Step 1: Add failing runtime-profile tests**
++
++Add tests that express the valid pair and invalid mixed states:
++
++```ts
++test("accepts an explicit empty Enterprise catalog", () => {
++  const profile = parseEnterpriseProfile({
++    OPENCODE_ENTERPRISE: "1",
++    OPENCODE_ENTERPRISE_MODELS: "[]",
++    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
++    OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
++    OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
++  })
++
++  expect(profile).toMatchObject({ enabled: true, models: [], defaultModelID: "", allowedOrigins: [] })
++  expect(enterpriseEnvironment(profile, { defaults: "C:/defaults", guide: "C:/guide" })).toMatchObject({
++    OPENCODE_ENTERPRISE_MODELS: "[]",
++    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
++  })
++})
++
++test("rejects mixed empty-catalog default states", () => {
++  expect(() => parseEnterpriseProfile({ ...emptyEnv, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++  expect(() => parseEnterpriseProfile({ ...nonEmptyEnv, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
++    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
++  )
++})
++```
++
++Remove `[]` from the existing generic invalid-model array because emptiness is now validated separately.
++
++- [ ] **Step 2: Run the runtime-profile tests and verify RED**
++
++Run:
++
++```powershell
++bun.cmd test ./src/enterprise.test.ts -t "explicit empty|mixed empty"
++```
++
++Expected: FAIL because `parseModels()` rejects an empty array and the default is always required.
++
++- [ ] **Step 3: Implement conditional profile validation**
++
++Make JSON-array parsing accept an empty array while retaining array/type/duplicate validation. Compute the default with this contract:
++
++```ts
++const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
++  ? models.length
++    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
++    : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
++  : models[0].id
++
++if (
++  (models.length === 0 && defaultModelID) ||
++  (models.length > 0 && !models.some((model) => model.id === defaultModelID))
++) {
++  throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
++}
++```
++
++Change only the array check from “non-empty array” to “array.” Preserve every model metadata and URL validation branch.
++
++- [ ] **Step 4: Add and run equivalent package-build RED tests**
++
++In `scripts/enterprise-build.test.ts`, assert that `validateEnterpriseBuild()` returns the same empty metadata and rejects both mixed states. Run:
++
++```powershell
++bun.cmd test ./scripts/enterprise-build.test.ts -t "empty Enterprise catalog|mixed empty"
++```
++
++Expected: FAIL for the same minimum-model/default requirements in the independent packaging validator.
++
++- [ ] **Step 5: Apply the same conditional contract to the package validator**
++
++Update `scripts/enterprise-build.ts` with the same default computation and conditional validation. Do not weaken its stricter portable URL validation.
++
++- [ ] **Step 6: Verify profile, build, and Vite injection behavior**
++
++Add an Electron Vite config case with `OPENCODE_ENTERPRISE_MODELS: "[]"` and blank default, asserting the injected definitions contain `"[]"` and `""`. Run:
++
++```powershell
++bun.cmd test ./src/enterprise.test.ts ./scripts/enterprise-build.test.ts ./electron.vite.config.test.ts
++```
++
++Expected: PASS with zero failures.
++
++---
++
++### Task 2: Permit the Empty Pair in Enterprise Manifest and Preflight
++
++**Files:**
++
++- Modify: `packages/desktop/src/main/enterprise-preflight.ts`
++- Modify: `packages/desktop/src/main/enterprise-preflight.test.ts`
++- Modify: `packages/desktop/scripts/enterprise-manifest.test.ts`
++- Test: `packages/desktop/scripts/enterprise-release.test.ts`
++- Test: `packages/desktop/scripts/verify-enterprise-package.test.ts`
++
++**Interfaces:**
++
++- Consumes: Task 1 build metadata with `models: []` and `defaultModelID: ""`.
++- Produces: schema-v2 manifest data containing `modelIDs: []`, the deterministic hash of `[]`, and `defaultModelID: ""`.
++
++- [ ] **Step 1: Add failing empty-manifest tests**
++
++Add a preflight test that creates, writes, and verifies this profile:
++
++```ts
++const emptyProfile = {
++  models: [],
++  defaultModelID: "",
++  defaultsVersion: "dev-1",
++  guideVersion: "kernexa-1",
++  catalogVersion: "dev-1",
++  allowedOrigins: [],
++}
++
++test("creates and verifies an empty Enterprise model manifest", async () => {
++  await using fixture = await enterpriseFixture()
++  const manifest = await createEnterpriseManifest({ appVersion: "1.2.3", profile: emptyProfile, resources: fixture.resources })
++  expect(manifest).toMatchObject({ defaultModelID: "", modelIDs: [], allowedOrigins: [] })
++  await writeEnterpriseManifest(fixture.manifest, manifest)
++  expect(await verifyEnterpriseManifest({ manifest: fixture.manifest, appVersion: "1.2.3", profile: emptyProfile, resources: fixture.resources })).toEqual(manifest)
++})
++```
++
++Add invalid manifest cases for `modelIDs: []` with a non-empty default and non-empty `modelIDs` with an empty default.
++
++- [ ] **Step 2: Run the manifest tests and verify RED**
++
++Run:
++
++```powershell
++bun.cmd test ./src/main/enterprise-preflight.test.ts -t "empty Enterprise model manifest|empty default"
++```
++
++Expected: FAIL because identity calculation rejects zero models and manifest decoding requires non-empty `defaultModelID`.
++
++- [ ] **Step 3: Implement a shared catalog/default pair check**
++
++Allow `enterpriseModelCatalogIdentity([])` and keep its hash deterministic:
++
++```ts
++if (new Set(modelIDs).size !== modelIDs.length) invalidManifest()
++```
++
++Replace unconditional membership checks with the exact pair rule:
++
++```ts
++function validDefaultModel(modelIDs: string[], defaultModelID: string) {
++  if (modelIDs.length === 0) return defaultModelID === ""
++  return isText(defaultModelID) && modelIDs.includes(defaultModelID)
++}
++```
++
++Use it in manifest creation and decoding. Decode `defaultModelID` as a string whose whitespace is normalized exactly, allowing only the empty string for the empty list. Preserve all resource hashes, sorted model ID, origin, and exact-key validation.
++
++- [ ] **Step 4: Verify manifest generation and package consumers**
++
++Add an empty-profile case to `scripts/enterprise-manifest.test.ts`. Run:
++
++```powershell
++bun.cmd test ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./scripts/enterprise-release.test.ts ./scripts/verify-enterprise-package.test.ts
++```
++
++Expected: PASS. Existing non-empty release metadata and package integrity tests must remain unchanged and green.
++
++---
++
++### Task 3: Seed New Users Empty and Preserve Existing Catalogs
++
++**Files:**
++
++- Modify: `packages/desktop/src/main/enterprise-providers.test.ts`
++- Modify if required by RED: `packages/desktop/src/main/enterprise-providers.ts`
++- Modify: `packages/desktop/src/main/enterprise-provider-runtime.test.ts`
++- Modify if required by RED: `packages/desktop/src/main/enterprise-provider-runtime.ts`
++- Modify: `packages/desktop/.env.enterprise.example`
++- Modify locally: `packages/desktop/.env` (ignored; do not commit)
++
++**Interfaces:**
++
++- Consumes: Task 1 empty profile and Task 2 valid empty manifest.
++- Produces: first-launch schema-v1 `{ providers: [] }`, preserved existing catalogs, and a runtime view with no default until the first model is created.
++
++- [ ] **Step 1: Add catalog initialization regressions**
++
++Add two tests:
++
++```ts
++test("seeds an empty catalog for a new user with no packaged models", async () => {
++  const result = await store.initialize({ models: [], defaultModelID: "" })
++  expect(result.catalog).toEqual({ schemaVersion: 1, providers: [] })
++  expect(await store.read()).toEqual(result.catalog)
++})
++
++test("preserves an existing user catalog when packaged models are empty", async () => {
++  await store.write(existing)
++  expect((await store.initialize({ models: [], defaultModelID: "" })).catalog).toEqual(existing)
++})
++```
++
++- [ ] **Step 2: Run the provider tests and verify the actual state**
++
++Run:
++
++```powershell
++bun.cmd test ./src/main/enterprise-providers.test.ts -t "empty catalog|packaged models are empty"
++```
++
++Expected: either RED identifying a real initialization gap or GREEN proving the existing read-before-seed implementation already satisfies the contract. Do not add production code if the test is already green.
++
++- [ ] **Step 3: Add a startup/runtime empty-profile regression**
++
++Exercise startup with no catalog file, `models: []`, and `defaultModelID: ""`. Assert:
++
++```ts
++expect(await runtime.providerCatalog()).toMatchObject({ providers: [], default: undefined })
++```
++
++Then create a provider and its first model and assert that model becomes the default. Also verify an existing on-disk catalog is returned unchanged under the empty profile.
++
++- [ ] **Step 4: Run runtime tests and make only RED-driven fixes**
++
++Run:
++
++```powershell
++bun.cmd test ./src/main/enterprise-provider-runtime.test.ts -t "empty packaged profile|first model"
++```
++
++If credential migration incorrectly invents an empty provider/model ID or marks healthy empty credentials as corrupt, fix that narrow boundary without weakening orphan-credential validation.
++
++- [ ] **Step 5: Update the example and local Desktop environment**
++
++Set both files to the supported empty configuration and remove legacy model variables:
++
++```env
++LOCAL_TEST=1
++OPENCODE_ENTERPRISE=1
++OPENCODE_ENTERPRISE_MODELS=[]
++OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
++OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
++OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
++```
++
++Keep `LOCAL_TEST=1` only in the local `.env`; omit it from `.env.enterprise.example`.
++
++- [ ] **Step 6: Run final Desktop verification**
++
++Run from `packages/desktop`:
++
++```powershell
++bun.cmd test ./src/enterprise.test.ts ./scripts/enterprise-build.test.ts ./electron.vite.config.test.ts ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./src/main/enterprise-providers.test.ts ./src/main/enterprise-provider-runtime.test.ts
++bun.cmd typecheck
++```
++
++Then run the build using the empty profile:
++
++```powershell
++$env:OPENCODE_CHANNEL='dev'
++bun.cmd run build
++```
++
++Expected: all focused tests and typecheck exit 0; prebuild writes and verifies an empty `models.json`/manifest; Electron main, preload, and renderer bundles complete.
++
++- [ ] **Step 7: Inspect the final diff and configuration**
++
++Run:
++
++```powershell
++& 'C:\Program Files\Git\cmd\git.exe' diff --check
++Get-Content .env
++```
++
++Expected: diff check exit 0 and `.env` contains no packaged model, endpoint, API key, or legacy model variables.
+
+## Untracked file: docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md
+diff --git a/docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md b/docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md
+new file mode 100644
+index 000000000..72e2855a2
+--- /dev/null
++++ b/docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md
+@@ -0,0 +1,73 @@
++# Empty Enterprise Catalog Design
++
++## Goal
++
++Allow a Kernexa Enterprise desktop build to package zero initial providers and models. New users start in the existing empty-composer experience and register providers and models through Settings. An existing Windows user-global provider catalog remains authoritative and is never cleared merely because the packaged catalog is empty.
++
++## Environment Contract
++
++The supported empty-catalog configuration is:
++
++```env
++OPENCODE_ENTERPRISE=1
++OPENCODE_ENTERPRISE_MODELS=[]
++OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
++OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
++OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
++```
++
++`OPENCODE_ENTERPRISE_MODELS=[]` is the explicit empty-catalog signal. When the array is empty, `OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID` may be omitted or blank. When the array contains models, the default model ID remains required and must reference one of them. The legacy single-model variables remain unchanged and still require a complete model.
++
++## Profile and Package Manifest
++
++The Enterprise profile keeps `defaultModelID` as a string so existing consumers and the manifest shape remain stable. Its value is the empty string only when `models` is empty.
++
++Manifest schema version 2 remains unchanged. It accepts exactly two valid catalog states:
++
++- one or more model IDs and a non-empty default contained in that list;
++- zero model IDs and an empty default model ID.
++
++The manifest continues to hash `models.json` and all packaged Enterprise resources. Empty models therefore remain integrity-checked rather than bypassing preflight.
++
++## Catalog Initialization and Persistence
++
++Catalog initialization remains read-before-seed:
++
++1. Read the Windows user-global provider catalog.
++2. If it exists and is valid, return it unchanged regardless of the packaged model list.
++3. If it does not exist and the packaged list is empty, persist a schema-v1 catalog with no providers and no default.
++4. If packaged models exist, preserve the current migration and seeding behavior.
++
++No startup path deletes an existing catalog because the package has zero models. The existing provider runtime assigns the first newly created model as the default, so no additional UI behavior is required.
++
++## Sidecar and Empty State
++
++The sidecar receives an empty authoritative catalog and empty provider-scoped credentials on a fresh installation. OpenCode materializes no providers and no model default. The App uses the already implemented Enterprise empty-composer state: editing and submission are disabled, and `Manage providers` opens provider settings.
++
++Allowed origins may be empty because user-configured OpenAI-compatible endpoints are contacted by the sidecar/runtime path, not directly by renderer code.
++
++## Validation and Errors
++
++- An empty JSON array is valid only through `OPENCODE_ENTERPRISE_MODELS=[]`.
++- Invalid JSON, non-array JSON, duplicate model IDs, incomplete model metadata, and unsafe URLs remain errors.
++- A non-empty default with an empty model list is rejected.
++- A blank or missing default with a non-empty model list is rejected.
++- Manifest states mixing an empty default with models, or a non-empty default with no models, are rejected.
++
++## Testing
++
++Tests cover:
++
++- profile parsing for the valid empty pair and both invalid mixed states;
++- environment serialization of the empty profile;
++- manifest creation, decoding, and verification for zero models;
++- existing manifest behavior for non-empty catalogs;
++- first-launch initialization to an empty catalog;
++- preservation of an existing user catalog when packaged models are empty;
++- focused Desktop typecheck and Enterprise profile/preflight/provider suites.
++
++## Compatibility
++
++This is additive for JSON-array configuration. Existing non-empty Enterprise builds and legacy single-model `.env` configurations retain their current validation. No public Protocol or Server `HttpApi` changes and no generated SDK updates are required.

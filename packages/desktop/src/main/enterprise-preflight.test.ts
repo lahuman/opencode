@@ -24,6 +24,15 @@ const profile = {
   allowedOrigins: ["https://llm.corp.example", "https://llm-dr.corp.example"],
 }
 
+const emptyProfile = {
+  models: [],
+  defaultModelID: "",
+  defaultsVersion: "dev-1",
+  guideVersion: "pilot-1",
+  catalogVersion: "dev-1",
+  allowedOrigins: [],
+}
+
 test("creates and verifies a deterministic non-secret enterprise manifest", async () => {
   await using fixture = await enterpriseFixture()
   const manifest = await createEnterpriseManifest({
@@ -62,6 +71,54 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
       resources: fixture.resources,
     }),
   ).toEqual(manifest)
+})
+
+test("creates and verifies an empty Enterprise model manifest", async () => {
+  await using fixture = await enterpriseFixture()
+  const manifest = await createEnterpriseManifest({
+    appVersion: "1.2.3",
+    profile: emptyProfile,
+    resources: fixture.resources,
+  })
+  expect(manifest).toMatchObject({ defaultModelID: "", modelIDs: [], allowedOrigins: [] })
+  await writeEnterpriseManifest(fixture.manifest, manifest)
+  expect(
+    await verifyEnterpriseManifest({
+      manifest: fixture.manifest,
+      appVersion: "1.2.3",
+      profile: emptyProfile,
+      resources: fixture.resources,
+    }),
+  ).toEqual(manifest)
+})
+
+test("rejects mismatched model catalogs with an empty default", async () => {
+  await using fixture = await enterpriseFixture()
+  const manifest = await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources })
+
+  await writeEnterpriseManifest(fixture.manifest, { ...manifest, modelIDs: [] })
+  expect(
+    (
+      await verifyFailure({
+        manifest: fixture.manifest,
+        appVersion: "1.2.3",
+        profile,
+        resources: fixture.resources,
+      })
+    ).kind,
+  ).toBe("manifest_invalid")
+
+  await writeEnterpriseManifest(fixture.manifest, { ...manifest, defaultModelID: "" })
+  expect(
+    (
+      await verifyFailure({
+        manifest: fixture.manifest,
+        appVersion: "1.2.3",
+        profile,
+        resources: fixture.resources,
+      })
+    ).kind,
+  ).toBe("manifest_invalid")
 })
 
 test("fails closed when an enterprise resource changes after manifest creation", async () => {

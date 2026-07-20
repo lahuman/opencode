@@ -25,9 +25,14 @@ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
 
   const models = parseModels(env)
   const defaultModelID = env.OPENCODE_ENTERPRISE_MODELS
-    ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+    ? models.length
+      ? requireValue(env, "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+      : env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID?.trim() ?? ""
     : models[0].id
-  if (!models.some((model) => model.id === defaultModelID)) {
+  if (
+    (models.length === 0 && defaultModelID) ||
+    (models.length > 0 && !models.some((model) => model.id === defaultModelID))
+  ) {
     throw new Error("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID must reference a configured model")
   }
   const allowedOrigins = Array.from(
@@ -71,8 +76,8 @@ function parseModels(env: Env) {
       throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
     }
   })()
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("OPENCODE_ENTERPRISE_MODELS must contain at least one model")
+  if (!Array.isArray(value)) {
+    throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
   }
   const models = value.map((item) => {
     if (!isRecord(item) || !hasExactKeys(item, ["baseURL", "id", "name"])) {

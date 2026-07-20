@@ -48,6 +48,32 @@ test("generates the packaged manifest from validated enterprise build inputs", a
   expect(await Bun.file(fixture.output).text()).not.toContain("/v1")
 })
 
+test("generates an empty Enterprise model manifest", async () => {
+  await using fixture = await manifestFixture()
+  const manifest = await generateEnterpriseManifest({
+    appVersion: "1.2.3",
+    output: fixture.output,
+    resources: fixture.resources,
+    env: {
+      OPENCODE_ENTERPRISE: "1",
+      OPENCODE_ENTERPRISE_MODELS: "[]",
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
+    },
+  })
+
+  expect(manifest).toMatchObject({
+    schemaVersion: 2,
+    defaultModelID: "",
+    modelIDs: [],
+    modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    allowedOrigins: [],
+  })
+  expect(await Bun.file(fixture.output).json()).toEqual(manifest)
+})
+
 test("prepares a manifest only for enterprise builds", async () => {
   await using fixture = await manifestFixture()
   expect(

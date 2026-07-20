@@ -19,6 +19,12 @@ const valid = {
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
+const empty = {
+  ...valid,
+  OPENCODE_ENTERPRISE_MODELS: "[]",
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+  OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "",
+}
 
 const acceptance = {
   windowsVersion: "Windows 11 Enterprise",
@@ -82,9 +88,54 @@ test("writes checksum and non-secret release metadata", async () => {
   }
 })
 
+test("writes an empty release model catalog with no default", async () => {
+  const input = await releaseInput(validateEnterpriseBuild(empty))
+  const result = await writeEnterpriseRelease(input)
+
+  expect(result).toMatchObject({
+    defaultModelID: "",
+    modelIDs: [],
+    modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  })
+})
+
+test.each([
+  ["empty catalog with a nonempty default", [], "ghost"],
+  [
+    "nonempty catalog with an empty default",
+    [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+    "",
+  ],
+] as const)("rejects an invalid release model/default pair: %s", async (_name, models, defaultModelID) => {
+  const profile = { ...validateEnterpriseBuild(valid), models: [...models], defaultModelID }
+
+  await expect(writeEnterpriseRelease(await releaseInput(profile))).rejects.toThrow(
+    "Enterprise release model catalog is invalid",
+  )
+})
+
 test("declares structured Windows acceptance records", async () => {
   const source = await Bun.file(new URL("./enterprise-release.ts", import.meta.url)).text()
 
   expect(source).toContain("export type EnterpriseWindowsAcceptance")
   expect(source).toContain("windowsAcceptance: EnterpriseWindowsAcceptance[]")
 })
+
+async function releaseInput(profile: ReturnType<typeof validateEnterpriseBuild>) {
+  const root = await mkdtemp(path.join(tmpdir(), "enterprise-release-pair-"))
+  roots.push(root)
+  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
+  const sbom = archive.replace(/\.zip$/, ".sbom.cdx.json")
+  const licenses = archive.replace(/\.zip$/, ".third-party-licenses.txt")
+  await Promise.all([Bun.write(archive, "portable archive"), Bun.write(sbom, "sbom"), Bun.write(licenses, "licenses")])
+  return {
+    archive,
+    version: "1.17.18",
+    gitCommit: "0123456789abcdef",
+    builtAt: new Date("2026-07-15T00:00:00.000Z"),
+    profile,
+    sbom,
+    licenses,
+    authenticode: "NotSigned" as const,
+  }
+}

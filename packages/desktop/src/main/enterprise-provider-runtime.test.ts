@@ -420,6 +420,66 @@ test("catalog snapshots reject credentials for providers outside the catalog", a
   })
 })
 
+test("startup with an empty packaged profile has no default until the first model is created", async () => {
+  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-empty-"))
+  try {
+    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
+    const credentials = createEnterpriseCredentialStore({
+      file: join(root, "credentials.bin"),
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+    await initializeEnterpriseProviderStores({
+      catalog,
+      credentials,
+      profile: { models: [], defaultModelID: "" },
+    })
+    const runtime = createEnterpriseProviderRuntime({
+      catalog,
+      credentials,
+      restart: async () => undefined,
+    })
+
+    expect(await runtime.providerCatalog()).toMatchObject({ providers: [], default: undefined })
+
+    await runtime.createProvider({
+      provider: { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
+    })
+    expect(
+      await runtime.createModel({ providerID: "provider", model: { id: "first", name: "First" } }),
+    ).toMatchObject({ default: { providerID: "provider", modelID: "first" } })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("startup preserves an existing on-disk catalog under an empty packaged profile", async () => {
+  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-existing-"))
+  try {
+    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
+    const existing = initial().catalog
+    await catalog.write(existing)
+    const credentials = createEnterpriseCredentialStore({
+      file: join(root, "credentials.bin"),
+      encryptionAvailable: () => true,
+      encrypt: Buffer.from,
+      decrypt: (value) => value.toString("utf8"),
+    })
+
+    expect(
+      await initializeEnterpriseProviderStores({
+        catalog,
+        credentials,
+        profile: { models: [], defaultModelID: "" },
+      }),
+    ).toEqual(existing)
+    expect(await catalog.read()).toEqual(existing)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("startup migration writes schema v3 once and is retry-safe", async () => {
   const root = await mkdtemp(join(tmpdir(), "enterprise-provider-startup-"))
   try {

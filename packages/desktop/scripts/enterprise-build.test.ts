@@ -13,18 +13,80 @@ const valid = {
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
-const multiModel = {
+const nonEmptyCatalog = {
   OPENCODE_ENTERPRISE: "1",
   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
     { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
     { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
   ]),
-  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
 }
+
+const multiModel = {
+  ...nonEmptyCatalog,
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
+}
+
+const emptyCatalog = {
+  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE_MODELS: "[]",
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "pilot-1",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
+}
+
+test("accepts an empty Enterprise catalog", () => {
+  expect(validateEnterpriseBuild(emptyCatalog)).toEqual({
+    models: [],
+    defaultModelID: "",
+    defaultsVersion: "dev-1",
+    guideVersion: "pilot-1",
+    catalogVersion: "dev-1",
+    allowedOrigins: [],
+  })
+})
+
+test("rejects mixed empty-catalog package default states", () => {
+  expect(() => validateEnterpriseBuild({ ...emptyCatalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "ghost" })).toThrow(
+    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
+  )
+  expect(() => validateEnterpriseBuild({ ...multiModel, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "" })).toThrow(
+    "OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID",
+  )
+})
+
+test.each([
+  ["empty catalog with omitted default", emptyCatalog, undefined, ""],
+  ["empty catalog with empty default", emptyCatalog, "", ""],
+  ["empty catalog with whitespace-only default", emptyCatalog, " \t ", ""],
+  ["non-empty catalog with valid default", nonEmptyCatalog, "code", "code"],
+])("package default matrix accepts %s", (_name, catalog, defaultModelID, expectedDefaultModelID) => {
+  const metadata = validateEnterpriseBuild(
+    defaultModelID === undefined
+      ? catalog
+      : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
+  )
+
+  expect(metadata.defaultModelID).toBe(expectedDefaultModelID)
+})
+
+test.each([
+  ["empty catalog with nonblank default", emptyCatalog, "ghost"],
+  ["non-empty catalog with omitted default", nonEmptyCatalog, undefined],
+  ["non-empty catalog with empty default", nonEmptyCatalog, ""],
+  ["non-empty catalog with whitespace-only default", nonEmptyCatalog, " \t "],
+])("package default matrix rejects %s", (_name, catalog, defaultModelID) => {
+  expect(() =>
+    validateEnterpriseBuild(
+      defaultModelID === undefined
+        ? catalog
+        : { ...catalog, OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID },
+    ),
+  ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
+})
 
 test("validates normalized multi-model build metadata", () => {
   expect(validateEnterpriseBuild(multiModel)).toEqual({

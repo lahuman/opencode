@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import type { EnterpriseBuildMetadata } from "./enterprise-build"
-import { enterpriseModelCatalogIdentity } from "../src/main/enterprise-preflight"
+import { enterpriseModelCatalogIdentity, validEnterpriseModelDefault } from "../src/main/enterprise-preflight"
 
 export type EnterpriseReleaseInput = {
   archive: string
@@ -42,9 +42,12 @@ export type EnterpriseReleaseMetadataV3 = {
 }
 
 export async function writeEnterpriseRelease(input: EnterpriseReleaseInput): Promise<EnterpriseReleaseMetadataV3> {
+  const models = enterpriseModelCatalogIdentity(input.profile.models)
+  if (!validEnterpriseModelDefault(models.modelIDs, input.profile.defaultModelID)) {
+    throw new Error("Enterprise release model catalog is invalid")
+  }
   const sha256 = await hash(input.archive)
   const artifact = path.basename(input.archive)
-  const models = enterpriseModelCatalogIdentity(input.profile.models)
   const metadata = {
     schemaVersion: 3,
     appVersion: input.version,

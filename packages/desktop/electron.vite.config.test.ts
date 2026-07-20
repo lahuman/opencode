@@ -12,7 +12,7 @@ const enabledProfile = {
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
-function evaluateConfig(env: Record<string, string> = {}) {
+function evaluateConfig(env: Record<string, string | undefined> = {}) {
   const result = Bun.spawnSync(
     [
       "node",
@@ -73,6 +73,31 @@ describe("enterprise Vite configuration", () => {
           "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
           "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
+        },
+      },
+    })
+  })
+
+  test.each([
+    ["blank", ""],
+    ["omitted", undefined],
+  ])("defines an explicit empty Enterprise catalog with %s default for main and renderer", (_name, defaultModelID) => {
+    expect(
+      evaluateConfig({
+        ...enabledProfile,
+        OPENCODE_ENTERPRISE_MODELS: "[]",
+        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: defaultModelID,
+      }),
+    ).toMatchObject({
+      exitCode: 0,
+      defines: {
+        main: {
+          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
+          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
+        },
+        renderer: {
+          "import.meta.env.OPENCODE_ENTERPRISE_MODELS": JSON.stringify("[]"),
+          "import.meta.env.OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID": JSON.stringify(""),
         },
       },
     })

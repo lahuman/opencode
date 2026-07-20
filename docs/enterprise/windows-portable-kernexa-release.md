@@ -181,17 +181,26 @@ function Read-VerifiedPortableReleaseMetadata {
   if ($metadata -isnot [PSCustomObject] -or (@($metadata.PSObject.Properties.Name | Sort-Object) -join ",") -ne ($expectedFields -join ",")) {
     throw "Release metadata shape is invalid"
   }
-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
+  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
     if ($metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($metadata.$field)) {
       throw "Release metadata shape is invalid"
     }
   }
+  if ($metadata.defaultModelID -isnot [string]) { throw "Release metadata model catalog is invalid" }
   if ($metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
-  if ($metadata.modelIDs -isnot [System.Array] -or $metadata.modelIDs.Count -eq 0) { throw "Release metadata model catalog is invalid" }
+  if ($metadata.modelIDs -isnot [System.Array]) { throw "Release metadata model catalog is invalid" }
   $modelIDs = @($metadata.modelIDs)
   if (@($modelIDs | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) { throw "Release metadata model catalog is invalid" }
-  if (($modelIDs -join ",") -ne (@($modelIDs | Sort-Object -Unique) -join ",")) { throw "Release metadata model catalog is invalid" }
-  if ($modelIDs -notcontains $metadata.defaultModelID) { throw "Release metadata model catalog is invalid" }
+  $modelIDSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+  if (@($modelIDs | Where-Object { -not $modelIDSet.Add($_) }).Count -ne 0) { throw "Release metadata model catalog is invalid" }
+  $sortedModelIDs = [string[]]$modelIDs.Clone()
+  [Array]::Sort($sortedModelIDs, [System.StringComparer]::Ordinal)
+  if (($modelIDs -join "`0") -cne ($sortedModelIDs -join "`0")) { throw "Release metadata model catalog is invalid" }
+  if ($modelIDs.Count -eq 0) {
+    if ($metadata.defaultModelID -cne "") { throw "Release metadata model catalog is invalid" }
+  } elseif ([string]::IsNullOrWhiteSpace($metadata.defaultModelID) -or -not $modelIDSet.Contains($metadata.defaultModelID)) {
+    throw "Release metadata model catalog is invalid"
+  }
   if ($metadata.schemaVersion -is [string] -or $metadata.schemaVersion -is [bool] -or $metadata.schemaVersion -isnot [System.IConvertible]) {
     throw "Release metadata schema version is invalid"
   }

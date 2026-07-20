@@ -221,6 +221,65 @@ test("portable smoke rejects scalar and incompatible release metadata before mut
   )
 })
 
+test.if(process.platform === "win32")(
+  "PowerShell enforces the exact release model/default pair",
+  async () => {
+    const script = await Bun.file(scriptPath).text()
+    const validation = script.slice(
+      script.indexOf("function Assert-WindowsAcceptanceRecords"),
+      script.indexOf("function Assert-EnterpriseCatalogIdentity"),
+    )
+    const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-release-pair-"))
+    const harness = join(temp, "validate-release.ps1")
+    const metadataPath = join(temp, "release.json")
+    const metadata = {
+      schemaVersion: 3,
+      appVersion: "1.0.0",
+      gitCommit: "0123456789abcdef",
+      artifact: "kernexa-1.0.0-win-x64.zip",
+      sha256: "a".repeat(64),
+      defaultsVersion: "defaults-1",
+      guideVersion: "kernexa-1",
+      defaultModelID: "code",
+      modelIDs: ["code", "reasoning"],
+      modelCatalogSHA256: "b".repeat(64),
+      target: { os: "win32", arch: "x64" },
+      builtAt: "2026-07-15T00:00:00.000Z",
+      authenticode: "NotSigned",
+      windowsAcceptance: [],
+      sbom: { file: "kernexa-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
+      thirdPartyLicenses: {
+        file: "kernexa-1.0.0-win-x64.third-party-licenses.txt",
+        sha256: "d".repeat(64),
+      },
+    }
+
+    try {
+      await Bun.write(
+        harness,
+        `${validation}\n$metadata = Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json\nAssert-EnterpriseReleaseMetadata -Metadata $metadata`,
+      )
+      const verify = async (value: typeof metadata) => {
+        await Bun.write(metadataPath, JSON.stringify(value))
+        const process = Bun.spawn(
+          ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", harness, metadataPath],
+          { stdout: "pipe", stderr: "pipe" },
+        )
+        return { code: await process.exited, stderr: await new Response(process.stderr).text() }
+      }
+
+      expect(await verify(metadata)).toEqual({ code: 0, stderr: "" })
+      expect(await verify({ ...metadata, defaultModelID: "", modelIDs: [] })).toEqual({ code: 0, stderr: "" })
+      expect((await verify({ ...metadata, defaultModelID: "ghost", modelIDs: [] })).code).not.toBe(0)
+      expect((await verify({ ...metadata, defaultModelID: "", modelIDs: ["code"] })).code).not.toBe(0)
+      expect((await verify({ ...metadata, defaultModelID: "ghost", modelIDs: ["code"] })).code).not.toBe(0)
+    } finally {
+      await rm(temp, { recursive: true, force: true })
+    }
+  },
+  30_000,
+)
+
 test("portable smoke compares release catalog identity with the extracted manifest", async () => {
   const script = await Bun.file(scriptPath).text()
   const validation = script.slice(

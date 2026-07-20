@@ -212,6 +212,44 @@ test("allows empty catalogs and normalizes provider URLs", () => {
   expect(validateEnterpriseProviderCatalog({ schemaVersion: 1, providers: [] })).toEqual({ schemaVersion: 1, providers: [] })
 })
 
+test("seeds an empty catalog for a new user with no packaged models", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
+  try {
+    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
+
+    const result = await store.initialize({ models: [], defaultModelID: "" })
+
+    expect(result.catalog).toEqual({ schemaVersion: 1, providers: [] })
+    expect(await store.read()).toEqual(result.catalog)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("preserves an existing user catalog when packaged models are empty", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
+  try {
+    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
+    const existing = {
+      schemaVersion: 1 as const,
+      default: { providerID: "existing", modelID: "model" },
+      providers: [
+        {
+          id: "existing",
+          name: "Existing",
+          baseURL: "https://existing.example/v1",
+          models: [{ id: "model", name: "Model" }],
+        },
+      ],
+    }
+    await store.write(existing)
+
+    expect((await store.initialize({ models: [], defaultModelID: "" })).catalog).toEqual(existing)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("preserves an existing catalog and cleans up temp files after failed writes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
   try {

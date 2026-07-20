@@ -1,0 +1,173 @@
+# Working-tree review package
+
+## Base
+077115271eacd420ca02286ebb404fd64a9cf9b8
+
+## Status
+ M packages/desktop/.env.enterprise.example
+ M packages/desktop/src/main/enterprise-provider-runtime.test.ts
+ M packages/desktop/src/main/enterprise-provider-runtime.ts
+ M packages/desktop/src/main/enterprise-providers.test.ts
+
+## Ignored local configuration
+!! packages/desktop/.env
+
+The ignored local file is intentionally excluded from the tracked diff. It contains the same empty Enterprise profile as the example plus LOCAL_TEST=1, with no packaged endpoints, legacy model variables, or secrets.
+
+## Tracked diff stat
+ packages/desktop/.env.enterprise.example           | 10 ++--
+ .../src/main/enterprise-provider-runtime.test.ts   | 60 ++++++++++++++++++++++
+ .../src/main/enterprise-provider-runtime.ts        |  1 +
+ .../desktop/src/main/enterprise-providers.test.ts  | 38 ++++++++++++++
+ 4 files changed, 104 insertions(+), 5 deletions(-)
+
+## Tracked diff
+diff --git a/packages/desktop/.env.enterprise.example b/packages/desktop/.env.enterprise.example
+index 621e3fd7a..00cdfdc03 100644
+--- a/packages/desktop/.env.enterprise.example
++++ b/packages/desktop/.env.enterprise.example
+@@ -1,7 +1,7 @@
+-# Copy these values into packages/desktop/.env before running bun run dev:enterprise.
+-OPENCODE_ENTERPRISE_MODELS=[{"id":"company-code","name":"Company Code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","name":"Company Reasoning","baseURL":"https://reasoning.corp.example/v1"}]
+-OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=company-code
+-OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=https://llm-dr.corp.example
++OPENCODE_ENTERPRISE=1
++OPENCODE_ENTERPRISE_MODELS=[]
++OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
++OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
+ OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
+-OPENCODE_ENTERPRISE_GUIDE_VERSION=dev-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=pilot-1
+ OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
+diff --git a/packages/desktop/src/main/enterprise-provider-runtime.test.ts b/packages/desktop/src/main/enterprise-provider-runtime.test.ts
+index e123dcc1d..3371f2da8 100644
+--- a/packages/desktop/src/main/enterprise-provider-runtime.test.ts
++++ b/packages/desktop/src/main/enterprise-provider-runtime.test.ts
+@@ -420,6 +420,66 @@ test("catalog snapshots reject credentials for providers outside the catalog", a
+   })
+ })
+ 
++test("startup with an empty packaged profile has no default until the first model is created", async () => {
++  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-empty-"))
++  try {
++    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
++    const credentials = createEnterpriseCredentialStore({
++      file: join(root, "credentials.bin"),
++      encryptionAvailable: () => true,
++      encrypt: Buffer.from,
++      decrypt: (value) => value.toString("utf8"),
++    })
++    await initializeEnterpriseProviderStores({
++      catalog,
++      credentials,
++      profile: { models: [], defaultModelID: "" },
++    })
++    const runtime = createEnterpriseProviderRuntime({
++      catalog,
++      credentials,
++      restart: async () => undefined,
++    })
++
++    expect(await runtime.providerCatalog()).toMatchObject({ providers: [], default: undefined })
++
++    await runtime.createProvider({
++      provider: { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
++    })
++    expect(
++      await runtime.createModel({ providerID: "provider", model: { id: "first", name: "First" } }),
++    ).toMatchObject({ default: { providerID: "provider", modelID: "first" } })
++  } finally {
++    await rm(root, { recursive: true, force: true })
++  }
++})
++
++test("startup preserves an existing on-disk catalog under an empty packaged profile", async () => {
++  const root = await mkdtemp(join(tmpdir(), "enterprise-provider-existing-"))
++  try {
++    const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
++    const existing = initial().catalog
++    await catalog.write(existing)
++    const credentials = createEnterpriseCredentialStore({
++      file: join(root, "credentials.bin"),
++      encryptionAvailable: () => true,
++      encrypt: Buffer.from,
++      decrypt: (value) => value.toString("utf8"),
++    })
++
++    expect(
++      await initializeEnterpriseProviderStores({
++        catalog,
++        credentials,
++        profile: { models: [], defaultModelID: "" },
++      }),
++    ).toEqual(existing)
++    expect(await catalog.read()).toEqual(existing)
++  } finally {
++    await rm(root, { recursive: true, force: true })
++  }
++})
++
+ test("startup migration writes schema v3 once and is retry-safe", async () => {
+   const root = await mkdtemp(join(tmpdir(), "enterprise-provider-startup-"))
+   try {
+diff --git a/packages/desktop/src/main/enterprise-provider-runtime.ts b/packages/desktop/src/main/enterprise-provider-runtime.ts
+index db19f49a7..ecc019226 100644
+--- a/packages/desktop/src/main/enterprise-provider-runtime.ts
++++ b/packages/desktop/src/main/enterprise-provider-runtime.ts
+@@ -407,6 +407,7 @@ function view(state: State, health: CredentialHealth): EnterpriseProviderCatalog
+   const errorCode = credentialHealthError(health)
+   return {
+     ...state.catalog,
++    default: state.catalog.default,
+     providers: state.catalog.providers.map((provider) => {
+       const credentials = errorCode ? undefined : state.credentials.providers[provider.id]
+       return {
+diff --git a/packages/desktop/src/main/enterprise-providers.test.ts b/packages/desktop/src/main/enterprise-providers.test.ts
+index b7e14d732..3d2d874f0 100644
+--- a/packages/desktop/src/main/enterprise-providers.test.ts
++++ b/packages/desktop/src/main/enterprise-providers.test.ts
+@@ -212,6 +212,44 @@ test("allows empty catalogs and normalizes provider URLs", () => {
+   expect(validateEnterpriseProviderCatalog({ schemaVersion: 1, providers: [] })).toEqual({ schemaVersion: 1, providers: [] })
+ })
+ 
++test("seeds an empty catalog for a new user with no packaged models", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
++
++    const result = await store.initialize({ models: [], defaultModelID: "" })
++
++    expect(result.catalog).toEqual({ schemaVersion: 1, providers: [] })
++    expect(await store.read()).toEqual(result.catalog)
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
++test("preserves an existing user catalog when packaged models are empty", async () => {
++  const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
++  try {
++    const store = createEnterpriseProviderStore({ file: join(dir, "providers.json") })
++    const existing = {
++      schemaVersion: 1 as const,
++      default: { providerID: "existing", modelID: "model" },
++      providers: [
++        {
++          id: "existing",
++          name: "Existing",
++          baseURL: "https://existing.example/v1",
++          models: [{ id: "model", name: "Model" }],
++        },
++      ],
++    }
++    await store.write(existing)
++
++    expect((await store.initialize({ models: [], defaultModelID: "" })).catalog).toEqual(existing)
++  } finally {
++    await rm(dir, { recursive: true, force: true })
++  }
++})
++
+ test("preserves an existing catalog and cleans up temp files after failed writes", async () => {
+   const dir = await mkdtemp(join(tmpdir(), "enterprise-providers-"))
+   try {

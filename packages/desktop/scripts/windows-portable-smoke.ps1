@@ -84,13 +84,14 @@ function Assert-EnterpriseReleaseMetadata {
   $metadataFields = @($Metadata.PSObject.Properties.Name | Sort-Object)
   if (($metadataFields -join ",") -ne ($requiredFields -join ",")) { throw "Release metadata shape is invalid" }
 
-  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultModelID", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
+  foreach ($field in @("appVersion", "artifact", "authenticode", "builtAt", "defaultsVersion", "gitCommit", "guideVersion", "modelCatalogSHA256", "sha256")) {
     if ($Metadata.$field -isnot [string] -or [string]::IsNullOrWhiteSpace($Metadata.$field)) {
       throw "Release metadata shape is invalid"
     }
   }
+  if ($Metadata.defaultModelID -isnot [string]) { throw "Release metadata model catalog is invalid" }
   if ($Metadata.modelCatalogSHA256 -notmatch "\A[0-9a-f]{64}\z") { throw "Release metadata model catalog is invalid" }
-  if ($Metadata.modelIDs -isnot [System.Array] -or $Metadata.modelIDs.Count -eq 0) {
+  if ($Metadata.modelIDs -isnot [System.Array]) {
     throw "Release metadata model catalog is invalid"
   }
   $modelIDs = @($Metadata.modelIDs)
@@ -104,7 +105,11 @@ function Assert-EnterpriseReleaseMetadata {
   $sortedModelIDs = [string[]]$modelIDs.Clone()
   [Array]::Sort($sortedModelIDs, [System.StringComparer]::Ordinal)
   if (($modelIDs -join "`0") -cne ($sortedModelIDs -join "`0")) { throw "Release metadata model catalog is invalid" }
-  if (-not $modelIDSet.Contains($Metadata.defaultModelID)) { throw "Release metadata model catalog is invalid" }
+  if ($modelIDs.Count -eq 0) {
+    if ($Metadata.defaultModelID -cne "") { throw "Release metadata model catalog is invalid" }
+  } elseif ([string]::IsNullOrWhiteSpace($Metadata.defaultModelID) -or -not $modelIDSet.Contains($Metadata.defaultModelID)) {
+    throw "Release metadata model catalog is invalid"
+  }
 
   $schemaVersion = $Metadata.schemaVersion
   if ($null -eq $schemaVersion -or $schemaVersion -is [string] -or $schemaVersion -is [bool] -or $schemaVersion -isnot [System.IConvertible]) {

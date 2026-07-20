@@ -55,16 +55,14 @@ export class EnterprisePreflightError extends Error {
 
 export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV2> {
   const catalog = enterpriseModelCatalogIdentity(input.profile.models)
-  if (!catalog.modelIDs.includes(input.profile.defaultModelID)) {
-    throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
-  }
+  if (!validEnterpriseModelDefault(catalog.modelIDs, input.profile.defaultModelID)) invalidManifest()
   return {
     schemaVersion: 2,
     appVersion: requireText(input.appVersion),
     defaultsVersion: requireText(input.profile.defaultsVersion),
     guideVersion: requireText(input.profile.guideVersion),
     catalogVersion: requireText(input.profile.catalogVersion),
-    defaultModelID: requireText(input.profile.defaultModelID),
+    defaultModelID: input.profile.defaultModelID,
     modelIDs: catalog.modelIDs,
     modelCatalogSHA256: catalog.sha256,
     allowedOrigins: normalizeOrigins(input.profile.allowedOrigins),
@@ -194,7 +192,8 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
     !isText(value.defaultsVersion) ||
     !isText(value.guideVersion) ||
     !isText(value.catalogVersion) ||
-    !isText(value.defaultModelID) ||
+    typeof value.defaultModelID !== "string" ||
+    value.defaultModelID.trim() !== value.defaultModelID ||
     !Array.isArray(value.modelIDs) ||
     value.modelIDs.some((modelID) => !isText(modelID)) ||
     new Set(value.modelIDs).size !== value.modelIDs.length ||
@@ -209,7 +208,7 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
   }
   const modelIDs = value.modelIDs as string[]
   if (
-    !modelIDs.includes(value.defaultModelID) ||
+    !validEnterpriseModelDefault(modelIDs, value.defaultModelID) ||
     modelIDs.some((modelID, index) => modelID !== [...modelIDs].sort()[index])
   ) {
     invalidManifest()
@@ -262,6 +261,11 @@ function requireText(value: string) {
   return value
 }
 
+export function validEnterpriseModelDefault(modelIDs: string[], defaultModelID: string) {
+  if (modelIDs.length === 0) return defaultModelID === ""
+  return isText(defaultModelID) && modelIDs.includes(defaultModelID)
+}
+
 function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim() === value && value.length > 0
 }
@@ -279,7 +283,7 @@ export function enterpriseModelCatalogIdentity(models: { id: string; name: strin
     }))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const modelIDs = normalized.map((model) => model.id)
-  if (!modelIDs.length || new Set(modelIDs).size !== modelIDs.length) {
+  if (new Set(modelIDs).size !== modelIDs.length) {
     throw new EnterprisePreflightError("manifest_invalid", "Enterprise package manifest is invalid")
   }
   return { modelIDs, sha256: hash(Buffer.from(JSON.stringify(normalized))) }
