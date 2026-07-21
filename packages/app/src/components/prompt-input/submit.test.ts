@@ -25,6 +25,7 @@ const sentShell: string[] = []
 const syncedDirectories: string[] = []
 const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string }> = []
 const toasts: Array<{ title?: string; description?: string }> = []
+const availableCommands: Array<{ name: string }> = []
 
 let params: { id?: string } = {}
 let search: { draftId?: string } = {}
@@ -33,6 +34,10 @@ let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
 let createSessionFailure: Error | undefined
+let createWorktreeFailure: Error | undefined
+let shellFailure: Error | undefined
+let commandFailure: Error | undefined
+let promptFailure: Error | undefined
 let enterprise = false
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -80,16 +85,26 @@ const clientFor = (directory: string) => {
         }
       },
       shell: async () => {
+        if (shellFailure) throw shellFailure
         sentShell.push(directory)
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
-      command: async () => ({ data: undefined }),
+      promptAsync: async () => {
+        if (promptFailure) throw promptFailure
+        return { data: undefined }
+      },
+      command: async () => {
+        if (commandFailure) throw commandFailure
+        return { data: undefined }
+      },
       abort: async () => ({ data: undefined }),
     },
     worktree: {
-      create: async () => ({ data: { directory: `${directory}/new` } }),
+      create: async () => {
+        if (createWorktreeFailure) throw createWorktreeFailure
+        return { data: { directory: `${directory}/new` } }
+      },
     },
   }
 }
@@ -191,7 +206,7 @@ beforeAll(async () => {
 
   mock.module("@/context/sync", () => ({
     useSync: () => () => ({
-      data: { command: [] },
+      data: { command: availableCommands },
       session: {
         optimistic: {
           add: (value: {
@@ -276,8 +291,13 @@ beforeEach(() => {
   permissionServer = "server-a"
   createSessionGate = undefined
   createSessionFailure = undefined
+  createWorktreeFailure = undefined
+  shellFailure = undefined
+  commandFailure = undefined
+  promptFailure = undefined
   enterprise = false
   toasts.length = 0
+  availableCommands.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -310,7 +330,9 @@ describe("prompt submit worktree selection", () => {
     const event = { preventDefault: () => undefined } as unknown as Event
 
     const first = submit.handleSubmit(event)
+    await Bun.sleep(0)
     const second = submit.handleSubmit(event)
+    await Bun.sleep(0)
     const third = submit.handleSubmit(event)
 
     expect(current.current()).toEqual(DEFAULT_PROMPT)
@@ -319,6 +341,57 @@ describe("prompt submit worktree selection", () => {
 
     expect(createdSessions).toEqual(["/repo/worktree-a"])
     expect(sentShell).toEqual(["/repo/worktree-a"])
+    expect(promoted).toEqual([{ directory: "/repo/worktree-a", sessionID: "session-1" }])
+  })
+
+  test("admits a different prompt target while initial session creation is pending", async () => {
+    let release = () => {}
+    createSessionGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const initial = createPromptState({ prompt: "ls" })
+    const established = createPromptState({ prompt: "pwd" })
+    let active = initial
+    const routed = {
+      ...initial,
+      capture: () => active.capture(),
+    }
+    const submit = createPromptSubmit({
+      prompt: routed,
+      info: () => (params.id ? { id: params.id } : undefined),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    const first = submit.handleSubmit(event)
+    expect(initial.current()).toEqual(DEFAULT_PROMPT)
+
+    active = established
+    params.id = "session-established"
+    await submit.handleSubmit(event)
+
+    expect(established.current()).toEqual(DEFAULT_PROMPT)
+    expect(sentShell).toEqual(["/repo/main"])
+
+    release()
+    await first
+
+    expect(createdSessions).toEqual(["/repo/worktree-a"])
+    expect(sentShell).toEqual(["/repo/main", "/repo/worktree-a"])
     expect(promoted).toEqual([{ directory: "/repo/worktree-a", sessionID: "session-1" }])
   })
 
@@ -401,6 +474,168 @@ describe("prompt submit worktree selection", () => {
     await first
 
     expect(current.current()).toEqual([{ type: "text", content: "next", start: 0, end: 4 }])
+  })
+
+  test("restores the initial prompt when worktree creation fails", async () => {
+    selected = "create"
+    createWorktreeFailure = new Error("worktree create failed")
+    const current = createPromptState({ prompt: "ls" })
+    const submit = createPromptSubmit({
+      prompt: current,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(current.current()).toEqual([{ type: "text", content: "ls", start: 0, end: 2 }])
+    expect(createdSessions).toEqual([])
+    expect(sentShell).toEqual([])
+  })
+
+  test("restores a normal prompt on its retargeted destination when send fails", async () => {
+    promptFailure = new Error("prompt send failed")
+    const initial = createPromptState({ prompt: "explain" })
+    const destination = createPromptState({ prompt: "stale" })
+    const routed = {
+      ...initial,
+      capture: (scope?: unknown) => (scope ? destination.capture() : initial.capture()),
+    }
+    const submit = createPromptSubmit({
+      prompt: routed,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Promise.resolve()
+
+    expect(initial.current()).toEqual(DEFAULT_PROMPT)
+    expect(destination.current()).toEqual([{ type: "text", content: "explain", start: 0, end: 7 }])
+  })
+
+  test("restores an established-session shell prompt when send fails", async () => {
+    params = { id: "session-established" }
+    shellFailure = new Error("shell send failed")
+    const current = createPromptState({ prompt: "ls" })
+    const submit = createPromptSubmit({
+      prompt: current,
+      info: () => ({ id: "session-established" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Promise.resolve()
+
+    expect(current.current()).toEqual([{ type: "text", content: "ls", start: 0, end: 2 }])
+  })
+
+  test("restores an established-session custom command when send fails", async () => {
+    params = { id: "session-established" }
+    availableCommands.push({ name: "build" })
+    commandFailure = new Error("command send failed")
+    const current = createPromptState({ prompt: "/build app" })
+    const submit = createPromptSubmit({
+      prompt: current,
+      info: () => ({ id: "session-established" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Promise.resolve()
+
+    expect(current.current()).toEqual([{ type: "text", content: "/build app", start: 0, end: 10 }])
+  })
+
+  test("keeps established-session queue behavior unchanged", async () => {
+    params = { id: "session-established" }
+    const queued: Array<{ sessionID: string; prompt: Prompt }> = []
+    let submitted = 0
+    const current = createPromptState({ prompt: "next" })
+    const submit = createPromptSubmit({
+      prompt: current,
+      info: () => ({ id: "session-established" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      shouldQueue: () => true,
+      onQueue: (draft) => queued.push({ sessionID: draft.sessionID, prompt: draft.prompt }),
+      onSubmit: () => submitted++,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(current.current()).toEqual(DEFAULT_PROMPT)
+    expect(queued).toEqual([
+      {
+        sessionID: "session-established",
+        prompt: [{ type: "text", content: "next", start: 0, end: 4 }],
+      },
+    ])
+    expect(submitted).toBe(0)
+    expect(createdSessions).toEqual([])
+    expect(optimistic).toEqual([])
   })
 
   test("reads the latest worktree accessor value per submit", async () => {

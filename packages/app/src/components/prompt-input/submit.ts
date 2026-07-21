@@ -210,6 +210,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const [search] = useSearchParams<{ draftId?: string }>()
   const tabs = useTabs()
   const pendingKey = (sessionID: string) => ScopedKey.from(sdk().scope, sessionID)
+  type PromptTarget = ReturnType<ReturnType<typeof usePrompt>["capture"]>
+  const submitting = new Set<PromptTarget>()
 
   const errorMessage = (err: unknown) => {
     if (err && typeof err === "object" && "data" in err) {
@@ -281,8 +283,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
   }
 
-  const submit = async () => {
-    const target = prompt.capture()
+  const submit = async (target: PromptTarget, retarget: (target: PromptTarget) => void) => {
     const submission = createPromptSubmissionState({
       target,
       prompt: target.current(),
@@ -422,7 +423,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           const draftID = search.draftId
           if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
           else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
-          submission.retarget(prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id }))
+          const destination = prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id })
+          submission.retarget(destination)
+          retarget(destination)
         })
       }
     }
@@ -601,14 +604,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
   }
 
-  let submitting = false
-
   const handleSubmit = async (event: Event) => {
     event.preventDefault()
-    if (submitting) return
-    submitting = true
-    await submit().finally(() => {
-      submitting = false
+    const target = prompt.capture()
+    if (submitting.has(target)) return
+    submitting.add(target)
+    const claim = { target }
+    await submit(target, (next) => {
+      submitting.delete(claim.target)
+      submitting.add(next)
+      claim.target = next
+    }).finally(() => {
+      submitting.delete(claim.target)
     })
   }
 
