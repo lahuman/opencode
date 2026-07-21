@@ -132,6 +132,29 @@ test("New Session preserves the ordinary composer with an empty provider catalog
   await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
 })
 
+test("provider editor defaults credentials by operation", async ({ page }) => {
+  await page.goto(fixture("company"))
+  const dialog = page.getByRole("dialog")
+
+  await dialog.getByRole("button", { name: "Create provider" }).click()
+  await expect(page.getByLabel("Credential action")).toHaveValue("replace")
+  await expect(page.getByLabel("API key")).toBeVisible()
+  await expect(page.getByPlaceholder("Header name")).toBeVisible()
+  await expect(page.getByPlaceholder("Secret value")).toBeVisible()
+  await page.getByLabel("Provider ID").fill("gateway")
+  await page.getByLabel("Provider name").fill("Gateway")
+  await page.getByLabel("Base URL").fill("https://gateway.example/v1")
+  await dialog.getByRole("button", { name: "Save provider" }).click()
+
+  const provider = page.getByTestId("enterprise-provider-gateway")
+  await expect(provider).toContainText("Credentials not configured")
+  await dialog.getByRole("button", { name: "Edit provider" }).click()
+  await expect(page.getByLabel("Credential action")).toHaveValue("preserve")
+  await expect(page.getByLabel("API key")).toBeHidden()
+  await expect(page.getByPlaceholder("Header name")).toBeHidden()
+  await expect(page.getByPlaceholder("Secret value")).toBeHidden()
+})
+
 test("DialogCompanyProvider manages provider, model, credentials, defaults, diagnostics, and deletion", async ({
   page,
 }) => {

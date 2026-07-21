@@ -195,7 +195,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
       name: mode === "edit" ? (provider?.name ?? "") : "",
       baseURL: mode === "edit" ? (provider?.baseURL ?? "") : "",
       models: mode === "edit" ? (provider?.models.map((model) => ({ ...model })) ?? []) : [],
-      credentialMode: "preserve",
+      credentialMode: mode === "create" ? "replace" : "preserve",
       apiKey: "",
       headers: [{ key: "", value: "" }],
     })
