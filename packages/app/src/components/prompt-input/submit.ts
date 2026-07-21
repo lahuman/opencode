@@ -281,9 +281,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
   }
 
-  const handleSubmit = async (event: Event) => {
-    event.preventDefault()
-
+  const submit = async () => {
     const target = prompt.capture()
     const submission = createPromptSubmissionState({
       target,
@@ -323,6 +321,31 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
+    const clearInput = () => {
+      submission.clear()
+      input.setMode("normal")
+      input.setPopover(null)
+    }
+
+    const restoreInput = () => {
+      const restored = submission.restore()
+      if (!restored) return false
+      restored.target.set(restored.prompt, input.promptLength(restored.prompt))
+      if (!submission.current(prompt.capture())) return true
+      input.setMode(mode)
+      input.setPopover(null)
+      requestAnimationFrame(() => {
+        const editor = input.editor()
+        if (!editor) return
+        editor.focus()
+        setCursorPosition(editor, input.promptLength(currentPrompt))
+        input.queueScroll()
+      })
+      return true
+    }
+
+    clearInput()
+
     const projectDirectory = sdk().directory
     const permissionState = permission.currentServerState()
     const isNewSession = !params.id
@@ -350,6 +373,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             title: language.t("prompt.toast.worktreeCreateFailed.title"),
             description: language.t("common.requestFailed"),
           })
+          restoreInput()
           return
         }
         WorktreeState.pending(sdk().scope, createdWorktree.directory)
@@ -407,6 +431,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         title: language.t("prompt.toast.promptSendFailed.title"),
         description: language.t("prompt.toast.promptSendFailed.description"),
       })
+      restoreInput()
       return
     }
 
@@ -425,40 +450,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
     }
 
-    const clearInput = () => {
-      submission.clear()
-      input.setMode("normal")
-      input.setPopover(null)
-    }
-
-    const restoreInput = () => {
-      const restored = submission.restore()
-      if (!restored) return false
-      restored.target.set(restored.prompt, input.promptLength(restored.prompt))
-      if (!submission.current(prompt.capture())) return true
-      input.setMode(mode)
-      input.setPopover(null)
-      requestAnimationFrame(() => {
-        const editor = input.editor()
-        if (!editor) return
-        editor.focus()
-        setCursorPosition(editor, input.promptLength(currentPrompt))
-        input.queueScroll()
-      })
-      return true
-    }
-
     if (!isNewSession && mode === "normal" && input.shouldQueue?.()) {
       input.onQueue?.(draft)
       clearContext(submission.target())
-      clearInput()
       return
     }
 
     input.onSubmit?.()
 
     if (mode === "shell") {
-      clearInput()
       client.session
         .shell({
           sessionID: session.id,
@@ -481,7 +481,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const commandName = cmdName.slice(1)
       const customCommand = sync().data.command.find((c) => c.name === commandName)
       if (customCommand) {
-        clearInput()
         client.session
           .command({
             sessionID: session.id,
@@ -521,7 +520,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     for (const item of commentItems) submission.target().context.remove(item.key)
-    clearInput()
 
     const waitForWorktree = async () => {
       const worktree = WorktreeState.get(sdk().scope, sessionDirectory)
@@ -600,6 +598,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       })
       removeOptimisticMessage()
       if (restoreInput()) restoreCommentItems(submission.target(), commentItems)
+    })
+  }
+
+  let submitting = false
+
+  const handleSubmit = async (event: Event) => {
+    event.preventDefault()
+    if (submitting) return
+    submitting = true
+    await submit().finally(() => {
+      submitting = false
     })
   }
 
