@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createPromptState, DEFAULT_PROMPT } from "@/context/prompt"
+import { createPromptState, DEFAULT_PROMPT } from "@/context/prompt-state"
 import { createPromptSubmissionState } from "./submission-state"
 
 test("keeps the destination composer clear when retargeting a cleared submission", () => {
