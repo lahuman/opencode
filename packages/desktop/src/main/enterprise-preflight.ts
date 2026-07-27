@@ -4,7 +4,15 @@ import { join } from "node:path"
 import type { EnterpriseProfile } from "../enterprise-profile"
 import { verifyEnterpriseSkillPacks } from "./enterprise-skill-packs"
 
-const resourceNames = ["company-guide.md", "models.json", "opencode.jsonc", "skill-packs.json"] as const
+const resourceNames = [
+  "company-guide.md",
+  "models.json",
+  "opencode.jsonc",
+  "ripgrep/LICENSE-MIT",
+  "ripgrep/UNLICENSE",
+  "ripgrep/rg.exe",
+  "skill-packs.json",
+] as const
 
 type ResourceName = (typeof resourceNames)[number]
 export type EnterpriseManifestResources = Record<ResourceName, string>
@@ -17,8 +25,8 @@ type EnterpriseManifestProfile = {
   allowedOrigins: string[]
 }
 
-export type EnterpriseManifestV2 = {
-  schemaVersion: 2
+export type EnterpriseManifestV3 = {
+  schemaVersion: 3
   appVersion: string
   defaultsVersion: string
   guideVersion: string
@@ -53,11 +61,11 @@ export class EnterprisePreflightError extends Error {
   }
 }
 
-export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV2> {
+export async function createEnterpriseManifest(input: ManifestInput): Promise<EnterpriseManifestV3> {
   const catalog = enterpriseModelCatalogIdentity(input.profile.models)
   if (!validEnterpriseModelDefault(catalog.modelIDs, input.profile.defaultModelID)) invalidManifest()
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     appVersion: requireText(input.appVersion),
     defaultsVersion: requireText(input.profile.defaultsVersion),
     guideVersion: requireText(input.profile.guideVersion),
@@ -74,7 +82,7 @@ export async function createEnterpriseManifest(input: ManifestInput): Promise<En
   }
 }
 
-export async function writeEnterpriseManifest(path: string, manifest: EnterpriseManifestV2) {
+export async function writeEnterpriseManifest(path: string, manifest: EnterpriseManifestV3) {
   await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`)
 }
 
@@ -96,13 +104,19 @@ export async function verifyEnterpriseManifest(input: ManifestInput & { manifest
       return [name, bytes] as const
     }),
   )
+  if (resources.find(([name]) => name === "ripgrep/rg.exe")?.[1].byteLength === 0) {
+    throw new EnterprisePreflightError("resource_mismatch", "Enterprise package resource verification failed")
+  }
   const manifest = verifyEnterpriseManifestContents({
     manifest: raw,
     resources: {
       "company-guide.md": resources[0][1],
       "models.json": resources[1][1],
       "opencode.jsonc": resources[2][1],
-      "skill-packs.json": resources[3][1],
+      "ripgrep/LICENSE-MIT": resources[3][1],
+      "ripgrep/UNLICENSE": resources[4][1],
+      "ripgrep/rg.exe": resources[5][1],
+      "skill-packs.json": resources[6][1],
     },
   })
   const expected = {
@@ -155,6 +169,9 @@ export function runEnterprisePreflight(input: {
         "company-guide.md": join(input.enterpriseDir, "company-guide.md"),
         "models.json": join(input.enterpriseDir, "models.json"),
         "skill-packs.json": join(input.enterpriseDir, "skill-packs.json"),
+        "ripgrep/rg.exe": join(input.enterpriseDir, "ripgrep", "rg.exe"),
+        "ripgrep/LICENSE-MIT": join(input.enterpriseDir, "ripgrep", "LICENSE-MIT"),
+        "ripgrep/UNLICENSE": join(input.enterpriseDir, "ripgrep", "UNLICENSE"),
       },
     }),
     verifyEnterpriseSkillPacks(input.enterpriseDir),
@@ -172,7 +189,7 @@ export function verifyEnterpriseManifestContents(input: {
   return manifest
 }
 
-function decodeManifest(raw: string): EnterpriseManifestV2 {
+function decodeManifest(raw: string): EnterpriseManifestV3 {
   const value: unknown = (() => {
     try {
       return JSON.parse(raw)
@@ -181,7 +198,7 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
     }
   })()
   if (!isRecord(value) || !hasExactKeys(value, [...manifestKeys])) invalidManifest()
-  if (value.schemaVersion !== 2) invalidManifest()
+  if (value.schemaVersion !== 3) invalidManifest()
   if (!Array.isArray(value.allowedOrigins) || value.allowedOrigins.some((origin) => typeof origin !== "string"))
     invalidManifest()
   const allowedOrigins = value.allowedOrigins as string[]
@@ -214,7 +231,7 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
     invalidManifest()
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     appVersion: value.appVersion,
     defaultsVersion: value.defaultsVersion,
     guideVersion: value.guideVersion,
@@ -223,7 +240,7 @@ function decodeManifest(raw: string): EnterpriseManifestV2 {
     modelIDs,
     modelCatalogSHA256: value.modelCatalogSHA256,
     allowedOrigins,
-    resources: resources as EnterpriseManifestV2["resources"],
+    resources: resources as EnterpriseManifestV3["resources"],
   }
 }
 

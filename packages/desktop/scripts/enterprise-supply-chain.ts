@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises"
 import path from "node:path"
+import { ENTERPRISE_RIPGREP_URL, ENTERPRISE_RIPGREP_VERSION } from "./prepare-enterprise-ripgrep"
 
 type Lockfile = { packages?: Record<string, unknown> }
 
@@ -9,6 +10,7 @@ export async function writeEnterpriseSupplyChain(input: {
   builtAt: Date
   lockfile?: string
   nodeModules?: string
+  ripgrepDir?: string
 }) {
   const root = path.resolve(import.meta.dir, "../../..")
   const lockfile: Lockfile = Bun.JSONC.parse(await Bun.file(input.lockfile ?? path.join(root, "bun.lock")).text())
@@ -50,6 +52,10 @@ export async function writeEnterpriseSupplyChain(input: {
   )
   const sbom = input.archive.replace(/\.zip$/, ".sbom.cdx.json")
   const licenses = input.archive.replace(/\.zip$/, ".third-party-licenses.txt")
+  const ripgrepDir = input.ripgrepDir ?? path.join(root, "packages", "desktop", "resources", "enterprise", "ripgrep")
+  const ripgrepLicenses = await Promise.all(
+    ["LICENSE-MIT", "UNLICENSE"].map((name) => Bun.file(path.join(ripgrepDir, name)).text()),
+  )
   await Bun.write(
     sbom,
     `${JSON.stringify(
@@ -61,17 +67,28 @@ export async function writeEnterpriseSupplyChain(input: {
           timestamp: input.builtAt.toISOString(),
           component: { type: "application", name: "kernexa", version: input.appVersion },
         },
-        components: notices.map((dependency) => {
-          const purl = `pkg:npm/${dependency.name.startsWith("@") ? `%40${dependency.name.slice(1)}` : dependency.name}@${dependency.version}`
-          return {
-            type: "library",
-            "bom-ref": purl,
-            name: dependency.name,
-            version: dependency.version,
-            purl,
-            ...(dependency.license === "NOASSERTION" ? {} : { licenses: [{ expression: dependency.license }] }),
-          }
-        }),
+        components: [
+          ...notices.map((dependency) => {
+            const purl = `pkg:npm/${dependency.name.startsWith("@") ? `%40${dependency.name.slice(1)}` : dependency.name}@${dependency.version}`
+            return {
+              type: "library",
+              "bom-ref": purl,
+              name: dependency.name,
+              version: dependency.version,
+              purl,
+              ...(dependency.license === "NOASSERTION" ? {} : { licenses: [{ expression: dependency.license }] }),
+            }
+          }),
+          {
+            type: "application",
+            "bom-ref": `pkg:generic/ripgrep@${ENTERPRISE_RIPGREP_VERSION}`,
+            name: "ripgrep",
+            version: ENTERPRISE_RIPGREP_VERSION,
+            purl: `pkg:generic/ripgrep@${ENTERPRISE_RIPGREP_VERSION}`,
+            licenses: [{ expression: "MIT OR Unlicense" }],
+            externalReferences: [{ type: "distribution", url: ENTERPRISE_RIPGREP_URL }],
+          },
+        ],
       },
       null,
       2,
@@ -84,7 +101,7 @@ export async function writeEnterpriseSupplyChain(input: {
         (dependency) =>
           `${dependency.name}@${dependency.version}\nDeclared license: ${dependency.license}\n${dependency.text || "License text unavailable in the local dependency installation."}`,
       )
-      .join("\n\n---\n\n")}\n`,
+      .join("\n\n---\n\n")}\n\n---\n\nripgrep@${ENTERPRISE_RIPGREP_VERSION}\nOfficial source: ${ENTERPRISE_RIPGREP_URL}\nDeclared license: MIT OR Unlicense\n${ripgrepLicenses.join("\n\n")}\n`,
   )
   return { sbom, licenses }
 }

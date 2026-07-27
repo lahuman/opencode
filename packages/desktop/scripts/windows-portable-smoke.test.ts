@@ -314,7 +314,7 @@ test.if(process.platform === "win32")(
     const temp = await mkdtemp(join(tmpdir(), "opencode-portable-smoke-catalog-"))
     const application = join(temp, "application")
     const manifest = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       defaultModelID: "code",
       modelIDs: ["code", "reasoning"],
       modelCatalogSHA256: "a".repeat(64),
@@ -444,6 +444,9 @@ test("portable smoke validates every required extracted payload and a nonempty e
     "resources/enterprise/company-guide.md",
     "resources/enterprise/models.json",
     "resources/enterprise/enterprise-manifest.json",
+    "resources/enterprise/ripgrep/rg.exe",
+    "resources/enterprise/ripgrep/LICENSE-MIT",
+    "resources/enterprise/ripgrep/UNLICENSE",
     "resources/licenses/OpenCode-LICENSE",
   ]) {
     expect(archive).toContain(`"${resource}"`)
@@ -454,6 +457,15 @@ test("portable smoke validates every required extracted payload and a nonempty e
   expect(archive).toContain("Portable archive is missing required resource")
   expect(archive).toContain("$executables[0].Length -eq 0")
   expect(archive).toContain('Status -ne "NotSigned"')
+})
+
+test("portable smoke executes bundled ripgrep and enumerates an enterprise skill", async () => {
+  const script = await Bun.file(scriptPath).text()
+  expect(script).toContain("function Test-BundledRipgrep")
+  expect(script).toContain('"--version"')
+  expect(script).toContain('"--glob=!**/SKILL.md"')
+  expect(script).toContain('"agents/openai.yaml"')
+  expect(script).toContain("Test-BundledRipgrep -ApplicationDirectory $application.Directory")
 })
 
 test("portable smoke retains process identities with PID and creation time for observation and cleanup", async () => {

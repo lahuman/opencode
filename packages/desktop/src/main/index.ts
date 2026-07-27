@@ -317,6 +317,7 @@ const main = Effect.gen(function* () {
     enterpriseEnvironment(ENTERPRISE_PROFILE, {
       defaults: join(enterpriseDir, "opencode.jsonc"),
       guide: enterpriseGuide,
+      ripgrep: app.isPackaged ? join(enterpriseDir, "ripgrep", "rg.exe") : undefined,
       userData: app.getPath("userData"),
       skillPacks: enabledSkillPackPaths(),
     }),

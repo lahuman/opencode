@@ -44,6 +44,9 @@ if (import.meta.main) {
       "company-guide.md": path.join(root, "resources", "enterprise", "company-guide.md"),
       "models.json": path.join(root, "resources", "enterprise", "models.json"),
       "skill-packs.json": path.join(root, "resources", "enterprise", "skill-packs.json"),
+      "ripgrep/rg.exe": path.join(root, "resources", "enterprise", "ripgrep", "rg.exe"),
+      "ripgrep/LICENSE-MIT": path.join(root, "resources", "enterprise", "ripgrep", "LICENSE-MIT"),
+      "ripgrep/UNLICENSE": path.join(root, "resources", "enterprise", "ripgrep", "UNLICENSE"),
     },
   })
 }

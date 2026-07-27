@@ -65,7 +65,7 @@ test("generates an empty Enterprise model manifest", async () => {
   })
 
   expect(manifest).toMatchObject({
-    schemaVersion: 2,
+    schemaVersion: 3,
     defaultModelID: "",
     modelIDs: [],
     modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
@@ -103,7 +103,7 @@ test("prepares a manifest only for enterprise builds", async () => {
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
       },
     }),
-  ).toMatchObject({ schemaVersion: 2, appVersion: "1.2.3" })
+  ).toMatchObject({ schemaVersion: 3, appVersion: "1.2.3" })
 })
 
 async function manifestFixture() {
@@ -113,12 +113,19 @@ async function manifestFixture() {
     "company-guide.md": join(root, "company-guide.md"),
     "models.json": join(root, "models.json"),
     "skill-packs.json": join(root, "skill-packs.json"),
+    "ripgrep/rg.exe": join(root, "ripgrep/rg.exe"),
+    "ripgrep/LICENSE-MIT": join(root, "ripgrep/LICENSE-MIT"),
+    "ripgrep/UNLICENSE": join(root, "ripgrep/UNLICENSE"),
   }
+  await Bun.write(join(root, "ripgrep", ".keep"), "")
   await Promise.all([
     Bun.write(resources["opencode.jsonc"], "{}"),
     Bun.write(resources["company-guide.md"], "# Guide"),
     Bun.write(resources["models.json"], "{}"),
     Bun.write(resources["skill-packs.json"], '{"schemaVersion":1,"packs":[]}'),
+    Bun.write(resources["ripgrep/rg.exe"], "executable"),
+    Bun.write(resources["ripgrep/LICENSE-MIT"], "MIT license"),
+    Bun.write(resources["ripgrep/UNLICENSE"], "Unlicense"),
   ])
   return {
     resources,

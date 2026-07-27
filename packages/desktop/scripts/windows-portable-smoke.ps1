@@ -165,7 +165,7 @@ function Assert-EnterpriseCatalogIdentity {
   } catch {
     throw "Enterprise manifest is invalid"
   }
-  if ($manifest -isnot [PSCustomObject] -or $manifest.schemaVersion -ne 2 -or $manifest.modelIDs -isnot [System.Array]) {
+  if ($manifest -isnot [PSCustomObject] -or $manifest.schemaVersion -ne 3 -or $manifest.modelIDs -isnot [System.Array]) {
     throw "Enterprise manifest is invalid"
   }
   if (
@@ -455,6 +455,9 @@ function Expand-PortableArchive {
     "resources/enterprise/models.json",
     "resources/enterprise/enterprise-manifest.json",
     "resources/enterprise/skill-packs.json",
+    "resources/enterprise/ripgrep/rg.exe",
+    "resources/enterprise/ripgrep/LICENSE-MIT",
+    "resources/enterprise/ripgrep/UNLICENSE",
     "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
     "resources/enterprise/skill-packs/debug-problems/LICENSE",
     "resources/enterprise/skill-packs/verify-changes/LICENSE",
@@ -469,6 +472,29 @@ function Expand-PortableArchive {
   return [PSCustomObject]@{
     Executable = $executables[0].FullName
     Directory = $executables[0].DirectoryName
+  }
+}
+
+function Test-BundledRipgrep {
+  param([string] $ApplicationDirectory)
+
+  $ripgrep = Join-Path $ApplicationDirectory "resources/enterprise/ripgrep/rg.exe"
+  $version = @(& $ripgrep "--version" 2>&1)
+  if ($LASTEXITCODE -ne 0 -or $version.Count -eq 0 -or $version[0] -notmatch "\Aripgrep 15\.1\.0") {
+    throw "Bundled ripgrep version check failed"
+  }
+
+  $skill = Join-Path $ApplicationDirectory "resources/enterprise/skill-packs/analyze-codebase/skills/analyze-codebase"
+  Push-Location -LiteralPath $skill
+  try {
+    $files = @(& $ripgrep "--no-config" "--files" "--hidden" "--glob=!**/SKILL.md" "." 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Bundled ripgrep skill enumeration failed" }
+  } finally {
+    Pop-Location
+  }
+  $normalized = @($files | ForEach-Object { $_.ToString().Replace("\", "/").TrimStart([char[]]@(".", "/")) })
+  if ($normalized -notcontains "agents/openai.yaml" -or @($normalized | Where-Object { $_ -match "(^|/)SKILL\.md\z" }).Count -ne 0) {
+    throw "Bundled ripgrep skill enumeration failed"
   }
 }
 
@@ -553,6 +579,7 @@ try {
 
   $application = Expand-PortableArchive -Destination $extractRoot
   Assert-EnterpriseCatalogIdentity -Metadata $metadata -ApplicationDirectory $application.Directory
+  Test-BundledRipgrep -ApplicationDirectory $application.Directory
   Test-PortableLaunch -Application $application -AllowedAddresses $allowedAddresses
 
   if (-not (Test-Path -LiteralPath $appData -PathType Container)) {

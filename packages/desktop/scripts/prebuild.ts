@@ -4,11 +4,17 @@ import { fileURLToPath } from "node:url"
 
 import { enterpriseModelEnvironment } from "./enterprise-model-catalog"
 import { prepareEnterpriseManifest } from "./enterprise-manifest"
+import { prepareEnterpriseRipgrep } from "./prepare-enterprise-ripgrep"
 import { resolveChannel } from "./utils"
 
 const channel = resolveChannel()
 await $`bun ./scripts/copy-icons.ts ${channel}`
 await $`bun ./scripts/copy-metainfo.ts ${channel}`
+
+await prepareEnterpriseRipgrep({
+  env: process.env,
+  output: fileURLToPath(new URL("../resources/enterprise/ripgrep", import.meta.url)),
+})
 
 await prepareEnterpriseManifest({
   appVersion: (await Bun.file(new URL("../package.json", import.meta.url)).json<{ version: string }>()).version,
@@ -19,6 +25,9 @@ await prepareEnterpriseManifest({
     "company-guide.md": fileURLToPath(new URL("../resources/enterprise/company-guide.md", import.meta.url)),
     "models.json": fileURLToPath(new URL("../resources/enterprise/models.json", import.meta.url)),
     "skill-packs.json": fileURLToPath(new URL("../resources/enterprise/skill-packs.json", import.meta.url)),
+    "ripgrep/rg.exe": fileURLToPath(new URL("../resources/enterprise/ripgrep/rg.exe", import.meta.url)),
+    "ripgrep/LICENSE-MIT": fileURLToPath(new URL("../resources/enterprise/ripgrep/LICENSE-MIT", import.meta.url)),
+    "ripgrep/UNLICENSE": fileURLToPath(new URL("../resources/enterprise/ripgrep/UNLICENSE", import.meta.url)),
   },
 })
 

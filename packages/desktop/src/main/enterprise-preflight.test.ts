@@ -42,7 +42,7 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
   })
 
   expect(manifest).toEqual({
-    schemaVersion: 2,
+    schemaVersion: 3,
     appVersion: "1.2.3",
     defaultsVersion: "defaults-2",
     guideVersion: "guide-3",
@@ -56,6 +56,9 @@ test("creates and verifies a deterministic non-secret enterprise manifest", asyn
       "models.json": expect.stringMatching(/^[a-f0-9]{64}$/),
       "opencode.jsonc": expect.stringMatching(/^[a-f0-9]{64}$/),
       "skill-packs.json": expect.stringMatching(/^[a-f0-9]{64}$/),
+      "ripgrep/rg.exe": expect.stringMatching(/^[a-f0-9]{64}$/),
+      "ripgrep/LICENSE-MIT": expect.stringMatching(/^[a-f0-9]{64}$/),
+      "ripgrep/UNLICENSE": expect.stringMatching(/^[a-f0-9]{64}$/),
     },
   })
   expect(JSON.stringify(manifest)).not.toContain("/v1")
@@ -127,7 +130,7 @@ test("fails closed when an enterprise resource changes after manifest creation",
     fixture.manifest,
     await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: fixture.resources }),
   )
-  await Bun.write(fixture.resources["company-guide.md"], "tampered secret-marker")
+  await Bun.write(fixture.resources["ripgrep/rg.exe"], "tampered secret-marker")
 
   const error = await verifyFailure({
     manifest: fixture.manifest,
@@ -138,6 +141,42 @@ test("fails closed when an enterprise resource changes after manifest creation",
   expect(error.kind).toBe("resource_mismatch")
   expect(error.message).toBe("Enterprise package resource verification failed")
   expect(error.message).not.toContain("secret-marker")
+})
+
+test("rejects a missing ripgrep license and an empty executable", async () => {
+  await using missing = await enterpriseFixture()
+  await writeEnterpriseManifest(
+    missing.manifest,
+    await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: missing.resources }),
+  )
+  await rm(missing.resources["ripgrep/LICENSE-MIT"])
+  expect(
+    (
+      await verifyFailure({
+        manifest: missing.manifest,
+        appVersion: "1.2.3",
+        profile,
+        resources: missing.resources,
+      })
+    ).kind,
+  ).toBe("resource_missing")
+
+  await using empty = await enterpriseFixture()
+  await writeEnterpriseManifest(
+    empty.manifest,
+    await createEnterpriseManifest({ appVersion: "1.2.3", profile, resources: empty.resources }),
+  )
+  await Bun.write(empty.resources["ripgrep/rg.exe"], "")
+  expect(
+    (
+      await verifyFailure({
+        manifest: empty.manifest,
+        appVersion: "1.2.3",
+        profile,
+        resources: empty.resources,
+      })
+    ).kind,
+  ).toBe("resource_mismatch")
 })
 
 test("rejects invalid manifests and packaged profile mismatches with fixed errors", async () => {
@@ -213,7 +252,7 @@ test("skips ordinary builds and verifies enabled packaged profiles", async () =>
       enterpriseDir: fixture.root,
     }),
   ).toMatchObject({
-    manifest: { schemaVersion: 2, catalogVersion: profile.catalogVersion },
+    manifest: { schemaVersion: 3, catalogVersion: profile.catalogVersion },
     skillPacks: { packs: [{ id: "analyze-codebase", members: ["analyze-codebase"] }] },
   })
 })
@@ -262,11 +301,18 @@ async function enterpriseFixture() {
     "company-guide.md": join(root, "company-guide.md"),
     "models.json": join(root, "models.json"),
     "skill-packs.json": join(root, "skill-packs.json"),
+    "ripgrep/rg.exe": join(root, "ripgrep/rg.exe"),
+    "ripgrep/LICENSE-MIT": join(root, "ripgrep/LICENSE-MIT"),
+    "ripgrep/UNLICENSE": join(root, "ripgrep/UNLICENSE"),
   }
+  await mkdir(join(root, "ripgrep"), { recursive: true })
   await Promise.all([
     Bun.write(resources["opencode.jsonc"], '{"provider":"company-llm","marker":"secret-marker"}'),
     Bun.write(resources["company-guide.md"], "# Company guide"),
     Bun.write(resources["models.json"], "{}"),
+    Bun.write(resources["ripgrep/rg.exe"], "executable"),
+    Bun.write(resources["ripgrep/LICENSE-MIT"], "MIT license"),
+    Bun.write(resources["ripgrep/UNLICENSE"], "Unlicense"),
     Bun.write(
       resources["skill-packs.json"],
       JSON.stringify({

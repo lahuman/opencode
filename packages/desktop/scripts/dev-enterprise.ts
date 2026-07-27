@@ -2,6 +2,7 @@ import path from "node:path"
 
 import { validateEnterpriseBuild } from "./enterprise-build"
 import { generateEnterpriseManifest } from "./enterprise-manifest"
+import { prepareEnterpriseRipgrep } from "./prepare-enterprise-ripgrep"
 
 type Env = Record<string, string | undefined>
 type Spawn = (
@@ -15,11 +16,21 @@ type Spawn = (
   },
 ) => { exited: Promise<number> }
 type Prepare = (input: Parameters<typeof generateEnterpriseManifest>[0]) => Promise<unknown>
+type PrepareRipgrep = (input: Parameters<typeof prepareEnterpriseRipgrep>[0]) => Promise<unknown>
 
-export async function runEnterpriseDev(input: { env: Env; spawn: Spawn; prepare?: Prepare }) {
+export async function runEnterpriseDev(input: {
+  env: Env
+  spawn: Spawn
+  prepare?: Prepare
+  prepareRipgrep?: PrepareRipgrep
+}) {
   const env = { ...input.env, OPENCODE_ENTERPRISE: "1" }
   validateEnterpriseBuild(env)
   const root = path.resolve(import.meta.dir, "..")
+  await (input.prepareRipgrep ?? prepareEnterpriseRipgrep)({
+    env,
+    output: path.join(root, "resources", "enterprise", "ripgrep"),
+  })
   await (input.prepare ?? generateEnterpriseManifest)({
     appVersion: (await Bun.file(path.join(root, "package.json")).json<{ version: string }>()).version,
     env,
@@ -29,6 +40,9 @@ export async function runEnterpriseDev(input: { env: Env; spawn: Spawn; prepare?
       "company-guide.md": path.join(root, "resources", "enterprise", "company-guide.md"),
       "models.json": path.join(root, "resources", "enterprise", "models.json"),
       "skill-packs.json": path.join(root, "resources", "enterprise", "skill-packs.json"),
+      "ripgrep/rg.exe": path.join(root, "resources", "enterprise", "ripgrep", "rg.exe"),
+      "ripgrep/LICENSE-MIT": path.join(root, "resources", "enterprise", "ripgrep", "LICENSE-MIT"),
+      "ripgrep/UNLICENSE": path.join(root, "resources", "enterprise", "ripgrep", "UNLICENSE"),
     },
   })
   return input.spawn(["bun", "run", "dev"], {

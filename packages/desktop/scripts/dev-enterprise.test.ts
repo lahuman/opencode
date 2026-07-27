@@ -22,6 +22,9 @@ test("validates, prepares the enterprise manifest, and starts desktop developmen
   const calls: { command: string[]; env: Record<string, string | undefined> }[] = []
   const code = await runEnterpriseDev({
     env: valid,
+    async prepareRipgrep() {
+      events.push("prepare-ripgrep")
+    },
     async prepare(input: ManifestInput) {
       preparations.push(input)
       await Promise.resolve()
@@ -35,7 +38,7 @@ test("validates, prepares the enterprise manifest, and starts desktop developmen
   })
 
   expect(code).toBe(0)
-  expect(events).toEqual(["prepare", "spawn"])
+  expect(events).toEqual(["prepare-ripgrep", "prepare", "spawn"])
   expect(preparations).toEqual([
     {
       appVersion: (await Bun.file(path.resolve(import.meta.dir, "../package.json")).json<{ version: string }>())
@@ -47,6 +50,9 @@ test("validates, prepares the enterprise manifest, and starts desktop developmen
         "company-guide.md": path.resolve(import.meta.dir, "../resources/enterprise/company-guide.md"),
         "models.json": path.resolve(import.meta.dir, "../resources/enterprise/models.json"),
         "skill-packs.json": path.resolve(import.meta.dir, "../resources/enterprise/skill-packs.json"),
+        "ripgrep/rg.exe": path.resolve(import.meta.dir, "../resources/enterprise/ripgrep/rg.exe"),
+        "ripgrep/LICENSE-MIT": path.resolve(import.meta.dir, "../resources/enterprise/ripgrep/LICENSE-MIT"),
+        "ripgrep/UNLICENSE": path.resolve(import.meta.dir, "../resources/enterprise/ripgrep/UNLICENSE"),
       },
     },
   ])
@@ -65,6 +71,9 @@ test("does not start desktop development when the enterprise profile is incomple
   await expect(
     runEnterpriseDev({
       env: {},
+      async prepareRipgrep() {
+        prepared = true
+      },
       async prepare() {
         prepared = true
       },
@@ -85,6 +94,7 @@ test("propagates manifest preparation failures without starting desktop developm
   await expect(
     runEnterpriseDev({
       env: valid,
+      async prepareRipgrep() {},
       async prepare() {
         throw failure
       },

@@ -13,6 +13,7 @@ export type EnterprisePackageSummary = {
   appArchive: true
   license: true
   skillPacks: true
+  ripgrep: true
 }
 
 const requiredEntries = [
@@ -23,6 +24,9 @@ const requiredEntries = [
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
   "resources/enterprise/skill-packs.json",
+  "resources/enterprise/ripgrep/rg.exe",
+  "resources/enterprise/ripgrep/LICENSE-MIT",
+  "resources/enterprise/ripgrep/UNLICENSE",
   "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
   "resources/enterprise/skill-packs/debug-problems/LICENSE",
   "resources/enterprise/skill-packs/verify-changes/LICENSE",
@@ -75,6 +79,7 @@ export async function verifyEnterprisePackage(root: string): Promise<EnterpriseP
     appArchive: true,
     license: true,
     skillPacks: true,
+    ripgrep: true,
   }
 }
 
@@ -235,12 +240,18 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
         "company-guide.md": files["resources/enterprise/company-guide.md"],
         "models.json": files["resources/enterprise/models.json"],
         "skill-packs.json": files["resources/enterprise/skill-packs.json"],
+        "ripgrep/rg.exe": files["resources/enterprise/ripgrep/rg.exe"],
+        "ripgrep/LICENSE-MIT": files["resources/enterprise/ripgrep/LICENSE-MIT"],
+        "ripgrep/UNLICENSE": files["resources/enterprise/ripgrep/UNLICENSE"],
       },
     })
   } catch {
     throw new Error("Portable package enterprise manifest is invalid")
   }
   if (files["Kernexa.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
+  if (files["resources/enterprise/ripgrep/rg.exe"].byteLength === 0) {
+    throw new Error("Portable package ripgrep executable is empty")
+  }
   if (files["resources/app.asar"].byteLength === 0) throw new Error("Portable package archive is empty")
   if (!new TextDecoder().decode(files["resources/licenses/OpenCode-LICENSE"]).includes("MIT License")) {
     throw new Error("Portable package license is invalid")
@@ -264,6 +275,9 @@ function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEnt
     "resources/enterprise/models.json": read("resources/enterprise/models.json"),
     "resources/enterprise/enterprise-manifest.json": read("resources/enterprise/enterprise-manifest.json"),
     "resources/enterprise/skill-packs.json": read("resources/enterprise/skill-packs.json"),
+    "resources/enterprise/ripgrep/rg.exe": read("resources/enterprise/ripgrep/rg.exe"),
+    "resources/enterprise/ripgrep/LICENSE-MIT": read("resources/enterprise/ripgrep/LICENSE-MIT"),
+    "resources/enterprise/ripgrep/UNLICENSE": read("resources/enterprise/ripgrep/UNLICENSE"),
     "resources/enterprise/skill-packs/analyze-codebase/LICENSE": read(
       "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
     ),

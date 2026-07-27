@@ -1,6 +1,6 @@
 export * as Ripgrep from "./ripgrep"
 
-import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { Entry, Match } from "@opencode-ai/schema/filesystem"
 import { makeGlobalNode } from "./effect/app-node"
@@ -143,11 +143,15 @@ const layer = Layer.effect(
       )
       const abortable = input.signal ? program.pipe(Effect.raceFirst(waitForAbort(input.signal))) : program
       return abortable.pipe(
-        Effect.mapError((cause) =>
-          cause instanceof Error || cause instanceof InvalidPatternError
-            ? cause
-            : failure("ripgrep execution failed", cause),
-        ),
+        Effect.catchCause((cause) => {
+          const map = (original: unknown) => {
+            if (original instanceof Error || original instanceof InvalidPatternError) return original
+            if (original instanceof globalThis.Error) return failure(original.message, original)
+            return failure("ripgrep execution failed", original)
+          }
+          if (Cause.hasInterrupts(cause)) return Effect.failCause(Cause.map(cause, map))
+          return Effect.fail(map(Cause.squash(cause)))
+        }),
       )
     }
 

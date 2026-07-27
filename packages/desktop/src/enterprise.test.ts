@@ -253,6 +253,7 @@ describe("enterprise profile", () => {
       enterpriseEnvironment(profile, {
         defaults: "C:/app/enterprise/opencode.jsonc",
         guide: "C:/app/enterprise/company-guide.md",
+        ripgrep: "C:/app/enterprise/ripgrep/rg.exe",
         userData: "C:/Users/person/AppData/Local/company-opencode",
         skillPacks: ["C:/app/enterprise/skill-packs/analyze-codebase/skills"],
       }),
@@ -261,6 +262,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_DEFAULTS_PATH: "C:/app/enterprise/opencode.jsonc",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_GUIDE_PATH: "C:/app/enterprise/company-guide.md",
+      OPENCODE_RIPGREP_PATH: "C:/app/enterprise/ripgrep/rg.exe",
       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:

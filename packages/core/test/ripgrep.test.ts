@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect } from "effect"
+import { Cause, Effect, Exit, Fiber } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { RelativePath } from "@opencode-ai/core/schema"
@@ -58,6 +58,107 @@ describe("Ripgrep", () => {
           const matches = yield* ripgrep.grep({ cwd: tmp.path, pattern: "needle", include: "config", limit: 10 })
           expect(matches.map((item) => item.entry.path)).toContain(RelativePath.make(".opencode/config"))
           expect(matches.map((item) => item.entry.path)).not.toContain(RelativePath.make(".git/config"))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("preserves the configured executable validation error", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => {
+            const previous = process.env.OPENCODE_RIPGREP_PATH
+            process.env.OPENCODE_RIPGREP_PATH = path.join(tmp.path, "missing-rg.exe")
+            return previous
+          }),
+          () =>
+            Effect.gen(function* () {
+              const error = yield* (yield* Ripgrep.Service)
+                .find({ cwd: tmp.path, pattern: "*", limit: 10 })
+                .pipe(Effect.flip)
+              expect(error.message).toBe(
+                `Configured ripgrep executable not found: ${path.join(tmp.path, "missing-rg.exe")}`,
+              )
+              expect(error.cause).toBeInstanceOf(globalThis.Error)
+            }),
+          (previous) =>
+            Effect.sync(() => {
+              if (previous === undefined) {
+                delete process.env.OPENCODE_RIPGREP_PATH
+                return
+              }
+              process.env.OPENCODE_RIPGREP_PATH = previous
+            }),
+        ),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("preserves a configured executable process creation failure", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const executable = path.join(tmp.path, process.platform === "win32" ? "invalid-rg.exe" : "invalid-rg")
+          yield* Effect.promise(() => fs.writeFile(executable, "not an executable"))
+          if (process.platform !== "win32") yield* Effect.promise(() => fs.chmod(executable, 0o644))
+          const previous = process.env.OPENCODE_RIPGREP_PATH
+          process.env.OPENCODE_RIPGREP_PATH = executable
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (previous === undefined) {
+                delete process.env.OPENCODE_RIPGREP_PATH
+                return
+              }
+              process.env.OPENCODE_RIPGREP_PATH = previous
+            }),
+          )
+
+          const error = yield* (yield* Ripgrep.Service)
+            .find({ cwd: tmp.path, pattern: "*", limit: 10 })
+            .pipe(Effect.flip)
+          expect(error.message).not.toBe("ripgrep execution failed")
+          expect(error.message.length).toBeGreaterThan(0)
+          expect(error.cause).toBeInstanceOf(globalThis.Error)
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("preserves fiber interruption while ripgrep is running", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const executable = path.join(tmp.path, process.platform === "win32" ? "slow-rg.cmd" : "slow-rg")
+          yield* Effect.promise(() =>
+            fs.writeFile(
+              executable,
+              process.platform === "win32" ? "@echo off\r\n:wait\r\ngoto wait\r\n" : "#!/bin/sh\nsleep 30\n",
+            ),
+          )
+          if (process.platform !== "win32") yield* Effect.promise(() => fs.chmod(executable, 0o755))
+          const previous = process.env.OPENCODE_RIPGREP_PATH
+          process.env.OPENCODE_RIPGREP_PATH = executable
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              if (previous === undefined) {
+                delete process.env.OPENCODE_RIPGREP_PATH
+                return
+              }
+              process.env.OPENCODE_RIPGREP_PATH = previous
+            }),
+          )
+
+          const fiber = yield* (yield* Ripgrep.Service)
+            .find({ cwd: tmp.path, pattern: "*", limit: 10 })
+            .pipe(Effect.forkChild)
+          yield* Effect.sleep("100 millis")
+          yield* Fiber.interrupt(fiber)
+          const exit = yield* Fiber.await(fiber)
+          expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),

@@ -18,6 +18,9 @@ const required = [
   "resources/enterprise/models.json",
   "resources/enterprise/enterprise-manifest.json",
   "resources/enterprise/skill-packs.json",
+  "resources/enterprise/ripgrep/rg.exe",
+  "resources/enterprise/ripgrep/LICENSE-MIT",
+  "resources/enterprise/ripgrep/UNLICENSE",
   "resources/enterprise/skill-packs/analyze-codebase/LICENSE",
   "resources/enterprise/skill-packs/analyze-codebase/skills/analyze-codebase/SKILL.md",
   "resources/enterprise/skill-packs/debug-problems/LICENSE",
@@ -29,6 +32,9 @@ const required = [
 const enterpriseGuide = await Bun.file(new URL("../resources/enterprise/company-guide.md", import.meta.url)).text()
 const enterpriseDefaults = JSON.stringify({ enabled_providers: ["company-llm"] })
 const enterpriseModels = JSON.stringify({ providers: [] })
+const ripgrepExecutable = "ripgrep executable"
+const ripgrepMIT = "MIT license"
+const ripgrepUnlicense = "Unlicense"
 const enterpriseModelCatalog = [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]
 const packLicense = "MIT License\n"
 const packSkills = {
@@ -65,6 +71,7 @@ test("accepts a complete portable enterprise tree", async () => {
     appArchive: true,
     license: true,
     skillPacks: true,
+    ripgrep: true,
   })
 })
 
@@ -201,6 +208,19 @@ test("rejects an empty portable executable", async () => {
   await Bun.write(path.join(root, "Kernexa.exe"), "")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package executable")
+})
+
+test("rejects an empty ripgrep executable even when the manifest matches it", async () => {
+  const root = await portableFixture()
+  const empty = createHash("sha256").update("").digest("hex")
+  const executable = createHash("sha256").update(ripgrepExecutable).digest("hex")
+  await Bun.write(path.join(root, "resources/enterprise/ripgrep/rg.exe"), "")
+  await Bun.write(
+    path.join(root, "resources/enterprise/enterprise-manifest.json"),
+    enterpriseManifest().replace(executable, empty),
+  )
+
+  await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package ripgrep executable is empty")
 })
 
 test("rejects a missing OpenCode license notice", async () => {
@@ -627,7 +647,7 @@ async function portableFixture() {
 
 async function writePortableFixture(root: string) {
   await Promise.all([
-    mkdir(path.join(root, "resources/enterprise"), { recursive: true }),
+    mkdir(path.join(root, "resources/enterprise/ripgrep"), { recursive: true }),
     mkdir(path.join(root, "resources/licenses"), { recursive: true }),
     ...Object.entries(packSkills).map(([id, skill]) =>
       mkdir(path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}`), { recursive: true }),
@@ -641,6 +661,9 @@ async function writePortableFixture(root: string) {
     Bun.write(path.join(root, "resources/enterprise/models.json"), enterpriseModels),
     Bun.write(path.join(root, "resources/enterprise/enterprise-manifest.json"), enterpriseManifest()),
     Bun.write(path.join(root, "resources/enterprise/skill-packs.json"), enterpriseSkillPacks),
+    Bun.write(path.join(root, "resources/enterprise/ripgrep/rg.exe"), ripgrepExecutable),
+    Bun.write(path.join(root, "resources/enterprise/ripgrep/LICENSE-MIT"), ripgrepMIT),
+    Bun.write(path.join(root, "resources/enterprise/ripgrep/UNLICENSE"), ripgrepUnlicense),
     ...Object.entries(packSkills).flatMap(([id, contents]) => [
       Bun.write(path.join(root, `resources/enterprise/skill-packs/${id}/LICENSE`), packLicense),
       Bun.write(path.join(root, `resources/enterprise/skill-packs/${id}/skills/${skillName(id)}/SKILL.md`), contents),
@@ -911,6 +934,9 @@ const portableContents: Record<string, string> = {
   "resources/enterprise/models.json": enterpriseModels,
   "resources/enterprise/enterprise-manifest.json": enterpriseManifest(),
   "resources/enterprise/skill-packs.json": enterpriseSkillPacks,
+  "resources/enterprise/ripgrep/rg.exe": ripgrepExecutable,
+  "resources/enterprise/ripgrep/LICENSE-MIT": ripgrepMIT,
+  "resources/enterprise/ripgrep/UNLICENSE": ripgrepUnlicense,
   "resources/enterprise/skill-packs/analyze-codebase/LICENSE": packLicense,
   "resources/enterprise/skill-packs/analyze-codebase/skills/analyze-codebase/SKILL.md": packSkills["analyze-codebase"],
   "resources/enterprise/skill-packs/debug-problems/LICENSE": packLicense,
@@ -925,7 +951,7 @@ function enterpriseManifest() {
   const identity = enterpriseModelCatalogIdentity(enterpriseModelCatalog)
   return `${JSON.stringify(
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       appVersion: "1.17.18",
       defaultsVersion: "pilot-1",
       guideVersion: "kernexa-1",
@@ -939,6 +965,9 @@ function enterpriseManifest() {
         "models.json": digest(enterpriseModels),
         "opencode.jsonc": digest(enterpriseDefaults),
         "skill-packs.json": digest(enterpriseSkillPacks),
+        "ripgrep/rg.exe": digest(ripgrepExecutable),
+        "ripgrep/LICENSE-MIT": digest(ripgrepMIT),
+        "ripgrep/UNLICENSE": digest(ripgrepUnlicense),
       },
     },
     null,

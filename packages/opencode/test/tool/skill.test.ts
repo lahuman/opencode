@@ -33,6 +33,7 @@ describe("tool.skill", () => {
   it.instance("execute returns skill content block with files", () =>
     Effect.gen(function* () {
       const dir = (yield* TestInstance).directory
+      yield* configureRipgrep(dir)
       const skill = path.join(dir, ".opencode", "skill", "tool-skill")
       yield* Effect.promise(() =>
         Bun.write(
@@ -93,6 +94,53 @@ Use this skill.
     }),
   )
 
+  it.instance("execute succeeds with an empty file list when the skill only contains SKILL.md", () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      yield* configureRipgrep(dir)
+      const skill = path.join(dir, ".opencode", "skill", "only-skill")
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(skill, "SKILL.md"),
+          `---
+name: only-skill
+description: Skill without auxiliary files.
+---
+
+# Only Skill
+`,
+        ),
+      )
+
+      const home = process.env.OPENCODE_TEST_HOME
+      process.env.OPENCODE_TEST_HOME = dir
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          process.env.OPENCODE_TEST_HOME = home
+        }),
+      )
+
+      const registry = yield* ToolRegistry.Service
+      const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
+      const tool = (yield* registry.tools({
+        providerID: "opencode" as any,
+        modelID: "gpt-5" as any,
+        agent,
+      })).find((tool) => tool.id === SkillTool.id)
+      if (!tool) throw new Error("Skill tool not found")
+
+      const result = yield* tool.execute(
+        { name: "only-skill" },
+        {
+          ...baseCtx,
+          ask: () => Effect.void,
+        },
+      )
+      expect(result.output).toContain("<skill_files>\n\n</skill_files>")
+      expect(result.output).not.toContain("<file>")
+    }),
+  )
+
   it.instance("execute preserves not found message", () =>
     Effect.gen(function* () {
       const dir = (yield* TestInstance).directory
@@ -132,3 +180,22 @@ Use this skill.
     }),
   )
 })
+
+function configureRipgrep(dir: string) {
+  return Effect.gen(function* () {
+    const executable = Bun.which(process.platform === "win32" ? "rg.exe" : "rg")
+    if (!executable) throw new Error("ripgrep is required for the skill integration test")
+    const previousPath = process.env.OPENCODE_RIPGREP_PATH
+    const previousCache = process.env.XDG_CACHE_HOME
+    process.env.OPENCODE_RIPGREP_PATH = executable
+    process.env.XDG_CACHE_HOME = path.join(dir, "empty-cache")
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (previousPath === undefined) delete process.env.OPENCODE_RIPGREP_PATH
+        else process.env.OPENCODE_RIPGREP_PATH = previousPath
+        if (previousCache === undefined) delete process.env.XDG_CACHE_HOME
+        else process.env.XDG_CACHE_HOME = previousCache
+      }),
+    )
+  })
+}

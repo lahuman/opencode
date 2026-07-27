@@ -91,6 +91,21 @@ export namespace RipgrepBinary {
       return Service.of({
         filepath: yield* Effect.cached(
           Effect.gen(function* () {
+            const configured = process.env.OPENCODE_RIPGREP_PATH
+            if (configured) {
+              if (!path.isAbsolute(configured)) {
+                return yield* Effect.fail(
+                  new globalThis.Error(`Configured ripgrep path must be absolute: ${configured}`),
+                )
+              }
+              if (!(yield* fs.isFile(configured))) {
+                return yield* Effect.fail(
+                  new globalThis.Error(`Configured ripgrep executable not found: ${configured}`),
+                )
+              }
+              return configured
+            }
+
             const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
             if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
 
@@ -110,9 +125,14 @@ export namespace RipgrepBinary {
             const bytes = yield* HttpClientRequest.get(url).pipe(
               http.execute,
               Effect.flatMap((response) => response.arrayBuffer),
-              Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))),
+              Effect.mapError((cause) => {
+                const safe = safeDownloadCause(cause)
+                return new globalThis.Error(`Failed to download ripgrep: ${safe.message}`, { cause: safe })
+              }),
             )
-            if (bytes.byteLength === 0) throw new Error(`failed to download ripgrep from ${url}`)
+            if (bytes.byteLength === 0) {
+              return yield* Effect.fail(new globalThis.Error(`Failed to download ripgrep: empty response from ${url}`))
+            }
 
             yield* fs.writeWithDirs(archive, new Uint8Array(bytes))
             yield* extract(archive, config, target)
@@ -129,4 +149,33 @@ export namespace RipgrepBinary {
     layer: layer,
     deps: [FSUtil.node, httpClient, CrossSpawnSpawner.node],
   })
+
+  function safeDownloadCause(cause: unknown) {
+    const tag = isRecord(cause) && typeof cause._tag === "string"
+      ? cause._tag
+      : cause instanceof globalThis.Error && cause.name
+        ? cause.name
+        : "HttpClientError"
+    const reason =
+      isRecord(cause) && isRecord(cause.reason) && typeof cause.reason._tag === "string"
+        ? cause.reason._tag
+        : undefined
+    const kind = reason ? `${tag}.${reason}` : tag
+    const message = cause instanceof globalThis.Error && cause.message ? redactDownloadMessage(cause.message) : ""
+    return new globalThis.Error(message && message !== kind ? `${kind}: ${message}` : kind)
+  }
+
+  function redactDownloadMessage(message: string) {
+    return message
+      .replace(
+        /((?:proxy-authorization|authorization|api[-_]?key|token|password)\s*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\r\n,;}]+)/giu,
+        "$1<redacted>",
+      )
+      .replace(/:\/\/[^/@\s:]+:[^/@\s]+@/gu, "://<redacted>@")
+      .slice(0, 1_000)
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+  }
 }

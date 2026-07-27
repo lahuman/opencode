@@ -59,7 +59,7 @@ export function parseEnterpriseProfile(env: BuildEnv): EnterpriseProfile {
 
 export function enterpriseEnvironment(
   profile: EnterpriseProfile,
-  paths: { defaults: string; guide: string; userData?: string; skillPacks?: string[] },
+  paths: { defaults: string; guide: string; ripgrep?: string; userData?: string; skillPacks?: string[] },
 ): Record<string, string> {
   if (!profile.enabled) return {}
   const userData = paths.userData?.replace(/[\\/]+$/, "")
@@ -82,6 +82,7 @@ export function enterpriseEnvironment(
         }
       : {}),
     ...(paths.guide ? { OPENCODE_ENTERPRISE_GUIDE_PATH: paths.guide } : {}),
+    ...(paths.ripgrep ? { OPENCODE_RIPGREP_PATH: paths.ripgrep } : {}),
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_DISABLE_AUTOUPDATE: "1",
     OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
