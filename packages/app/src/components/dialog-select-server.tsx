@@ -22,6 +22,7 @@ import {
   ServerConnection,
   useServer,
 } from "@/context/server"
+import { detectServerProtocol } from "@/utils/server-protocol"
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
@@ -381,6 +382,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
         setStore("addServer", { error: language.t("dialog.server.add.error") })
         return
       }
+      if (
+        !settings.general.newLayoutDesigns() &&
+        (await detectServerProtocol(conn.http, platform.fetch ?? globalThis.fetch)) === "v2"
+      ) {
+        setStore("addServer", { error: language.t("dialog.server.add.error") })
+        return
+      }
 
       resetAdd()
       if (options.navigateOnAdd === false) {
@@ -430,6 +438,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
         setStore("editServer", { error: language.t("dialog.server.add.error") })
         return
       }
+      if (
+        !settings.general.newLayoutDesigns() &&
+        (await detectServerProtocol(conn.http, platform.fetch ?? globalThis.fetch)) === "v2"
+      ) {
+        setStore("editServer", { error: language.t("dialog.server.add.error") })
+        return
+      }
       if (normalized === input.original.http.url) {
         server.add(conn)
       } else {
@@ -468,7 +483,10 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   )
 
   const sortedItems = createMemo(() => {
-    const list = items()
+    const raw = items()
+    const list = settings.general.newLayoutDesigns()
+      ? raw
+      : raw.filter((x) => global.ensureServerCtx(x).sdk.protocolKind() !== "v2")
     if (!list.length) return list
     const active = current()
     const order = new Map(list.map((url, index) => [url, index] as const))

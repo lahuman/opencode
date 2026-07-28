@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url"
 
 import { enterpriseModelEnvironment } from "./enterprise-model-catalog"
 
+await $`bun run install-electron`
+
 await $`bun ./scripts/copy-icons.ts ${process.env.OPENCODE_CHANNEL ?? "dev"}`
 
 const child = Bun.spawn(["bun", "script/build-node.ts"], {

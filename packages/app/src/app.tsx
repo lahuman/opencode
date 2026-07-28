@@ -1,7 +1,5 @@
 import "@/index.css"
 import { Splash } from "@opencode-ai/ui/logo"
-import { ThemeProvider } from "@opencode-ai/ui/theme/context"
-import { MetaProvider } from "@solidjs/meta"
 import {
   type BaseRouterProps,
   Navigate,
@@ -12,7 +10,6 @@ import {
   useParams,
   useSearchParams,
 } from "@solidjs/router"
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { Effect } from "effect"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import {
@@ -56,7 +53,8 @@ import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref }
 import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
-import { NewHome, LegacyHome } from "@/pages/home"
+import { NewHome } from "@/pages/home"
+import { LegacyHome } from "@/pages/home/legacy-home"
 import { AppBaseProviders, QueryProvider } from "@/app-base-providers"
 import { DesktopCommands } from "@/desktop-commands"
 
@@ -222,6 +220,30 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
       </ServerSDKProvider>
     </Show>
   )
+}
+
+function LayoutCompatibility(props: ParentProps) {
+  const global = useGlobal()
+  const navigate = useNavigate()
+  const server = useServer()
+  const settings = useSettings()
+
+  createEffect(() => {
+    if (settings.general.newLayoutDesigns()) return
+    const current = server.current
+    if (!current) return
+    const protocol = global.ensureServerCtx(current).sdk.protocolKind()
+    if (protocol !== "v2") return
+    const next = global.servers.list().find((s) => {
+      if (ServerConnection.key(s) === ServerConnection.key(current)) return false
+      return global.ensureServerCtx(s).sdk.protocolKind() !== "v2"
+    })
+    if (!next) return
+    navigate("/")
+    queueMicrotask(() => server.setActive(ServerConnection.key(next)))
+  })
+
+  return <>{props.children}</>
 }
 
 function BodyDesignClass() {

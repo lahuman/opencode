@@ -54,6 +54,12 @@ for (const channel of channels) {
       startupWMClass: channel.appId,
     })
     expect(result.summary?.publish).toEqual(channel.publish)
+    expect(result.summary?.debFpm).toContainEqual(
+      expect.stringContaining(`/usr/share/metainfo/${channel.appId}.metainfo.xml`),
+    )
+    expect(result.summary?.rpmFpm).toContainEqual(
+      expect.stringContaining(`/usr/share/metainfo/${channel.appId}.metainfo.xml`),
+    )
   })
 }
 
@@ -61,12 +67,16 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   const result = evaluateConfig({ OPENCODE_CHANNEL: "prod" })
 
   expect(result.exitCode).toBe(0)
-  expect(result.summary?.debFpm?.[0]).toEndWith(
-    `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`,
-  )
-  expect(result.summary?.rpmFpm?.[0]).toEndWith(
-    `${legacyDesktopEntry}=/usr/share/applications/opencode-desktop.desktop`,
-  )
+  expect(
+    result.summary?.debFpm?.some((entry: string) =>
+      entry.endsWith("opencode-desktop.desktop=/usr/share/applications/opencode-desktop.desktop"),
+    ),
+  ).toBe(true)
+  expect(
+    result.summary?.rpmFpm?.some((entry: string) =>
+      entry.endsWith("opencode-desktop.desktop=/usr/share/applications/opencode-desktop.desktop"),
+    ),
+  ).toBe(true)
 
   const desktop = await Bun.file(legacyDesktopEntry).text()
   expect(desktop).toContain("Exec=/opt/OpenCode/ai.opencode.desktop %U")

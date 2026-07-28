@@ -314,6 +314,11 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
     return win?.isFocused() ?? false
   })
 
+  registry.handle("get-window-fullscreen", (event: IpcMainInvokeEvent) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win?.isFullScreen() ?? false
+  })
+
   registry.handle("set-window-focus", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     win?.focus()

@@ -60,6 +60,7 @@ const platform = createPlatform({}, () => ({ status: "disabled" }), {
   acceptedFileExtensions: [],
   handleNotificationClick() {},
   makeServerKey: (value) => value,
+  windowFullscreen: () => false,
 })
 
 platform.openLink("https://opencode.ai/docs?token=open-link-secret")

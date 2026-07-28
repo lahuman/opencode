@@ -22,6 +22,7 @@ import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
+import { windowFullscreen } from "./window-fullscreen"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
 import "./styles.css"
 import { Splash } from "@opencode-ai/ui/logo"
@@ -126,6 +127,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
     acceptedFileExtensions: ACCEPTED_FILE_EXTENSIONS,
     handleNotificationClick,
     makeServerKey: ServerConnection.Key.make,
+    windowFullscreen,
   })
   const loadLocale = async () => {
     const current = await platform.storage?.("opencode.global.dat").getItem("language")

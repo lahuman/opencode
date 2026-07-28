@@ -24,6 +24,7 @@ export function createPlatform(
     acceptedFileExtensions: string[]
     handleNotificationClick: (href?: string) => void
     makeServerKey: (value: string) => ServerConnection.Key
+    windowFullscreen: Platform["windowFullscreen"]
   },
 ): Platform {
   const attachmentPaths = new WeakMap<File, string>()
@@ -212,6 +213,8 @@ export function createPlatform(
     parseMarkdown: (markdown: string) => window.api.parseMarkdownCommand(markdown),
 
     webviewZoom,
+
+    windowFullscreen: runtime.windowFullscreen,
 
     getPinchZoomEnabled: () => window.api.getPinchZoomEnabled(),
 
