@@ -75,6 +75,16 @@ Here are all available slash commands:
 
 ---
 
+### build
+
+Switch to the Build agent. New prompts can use tools and edit files according to your configured permissions.
+
+```bash frame="none"
+/build
+```
+
+---
+
 ### connect
 
 Add a provider to OpenCode. Allows you to select from available providers and add their API keys.
@@ -184,6 +194,16 @@ Start a new session. _Alias_: `/clear`
 ```
 
 **Keybind:** `ctrl+x n`
+
+---
+
+### plan
+
+Toggle the read-only Plan agent. Plan can inspect and search the project and ask questions. With `OPENCODE_EXPERIMENTAL_PLAN_MODE=true`, it also saves a final Markdown plan before requesting approval to switch to Build. You can switch agents with the `Tab` key.
+
+```bash frame="none"
+/plan
+```
 
 ---
 

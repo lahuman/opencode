@@ -4,13 +4,15 @@ import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import { Question } from "../question"
 import { Session } from "@/session/session"
-import { MessageV2 } from "../session/message-v2"
 import { Provider } from "@/provider/provider"
 import { InstanceState } from "@/effect/instance-state"
 import { MessageID, PartID } from "../session/schema"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import EXIT_DESCRIPTION from "./plan-exit.txt"
 
-export const Parameters = Schema.Struct({})
+export const Parameters = Schema.Struct({
+  plan: Schema.NonEmptyString.annotate({ description: "The complete implementation plan in Markdown" }),
+})
 
 export const PlanExitTool = Tool.define(
   "plan_exit",
@@ -18,32 +20,42 @@ export const PlanExitTool = Tool.define(
     const session = yield* Session.Service
     const question = yield* Question.Service
     const provider = yield* Provider.Service
+    const fsys = yield* FSUtil.Service
 
     return {
       description: EXIT_DESCRIPTION,
       parameters: Parameters,
-      execute: (_params: {}, ctx: Tool.Context) =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const instance = yield* InstanceState.context
           const info = yield* session.get(ctx.sessionID)
-          const plan = path.relative(instance.worktree, Session.plan(info, instance))
+          const file = Session.plan(info, instance)
+          const plan = path.relative(instance.worktree, file)
+          if (!params.plan.trim()) return yield* Effect.die(new Error("Plan must not be empty"))
+          yield* fsys.writeWithDirs(file, params.plan.trimEnd() + "\n")
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
             questions: [
               {
-                question: `Plan at ${plan} is complete. Would you like to switch to the build agent and start implementing?`,
+                question: `Plan saved at ${plan}. Would you like to switch to Build and start implementing?`,
                 header: "Build Agent",
                 custom: false,
                 options: [
-                  { label: "Yes", description: "Switch to build agent and start implementing the plan" },
-                  { label: "No", description: "Stay with plan agent to continue refining the plan" },
+                  { label: "Build now", description: "Switch to Build and start implementing the saved plan" },
+                  { label: "Keep planning", description: "Stay in Plan mode and continue refining the plan" },
                 ],
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
           })
 
-          if (answers[0]?.[0] === "No") yield* new Question.RejectedError()
+          if (answers[0]?.[0] !== "Build now") {
+            return {
+              title: "Plan saved",
+              output: `Plan saved at ${plan}. Staying in Plan mode.`,
+              metadata: { agent: "plan", plan },
+            }
+          }
 
           const messages = yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie)
           const lastUser = messages.findLast((item) => item.info.role === "user" && item.info.model)
@@ -70,8 +82,8 @@ export const PlanExitTool = Tool.define(
 
           return {
             title: "Switching to build agent",
-            output: "User approved switching to build agent. Wait for further instructions.",
-            metadata: {},
+            output: "User approved the plan. Switch to Build and execute the saved plan.",
+            metadata: { agent: "build", plan },
           }
         }).pipe(Effect.orDie),
     }

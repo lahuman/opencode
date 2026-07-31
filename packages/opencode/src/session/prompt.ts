@@ -1250,6 +1250,7 @@ const layer = Layer.effect(
 
             const tools = yield* SessionTools.resolve({
               agent,
+              agentID: lastUser.agent,
               session,
               model,
               processor: handle,

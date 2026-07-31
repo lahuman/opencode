@@ -190,8 +190,10 @@ describe("tool parameters", () => {
   })
 
   describe("plan", () => {
-    test("accepts empty object", () => {
-      expect(parse(Plan, {})).toEqual({})
+    test("requires a non-empty Markdown plan", () => {
+      expect(parse(Plan, { plan: "# Plan" })).toEqual({ plan: "# Plan" })
+      expect(accepts(Plan, {})).toBe(false)
+      expect(accepts(Plan, { plan: "" })).toBe(false)
     })
   })
 

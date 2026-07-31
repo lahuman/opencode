@@ -49,6 +49,7 @@ import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpa
 import { useCommand } from "@/context/command"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
+import { agentLabel } from "@/context/local-agent"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
@@ -1717,6 +1718,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         size="normal"
                         options={props.controls.agents.options}
                         current={props.controls.agents.current}
+                        label={agentLabel}
                         onSelect={(value) => {
                           props.controls.agents.select(value)
                           restoreFocus()

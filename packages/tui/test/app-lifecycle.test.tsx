@@ -126,3 +126,53 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
     mock.restore()
   }
 })
+
+test("registers plan and build commands", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const calls = createFetch()
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  let task: Promise<void> | undefined
+
+  try {
+    const { run } = await import("../src/app")
+    task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await setup.renderOnce()
+
+    const commands = api?.keymap.getCommandEntries({ visibility: "reachable", namespace: "palette" }) ?? []
+    expect(commands.find((entry) => entry.command.name === "agent.plan")?.command.slashName).toBe("plan")
+    expect(commands.find((entry) => entry.command.name === "agent.build")?.command.slashName).toBe("build")
+
+    expect(api?.keymap.dispatchCommand("agent.plan")).toEqual({ ok: true })
+    expect(api?.keymap.dispatchCommand("agent.build")).toEqual({ ok: true })
+  } finally {
+    if (!setup.renderer.isDestroyed) api?.keymap.dispatchCommand("app.exit")
+    await task?.catch(() => {})
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})

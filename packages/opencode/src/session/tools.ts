@@ -29,6 +29,18 @@ const MCP_RESOURCE_TOOLS = {
   listTemplates: "list_mcp_resource_templates",
   read: "read_mcp_resource",
 } as const
+const PLAN_TOOLS = new Set([
+  "glob",
+  "grep",
+  MCP_RESOURCE_TOOLS.list,
+  MCP_RESOURCE_TOOLS.listTemplates,
+  "plan_exit",
+  "question",
+  "read",
+  MCP_RESOURCE_TOOLS.read,
+  "webfetch",
+  "websearch",
+])
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
@@ -40,6 +52,7 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
+  agentID: string
   model: Provider.Model
   session: Session.Info
   processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
@@ -93,6 +106,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     modelID: ModelV2.ID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
+    agentID: input.agentID,
     permission: input.session.permission,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
@@ -385,7 +399,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
-  if (flags.experimentalCodeMode) return tools
+  if (flags.experimentalCodeMode) return restrictPlanTools(input.agentID, tools)
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
@@ -489,8 +503,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
-  return tools
+  return restrictPlanTools(input.agentID, tools)
 })
+
+export function restrictPlanTools<T>(agentID: string, tools: Record<string, T>) {
+  if (agentID !== "plan") return tools
+  return Object.fromEntries(Object.entries(tools).filter(([id]) => PLAN_TOOLS.has(id)))
+}
 
 function toRecord(value: unknown) {
   if (isRecord(value)) return value

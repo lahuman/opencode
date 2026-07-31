@@ -94,12 +94,50 @@ const withEmptyCodeMode = testEffect(
   ]),
 )
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
+const withDesktopPlanMode = testEffect(
+  LayerNode.compile(root, [
+    [Config.node, configLayer],
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalPlanMode: true, client: "desktop" })],
+  ]),
+)
 
 afterEach(async () => {
   await disposeAllInstances()
 })
 
 describe("tool.registry", () => {
+  withDesktopPlanMode.instance("plan mode exposes only read-only planning tools", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const tools = path.join(test.directory, ".opencode", "tool")
+      yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(tools, "unsafe.ts"),
+          "export default { description: 'unsafe', args: {}, execute: async () => 'ok' }\n",
+        ),
+      )
+
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const plan = yield* agents.get("plan")
+      if (!plan) throw new Error("plan agent not found")
+      const available = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: plan,
+        agentID: "plan",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const ids = available.map((tool) => tool.id)
+
+      expect(ids.toSorted()).toEqual(
+        ["glob", "grep", "plan_exit", "question", "read", "webfetch", "websearch"].toSorted(),
+      )
+      expect(ids).not.toContain("unsafe")
+    }),
+  )
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

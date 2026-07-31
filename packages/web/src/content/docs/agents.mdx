@@ -58,13 +58,11 @@ Build is the **default** primary agent with all tools enabled. This is the stand
 
 _Mode_: `primary`
 
-A restricted agent designed for planning and analysis. We use a permission system to give you more control and prevent unintended changes.
-By default, all of the following are set to `ask`:
+A read-only agent designed for implementation planning. Plan can inspect and search the project, research documentation, and ask focused questions, but it cannot run shell commands, edit files, invoke subagents, or execute custom action tools.
 
-- `file edits`: All writes, patches, and edits
-- `bash`: All bash commands
+In Desktop, the guided Plan workflow saves the final Markdown to `.opencode/plans` for Git projects or the global data directory for other projects, then asks whether to switch to Build. Saving this plan artifact is the only write performed by Plan mode. Approving the prompt switches to Build and starts implementation; choosing **Keep planning** leaves the session in Plan mode. CLI users can enable this workflow with `OPENCODE_EXPERIMENTAL_PLAN_MODE=true`.
 
-This agent is useful when you want the LLM to analyze code, suggest changes, or create plans without making any actual modifications to your codebase.
+Use `/plan` to toggle Plan mode and `/build` to switch directly to Build. Desktop displays the current mode as **Build** or **Plan · Read-only** in the composer.
 
 ---
 
@@ -118,7 +116,7 @@ Hidden system agent that creates session summaries. It runs automatically and is
 
 ## Usage
 
-1. For primary agents, use the **Tab** key to cycle through them during a session. You can also use your configured `switch_agent` keybind.
+1. For primary agents, use the **Tab** key to cycle through them during a session. You can also use your configured `switch_agent` keybind, `/plan`, or `/build`.
 
 2. Subagents can be invoked:
    - **Automatically** by primary agents for specialized tasks based on their descriptions.

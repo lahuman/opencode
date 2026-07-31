@@ -684,6 +684,24 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "agent.plan",
+        title: "Toggle plan mode",
+        category: "Agent",
+        slashName: "plan",
+        run: () => {
+          local.agent.set(local.agent.current()?.name === "plan" ? "build" : "plan")
+        },
+      },
+      {
+        name: "agent.build",
+        title: "Switch to build mode",
+        category: "Agent",
+        slashName: "build",
+        run: () => {
+          local.agent.set("build")
+        },
+      },
+      {
         name: "mcp.list",
         title: "Toggle MCPs",
         category: "Agent",

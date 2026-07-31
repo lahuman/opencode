@@ -155,24 +155,13 @@ const layer = Layer.effect(
           },
           plan: {
             name: "plan",
-            description: "Plan mode. Disallows all edit tools.",
+            description: "Read-only planning mode. Explores the project and produces an implementation plan.",
             options: {},
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
                 question: "allow",
                 plan_exit: "allow",
-                task: {
-                  general: "deny",
-                },
-                external_directory: {
-                  [path.join(Global.Path.data, "plans", "*")]: "allow",
-                },
-                edit: {
-                  "*": "deny",
-                  [path.join(".opencode", "plans", "*.md")]: "allow",
-                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
-                },
               }),
               user,
             ),
@@ -291,6 +280,21 @@ const layer = Layer.effect(
           item.steps = value.steps ?? item.steps
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
+        }
+
+        if (agents.plan) {
+          agents.plan.permission = Permission.merge(
+            agents.plan.permission,
+            Permission.fromConfig({
+              bash: "deny",
+              edit: "deny",
+              execute: "deny",
+              lsp: "deny",
+              skill: "deny",
+              task: "deny",
+              todowrite: "deny",
+            }),
+          )
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured

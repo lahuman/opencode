@@ -55,6 +55,19 @@ import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 
+const PLAN_TOOLS = new Set([
+  "glob",
+  "grep",
+  "list_mcp_resource_templates",
+  "list_mcp_resources",
+  "plan_exit",
+  "question",
+  "read",
+  "read_mcp_resource",
+  "webfetch",
+  "websearch",
+])
+
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
 }
@@ -77,6 +90,7 @@ export interface Interface {
     providerID: ProviderV2.ID
     modelID: ModelV2.ID
     agent: Agent.Info
+    agentID?: string
     permission?: PermissionV1.Ruleset
   }) => Effect.Effect<Tool.Def[]>
 }
@@ -247,7 +261,9 @@ const layer = Layer.effect(
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
-            ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            ...(flags.experimentalPlanMode && (flags.client === "cli" || flags.client === "desktop")
+              ? [tool.plan]
+              : []),
           ],
           task: tool.task,
           read: tool.read,
@@ -304,10 +320,14 @@ const layer = Layer.effect(
         return true
       })
 
-      const codeModeDescription = filtered.some((tool) => tool.id === "execute")
+      const available =
+        input.agentID === "plan" || (!input.agentID && input.agent.name === "plan")
+          ? filtered.filter((tool) => PLAN_TOOLS.has(tool.id))
+          : filtered
+      const codeModeDescription = available.some((tool) => tool.id === "execute")
         ? yield* describeCodeMode(input)
         : undefined
-      const visible = filtered.filter((tool) => tool.id !== "execute" || codeModeDescription)
+      const visible = available.filter((tool) => tool.id !== "execute" || codeModeDescription)
 
       return yield* Effect.forEach(
         visible,

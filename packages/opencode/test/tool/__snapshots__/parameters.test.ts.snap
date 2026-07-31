@@ -189,7 +189,16 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
 exports[`tool parameters JSON Schema (wire shape) plan 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "properties": {},
+  "properties": {
+    "plan": {
+      "description": "The complete implementation plan in Markdown",
+      "minLength": 1,
+      "type": "string",
+    },
+  },
+  "required": [
+    "plan",
+  ],
   "type": "object",
 }
 `;

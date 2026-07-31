@@ -69,40 +69,44 @@ it.instance("build agent has correct default properties", () =>
   }),
 )
 
-it.instance("plan agent denies edits except .opencode/plans/*", () =>
+it.instance("plan agent denies all direct edits", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
-    // Wildcard is denied
     expect(evalPerm(plan, "edit")).toBe("deny")
-    // But specific path is allowed
-    expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("deny")
+    expect(evalPerm(plan, "bash")).toBe("deny")
+    expect(evalPerm(plan, "skill")).toBe("deny")
   }),
 )
 
-it.instance("plan agent denies the general subagent by default", () =>
+it.instance("plan agent denies every subagent", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
     expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
-    expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("allow")
-    expect(Permission.evaluate("task", "custom", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("task", "custom", plan!.permission).action).toBe("deny")
   }),
 )
 
 it.instance(
-  "user permission can allow the general subagent from plan mode",
+  "user permission cannot enable subagents in plan mode",
   () =>
     Effect.gen(function* () {
       const plan = yield* load((svc) => svc.get("plan"))
       expect(plan).toBeDefined()
-      expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
+      expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
     }),
   {
     config: {
-      permission: {
-        task: {
-          general: "allow",
+      agent: {
+        plan: {
+          permission: {
+            task: {
+              general: "allow",
+            },
+          },
         },
       },
     },

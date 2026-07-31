@@ -22,6 +22,7 @@ import { enterpriseModelState } from "@/context/model-selection"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePermission } from "@/context/permission"
+import { agentLabel } from "@/context/local-agent"
 import { type ImageAttachmentPart, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
@@ -393,7 +394,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       get agent() {
         return props.controls.agents.visible && props.controls.agents.options.length > 0
           ? {
-              options: () => props.controls.agents.options.map((name) => ({ id: name, label: name })),
+              options: () => props.controls.agents.options.map((name) => ({ id: name, label: agentLabel(name) })),
               current: () => props.controls.agents.current,
               onSelect: (value: string) => props.controls.agents.select(value),
               keybind: () => command.keybindParts("agent.cycle"),

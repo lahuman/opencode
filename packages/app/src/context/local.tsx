@@ -1,13 +1,13 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useParams } from "@solidjs/router"
-import { batch, createEffect, createMemo, startTransition } from "solid-js"
+import { batch, createEffect, createMemo, onCleanup, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
-import { hasCustomAgent, resolveAgent } from "./local-agent"
+import { hasCustomAgent, hasPlanMode, resolveAgent } from "./local-agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { usePlatform } from "./platform"
 import { useSDK } from "./sdk"
@@ -77,7 +77,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
-    const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
+    const agentsVisible = createMemo(
+      () => settings.visibility.customAgents() || hasCustomAgent(list()) || hasPlanMode(list()),
+    )
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
     const [saved, setSaved, , savedReady] = persisted(
@@ -235,6 +237,17 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         agent.set(item.name)
       },
     }
+
+    createEffect(() => {
+      const unsubscribe = sdk().event.on("message.part.updated", (event) => {
+        const part = event.properties.part
+        if (part.type !== "tool" || part.tool !== "plan_exit") return
+        if (part.sessionID !== id() || part.state.status !== "completed") return
+        if (part.state.metadata?.agent !== "build") return
+        agent.set("build")
+      })
+      onCleanup(unsubscribe)
+    })
 
     const current = () => {
       const item = firstModel(

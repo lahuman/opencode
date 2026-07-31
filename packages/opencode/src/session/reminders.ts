@@ -1,4 +1,3 @@
-import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Effect } from "effect"
 import { Agent } from "@/agent/agent"
@@ -72,7 +71,6 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   const ctx = yield* InstanceState.context
   const plan = Session.plan(input.session, ctx)
   const exists = yield* fsys.existsSafe(plan)
-  if (!exists) yield* fsys.ensureDir(path.dirname(plan)).pipe(Effect.catch(Effect.die))
   const part = yield* sessions.updatePart({
     id: PartID.ascending(),
     messageID: userMessage.info.id,
@@ -80,8 +78,8 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
     type: "text",
     text: PLAN_MODE.replace("${planInfo}", () =>
       exists
-        ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.`
-        : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
+        ? `A previous plan exists at ${plan}. You may read it for context. Calling plan_exit replaces it with the final plan.`
+        : `The final plan will be saved to ${plan} by plan_exit. Do not create or edit this file directly.`,
     ),
     synthetic: true,
   })

@@ -79,5 +79,21 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
       disabled: !local.agent.visible(),
       onSelect: () => local.agent.move(-1),
     }),
+    agentCommand({
+      id: "agent.plan",
+      title: "Toggle Plan mode",
+      description: "Switch between Build and read-only Plan mode",
+      slash: "plan",
+      disabled: !local.agent.list().some((item) => item.name === "plan"),
+      onSelect: () => local.agent.set(local.agent.current()?.name === "plan" ? "build" : "plan"),
+    }),
+    agentCommand({
+      id: "agent.build",
+      title: "Switch to Build mode",
+      description: "Use tools and edit files with the Build agent",
+      slash: "build",
+      disabled: !local.agent.list().some((item) => item.name === "build"),
+      onSelect: () => local.agent.set("build"),
+    }),
   ])
 }
