@@ -1,5 +1,6 @@
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
@@ -30,6 +31,7 @@ const MCP_RESOURCE_TOOLS = {
   read: "read_mcp_resource",
 } as const
 const PLAN_TOOLS = new Set([
+  "bash",
   "glob",
   "grep",
   MCP_RESOURCE_TOOLS.list,
@@ -68,6 +70,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
+  const ruleset = resolvePermissionRules({
+    agent: input.agent,
+    agentID: input.agentID,
+    permission: input.session.permission,
+  })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -95,9 +102,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       permission
         .ask({
           ...req,
+          always: input.agentID === "plan" && req.permission === "bash" ? [] : req.always,
+          alwaysAsk: input.agentID === "plan" && req.permission === "bash",
           sessionID: input.session.id,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+          ruleset,
         })
         .pipe(Effect.orDie),
   })
@@ -509,6 +518,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 export function restrictPlanTools<T>(agentID: string, tools: Record<string, T>) {
   if (agentID !== "plan") return tools
   return Object.fromEntries(Object.entries(tools).filter(([id]) => PLAN_TOOLS.has(id)))
+}
+
+export function resolvePermissionRules(input: {
+  agent: Agent.Info
+  agentID: string
+  permission?: PermissionV1.Ruleset
+}) {
+  return Permission.merge(
+    input.agent.permission,
+    input.permission ?? [],
+    input.agentID === "plan" ? Permission.fromConfig({ bash: "ask" }) : [],
+  )
 }
 
 function toRecord(value: unknown) {

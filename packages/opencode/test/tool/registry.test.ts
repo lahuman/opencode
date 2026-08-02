@@ -94,10 +94,10 @@ const withEmptyCodeMode = testEffect(
   ]),
 )
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
-const withDesktopPlanMode = testEffect(
+const withDesktop = testEffect(
   LayerNode.compile(root, [
     [Config.node, configLayer],
-    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalPlanMode: true, client: "desktop" })],
+    [RuntimeFlags.node, RuntimeFlags.layer({ client: "desktop" })],
   ]),
 )
 
@@ -106,7 +106,7 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
-  withDesktopPlanMode.instance("plan mode exposes only read-only planning tools", () =>
+  withDesktop.instance("plan mode exposes only approval-gated planning tools", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
       const tools = path.join(test.directory, ".opencode", "tool")
@@ -132,9 +132,16 @@ describe("tool.registry", () => {
       const ids = available.map((tool) => tool.id)
 
       expect(ids.toSorted()).toEqual(
-        ["glob", "grep", "plan_exit", "question", "read", "webfetch", "websearch"].toSorted(),
+        ["bash", "glob", "grep", "plan_exit", "question", "read", "webfetch", "websearch"].toSorted(),
       )
       expect(ids).not.toContain("unsafe")
+    }),
+  )
+
+  it.instance("registers the guided Plan workflow for CLI without an experimental flag", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      expect(yield* registry.ids()).toContain("plan_exit")
     }),
   )
 

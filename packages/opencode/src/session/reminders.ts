@@ -3,11 +3,9 @@ import { Effect } from "effect"
 import { Agent } from "@/agent/agent"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
-import { RuntimeFlags } from "@/effect/runtime-flags"
 import { PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
-import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
 
@@ -16,36 +14,10 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   agent: Agent.Info
   session: Session.Info
 }) {
-  const flags = yield* RuntimeFlags.Service
   const fsys = yield* FSUtil.Service
   const sessions = yield* Session.Service
   const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
   if (!userMessage) return input.messages
-
-  if (!flags.experimentalPlanMode) {
-    if (input.agent.name === "plan") {
-      userMessage.parts.push({
-        id: PartID.ascending(),
-        messageID: userMessage.info.id,
-        sessionID: userMessage.info.sessionID,
-        type: "text",
-        text: PROMPT_PLAN,
-        synthetic: true,
-      })
-    }
-    const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
-    if (wasPlan && input.agent.name === "build") {
-      userMessage.parts.push({
-        id: PartID.ascending(),
-        messageID: userMessage.info.id,
-        sessionID: userMessage.info.sessionID,
-        type: "text",
-        text: BUILD_SWITCH,
-        synthetic: true,
-      })
-    }
-    return input.messages
-  }
 
   const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
   if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
@@ -78,8 +50,8 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
     type: "text",
     text: PLAN_MODE.replace("${planInfo}", () =>
       exists
-        ? `A previous plan exists at ${plan}. You may read it for context. Calling plan_exit replaces it with the final plan.`
-        : `The final plan will be saved to ${plan} by plan_exit. Do not create or edit this file directly.`,
+        ? `A previously approved plan exists at ${plan}. You may read it for context. A new compatibility copy replaces it only after Build is approved.`
+        : `An approved plan will be copied to ${plan} when switching to Build. Do not create or edit this file directly.`,
     ),
     synthetic: true,
   })

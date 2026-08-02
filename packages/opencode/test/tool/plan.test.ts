@@ -27,7 +27,7 @@ const ctx: Tool.Context = {
 }
 
 function run(
-  choice: "Build now" | "Keep planning",
+  choice?: "Build now" | "Keep planning",
   write: (file: string, content: string | Uint8Array) => Effect.Effect<void, FSUtil.Error> = () => Effect.void,
 ) {
   const directory = path.resolve("plan-test")
@@ -48,11 +48,11 @@ function run(
   const layer = Layer.mergeAll(
     Layer.succeed(FSUtil.Service, { writeWithDirs: write } as FSUtil.Interface),
     Layer.mock(Question.Service, {
-      ask: () =>
-        Effect.sync(() => {
-          questions++
-          return [[choice]]
-        }),
+      ask: () => {
+        questions++
+        if (!choice) return Effect.fail(new Question.RejectedError())
+        return Effect.succeed([[choice]])
+      },
     }),
     Layer.mock(Session.Service, {
       get: () => Effect.succeed(info as never),
@@ -91,7 +91,7 @@ function run(
 }
 
 describe("tool.plan_exit", () => {
-  test("saves the final plan and stays in Plan when requested", async () => {
+  test("keeps the conversation plan without writing when requested", async () => {
     const writes: Array<{ file: string; content: string }> = []
     const test = run("Keep planning", (file, content) =>
       Effect.sync(() => writes.push({ file, content: String(content) })),
@@ -99,23 +99,41 @@ describe("tool.plan_exit", () => {
 
     const result = await Effect.runPromise(test.effect)
 
-    expect(writes).toEqual([{ file: test.file, content: "# Plan\n\nDo the work.\n" }])
+    expect(writes).toEqual([])
     expect(result.metadata.agent).toBe("plan")
+    expect(result.metadata.plan).toBeUndefined()
     expect(test.messages).toHaveLength(0)
     expect(test.parts).toHaveLength(0)
   })
 
-  test("creates one Build message after approval", async () => {
-    const test = run("Build now")
+  test("treats a dismissed approval question as keep planning", async () => {
+    const writes: Array<{ file: string; content: string }> = []
+    const test = run(undefined, (file, content) => Effect.sync(() => writes.push({ file, content: String(content) })))
+
     const result = await Effect.runPromise(test.effect)
 
+    expect(writes).toEqual([])
+    expect(result.metadata).toMatchObject({ agent: "plan" })
+    expect(test.messages).toHaveLength(0)
+    expect(test.parts).toHaveLength(0)
+  })
+
+  test("saves one compatibility copy and creates one Build message after approval", async () => {
+    const writes: Array<{ file: string; content: string }> = []
+    const test = run("Build now", (file, content) =>
+      Effect.sync(() => writes.push({ file, content: String(content) })),
+    )
+    const result = await Effect.runPromise(test.effect)
+
+    expect(writes).toEqual([{ file: test.file, content: "# Plan\n\nDo the work.\n" }])
     expect(result.metadata.agent).toBe("build")
+    expect(result.metadata.plan).toBe(path.join(".opencode", "plans", "1-sample.md"))
     expect(test.messages).toHaveLength(1)
     expect(test.parts).toHaveLength(1)
     expect(test.messages[0]).toMatchObject({ agent: "build" })
   })
 
-  test("does not ask for approval when saving fails", async () => {
+  test("does not switch to Build when the approved compatibility copy fails", async () => {
     const test = run("Build now", () =>
       Effect.fail(new FSUtil.FileSystemError({ method: "writeWithDirs", cause: new Error("write failed") })),
     )
@@ -123,6 +141,8 @@ describe("tool.plan_exit", () => {
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("write failed")
-    expect(test.questions()).toBe(0)
+    expect(test.questions()).toBe(1)
+    expect(test.messages).toHaveLength(0)
+    expect(test.parts).toHaveLength(0)
   })
 })

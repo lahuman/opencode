@@ -124,7 +124,6 @@ const layer = Layer.effect(
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
           },
           question: "deny",
-          plan_enter: "deny",
           plan_exit: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
           read: {
@@ -146,7 +145,6 @@ const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 question: "allow",
-                plan_enter: "allow",
               }),
               user,
             ),
@@ -155,7 +153,7 @@ const layer = Layer.effect(
           },
           plan: {
             name: "plan",
-            description: "Read-only planning mode. Explores the project and produces an implementation plan.",
+            description: "Approval-gated planning mode. Explores the project and produces an implementation plan.",
             options: {},
             permission: Permission.merge(
               defaults,
@@ -286,7 +284,7 @@ const layer = Layer.effect(
           agents.plan.permission = Permission.merge(
             agents.plan.permission,
             Permission.fromConfig({
-              bash: "deny",
+              bash: "ask",
               edit: "deny",
               execute: "deny",
               lsp: "deny",

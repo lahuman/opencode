@@ -14,6 +14,11 @@ export const Parameters = Schema.Struct({
   plan: Schema.NonEmptyString.annotate({ description: "The complete implementation plan in Markdown" }),
 })
 
+type Metadata = {
+  agent: "plan" | "build"
+  plan?: string
+}
+
 export const PlanExitTool = Tool.define(
   "plan_exit",
   Effect.gen(function* () {
@@ -32,31 +37,33 @@ export const PlanExitTool = Tool.define(
           const file = Session.plan(info, instance)
           const plan = path.relative(instance.worktree, file)
           if (!params.plan.trim()) return yield* Effect.die(new Error("Plan must not be empty"))
-          yield* fsys.writeWithDirs(file, params.plan.trimEnd() + "\n")
-          const answers = yield* question.ask({
-            sessionID: ctx.sessionID,
-            questions: [
-              {
-                question: `Plan saved at ${plan}. Would you like to switch to Build and start implementing?`,
-                header: "Build Agent",
-                custom: false,
-                options: [
-                  { label: "Build now", description: "Switch to Build and start implementing the saved plan" },
-                  { label: "Keep planning", description: "Stay in Plan mode and continue refining the plan" },
-                ],
-              },
-            ],
-            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-          })
+          const answers = yield* question
+            .ask({
+              sessionID: ctx.sessionID,
+              questions: [
+                {
+                  question: "The plan is ready. Would you like to switch to Build and start implementing?",
+                  header: "Build Agent",
+                  custom: false,
+                  options: [
+                    { label: "Build now", description: "Save a compatibility copy and start implementing" },
+                    { label: "Keep planning", description: "Keep the conversation plan and continue refining it" },
+                  ],
+                },
+              ],
+              tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+            })
+            .pipe(Effect.catchTag("QuestionRejectedError", () => Effect.succeed([])))
 
           if (answers[0]?.[0] !== "Build now") {
             return {
-              title: "Plan saved",
-              output: `Plan saved at ${plan}. Staying in Plan mode.`,
-              metadata: { agent: "plan", plan },
+              title: "Plan ready",
+              output: "Staying in Plan mode. The conversation plan remains authoritative.",
+              metadata: { agent: "plan" } as Metadata,
             }
           }
 
+          yield* fsys.writeWithDirs(file, params.plan.trimEnd() + "\n")
           const messages = yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie)
           const lastUser = messages.findLast((item) => item.info.role === "user" && item.info.model)
           const model =
@@ -83,7 +90,7 @@ export const PlanExitTool = Tool.define(
           return {
             title: "Switching to build agent",
             output: "User approved the plan. Switch to Build and execute the saved plan.",
-            metadata: { agent: "build", plan },
+            metadata: { agent: "build", plan } as Metadata,
           }
         }).pipe(Effect.orDie),
     }

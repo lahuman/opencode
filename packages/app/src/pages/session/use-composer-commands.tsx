@@ -82,7 +82,7 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
     agentCommand({
       id: "agent.plan",
       title: "Toggle Plan mode",
-      description: "Switch between Build and read-only Plan mode",
+      description: "Switch between Build and approval-gated Plan mode",
       slash: "plan",
       disabled: !local.agent.list().some((item) => item.name === "plan"),
       onSelect: () => local.agent.set(local.agent.current()?.name === "plan" ? "build" : "plan"),

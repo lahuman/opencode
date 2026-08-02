@@ -327,9 +327,6 @@ export function Session() {
     if (part.tool === "plan_exit" && part.state.metadata?.agent === "build") {
       local.agent.set("build")
       lastSwitch = part.id
-    } else if (part.tool === "plan_enter") {
-      local.agent.set("plan")
-      lastSwitch = part.id
     }
   })
 
@@ -1705,6 +1702,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
 
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
+    if (props.part.tool === "plan_exit") return false
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
     return true
@@ -1769,6 +1767,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         </Match>
         <Match when={display() === "question"}>
           <Question {...toolprops} />
+        </Match>
+        <Match when={display() === "plan_exit"}>
+          <Plan {...toolprops} />
         </Match>
         <Match when={display() === "skill"}>
           <Skill {...toolprops} />
@@ -2576,6 +2577,28 @@ function Question(props: ToolProps) {
   )
 }
 
+function Plan(props: ToolProps) {
+  const ctx = use()
+  const { theme, syntax } = useTheme()
+  const plan = createMemo(() => stringValue(props.input.plan)?.trim() ?? "")
+  return (
+    <Show when={plan()}>
+      <BlockTool title="# Plan" part={props.part}>
+        <markdown
+          syntaxStyle={syntax()}
+          streaming={props.part.state.status !== "completed"}
+          internalBlockMode="top-level"
+          content={plan()}
+          tableOptions={{ style: "grid" }}
+          conceal={ctx.conceal()}
+          fg={theme.markdownText}
+          bg={theme.background}
+        />
+      </BlockTool>
+    </Show>
+  )
+}
+
 function Skill(props: ToolProps) {
   return (
     <InlineTool icon="→" pending="Loading skill..." complete={stringValue(props.input.name)} part={props.part}>
@@ -2640,6 +2663,7 @@ const toolDisplays = new Set([
   "apply_patch",
   "todowrite",
   "question",
+  "plan_exit",
   "skill",
   "execute",
 ])

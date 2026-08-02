@@ -8,7 +8,7 @@ export function hasPlanMode(items: Array<{ name: string }>) {
 
 export function agentLabel(name: string) {
   if (name === "build") return "Build"
-  if (name === "plan") return "Plan · Read-only"
+  if (name === "plan") return "Plan · Approval-gated"
   return name
 }
 

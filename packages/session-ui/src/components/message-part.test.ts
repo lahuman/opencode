@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { readPartText } from "./message-part-text"
+import { planExitDisplay, readPartText } from "./message-part-text"
 
 describe("readPartText", () => {
   test("returns empty string when accum is undefined and part text is undefined", () => {
@@ -24,5 +24,21 @@ describe("readPartText", () => {
 
   test("trims leading and trailing whitespace", () => {
     expect(readPartText(undefined, { id: "part_1", text: "\n  body  \n" })).toBe("body")
+  })
+})
+
+describe("planExitDisplay", () => {
+  test.each(["pending", "running"])("shows the Plan input while %s", (status) => {
+    expect(planExitDisplay({ plan: "\n# Plan\n" }, status, "ignored")).toEqual({
+      plan: "# Plan",
+      subtitle: undefined,
+    })
+  })
+
+  test("shows the Plan input and result when completed", () => {
+    expect(planExitDisplay({ plan: "# Plan" }, "completed", "Staying in Plan mode.")).toEqual({
+      plan: "# Plan",
+      subtitle: "Staying in Plan mode.",
+    })
   })
 })

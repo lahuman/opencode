@@ -199,7 +199,7 @@ Start a new session. _Alias_: `/clear`
 
 ### plan
 
-Toggle the read-only Plan agent. Plan can inspect and search the project and ask questions. With `OPENCODE_EXPERIMENTAL_PLAN_MODE=true`, it also saves a final Markdown plan before requesting approval to switch to Build. You can switch agents with the `Tab` key.
+Toggle the approval-gated Plan agent. Plan can inspect and search the project, ask questions, and request user-approved shell commands for read-only inspection or project-documented tests and type checks. Its final tool input is the authoritative conversation plan. A compatibility copy is saved only after you approve switching to Build. You can switch agents with the `Tab` key.
 
 ```bash frame="none"
 /plan

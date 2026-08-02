@@ -38,7 +38,7 @@ describe("hasPlanMode", () => {
 describe("agentLabel", () => {
   test("labels built-in modes without changing custom names", () => {
     expect(agentLabel("build")).toBe("Build")
-    expect(agentLabel("plan")).toBe("Plan · Read-only")
+    expect(agentLabel("plan")).toBe("Plan · Approval-gated")
     expect(agentLabel("reviewer")).toBe("reviewer")
   })
 })

@@ -58,11 +58,11 @@ Build is the **default** primary agent with all tools enabled. This is the stand
 
 _Mode_: `primary`
 
-A read-only agent designed for implementation planning. Plan can inspect and search the project, research documentation, and ask focused questions, but it cannot run shell commands, edit files, invoke subagents, or execute custom action tools.
+A planning agent designed for implementation planning. Plan can inspect and search the project, research documentation, ask focused questions, and request shell commands for read-only inspection or project-documented tests and type checks. Every shell command requires user approval. Plan cannot edit files, invoke subagents, or execute custom action tools.
 
-In Desktop, the guided Plan workflow saves the final Markdown to `.opencode/plans` for Git projects or the global data directory for other projects, then asks whether to switch to Build. Saving this plan artifact is the only write performed by Plan mode. Approving the prompt switches to Build and starts implementation; choosing **Keep planning** leaves the session in Plan mode. CLI users can enable this workflow with `OPENCODE_EXPERIMENTAL_PLAN_MODE=true`.
+Desktop and CLI show the final `plan_exit` tool input as the authoritative Markdown plan, then ask whether to switch to Build. Approving the prompt saves a compatibility copy to `.opencode/plans` for Git projects or the global data directory for other projects, switches to Build, and starts implementation. Choosing **Keep planning** or dismissing the prompt leaves the session in Plan mode without writing a file.
 
-Use `/plan` to toggle Plan mode and `/build` to switch directly to Build. Desktop displays the current mode as **Build** or **Plan · Read-only** in the composer.
+Use `/plan` to toggle Plan mode and `/build` to switch directly to Build. Desktop displays the current mode as **Build** or **Plan · Approval-gated** in the composer. Shell approval is not an operating-system sandbox, so review each requested command before allowing it.
 
 ---
 

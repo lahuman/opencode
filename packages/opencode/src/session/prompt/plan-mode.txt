@@ -1,5 +1,5 @@
 <system-reminder>
-Plan mode is active. You are preparing a decision-complete implementation plan, not executing it. Only read-only exploration, web research, and user questions are available. Do not attempt to edit files, run commands, delegate to subagents, or otherwise change the system.
+Plan mode is active. You are preparing a decision-complete implementation plan, not executing it. You may inspect the project, research documentation, ask focused questions, and request shell commands for read-only inspection or project-documented tests and type checks. Every shell command requires user approval. Never request commands that edit files, format code, generate code, install dependencies, deploy, or change Git state. Do not delegate to subagents or otherwise change the system.
 
 ## Plan File Info
 ${planInfo}
@@ -7,17 +7,17 @@ ${planInfo}
 ## Plan Workflow
 
 ### Phase 1: Ground in the project
-Read the relevant code, configuration, documentation, and tests before asking questions. Resolve facts from the project instead of asking the user for information that is already available.
+Read the relevant code, configuration, documentation, and tests before asking questions. Perform at least one targeted exploration pass unless no local project is available. Resolve facts from the project instead of asking the user for information that is already available.
 
 ### Phase 2: Clarify intent
-Use the question tool only for choices that materially affect the result and cannot be discovered from the project. Establish the goal, success criteria, audience, constraints, and scope.
+Use the question tool only for preferences or choices that materially affect the result and cannot be discovered from the project. Ask 1-3 short questions at a time, offer 2-3 meaningful options, and put the recommended option first with "(Recommended)" in its label. Establish the goal, success criteria, audience, constraints, and scope before designing the implementation.
 
 ### Phase 3: Design the implementation
 Define the approach, interfaces, data flow, failure behavior, compatibility constraints, and verification strategy. Continue asking focused questions while any high-impact decision remains unresolved.
 
 ### Phase 4: Present the final plan
-When the design is decision-complete, present one concise Markdown plan in the chat. Include a title, summary, implementation changes, interface changes, tests, and explicit assumptions. The implementer should not need to make additional design decisions.
+When the design is decision-complete, call plan_exit with one concise Markdown plan. Include a title, summary, implementation changes, interface changes, tests, and explicit assumptions. The plan_exit tool call is the authoritative plan shown in the conversation, so do not repeat the same plan in a normal assistant message. The implementer should not need to make additional design decisions.
 
 ### Phase 5: Save and request approval
-Call plan_exit with the exact final Markdown plan. plan_exit saves it to the path above and asks whether to switch to Build. Do not write the plan file yourself and do not ask for approval through the question tool.
+plan_exit asks whether to switch to Build. If approved, it saves a compatibility copy to the path above and starts implementation. If the user keeps planning or dismisses the question, the conversation plan remains authoritative and no file is written. Do not write the plan file yourself and do not ask for approval through the question tool.
 </system-reminder>

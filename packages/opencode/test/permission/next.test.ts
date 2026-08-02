@@ -885,6 +885,43 @@ it.instance(
 )
 
 it.instance(
+  "ask - alwaysAsk ignores persisted approval",
+  () =>
+    Effect.gen(function* () {
+      const approved = yield* ask({
+        id: PermissionV1.ID.make("per_always_ask_approved"),
+        sessionID: SessionID.make("session_always_ask_approved"),
+        permission: "bash",
+        patterns: ["ls"],
+        metadata: {},
+        always: ["ls"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(1)
+      yield* reply({ requestID: PermissionV1.ID.make("per_always_ask_approved"), reply: "always" })
+      yield* Fiber.join(approved)
+
+      const pending = yield* ask({
+        id: PermissionV1.ID.make("per_always_ask_pending"),
+        sessionID: SessionID.make("session_always_ask_pending"),
+        permission: "bash",
+        patterns: ["ls"],
+        metadata: {},
+        always: [],
+        alwaysAsk: true,
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      expect(yield* waitForPending(1)).toHaveLength(1)
+      yield* reply({ requestID: PermissionV1.ID.make("per_always_ask_pending"), reply: "reject" })
+      expect(Exit.isFailure(yield* Fiber.await(pending))).toBe(true)
+    }),
+  { git: true },
+  { timeout: 15_000 },
+)
+
+it.instance(
   "reply - reject cancels all pending for same session",
   () =>
     Effect.gen(function* () {

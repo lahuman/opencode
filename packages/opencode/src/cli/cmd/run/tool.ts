@@ -471,11 +471,13 @@ function runLsp(p: ToolProps<typeof LspTool>): ToolInline {
 }
 
 function runPlanExit(p: ToolProps<typeof PlanExitTool>): ToolInline {
+  const plan = text(p.input.plan)
+  const output = p.frame.status === "completed" ? text(p.frame.state.output) : ""
   return {
     icon: "→",
-    title: text(p.frame.state.title) || "Switching to build agent",
+    title: text(p.frame.state.title) || "Plan",
     mode: "block",
-    body: p.frame.status === "completed" ? text(p.frame.state.output) : undefined,
+    body: [plan, output].filter(Boolean).join("\n\n") || undefined,
   }
 }
 

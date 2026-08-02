@@ -56,6 +56,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 
 const PLAN_TOOLS = new Set([
+  "bash",
   "glob",
   "grep",
   "list_mcp_resource_templates",
@@ -261,9 +262,7 @@ const layer = Layer.effect(
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
-            ...(flags.experimentalPlanMode && (flags.client === "cli" || flags.client === "desktop")
-              ? [tool.plan]
-              : []),
+            ...(["cli", "desktop"].includes(flags.client) ? [tool.plan] : []),
           ],
           task: tool.task,
           read: tool.read,

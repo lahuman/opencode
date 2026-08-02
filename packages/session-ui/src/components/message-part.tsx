@@ -64,7 +64,7 @@ import { patchFiles } from "./apply-patch-file"
 import { animate } from "motion"
 import { useLocation } from "@solidjs/router"
 import { attached, inline, kind, typeLabel } from "./message-file"
-import { readPartText } from "./message-part-text"
+import { planExitDisplay, readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -557,6 +557,11 @@ export function getToolInfo(
       return {
         icon: "bubble-5",
         title: i18n.t("ui.tool.questions"),
+      }
+    case "plan_exit":
+      return {
+        icon: "checklist",
+        title: "Plan",
       }
     case "skill":
       return {
@@ -1787,6 +1792,30 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
     </Show>
   )
 }
+
+ToolRegistry.register({
+  name: "plan_exit",
+  render(props) {
+    const display = createMemo(() => planExitDisplay(props.input, props.status, props.output))
+    return (
+      <Show when={display().plan}>
+        <BasicTool
+          icon="checklist"
+          trigger={{ title: "Plan", subtitle: display().subtitle }}
+          status={props.status}
+          defaultOpen
+          forceOpen
+          locked
+          allowOpenWhilePending
+        >
+          <div data-component="plan-part">
+            <Markdown text={display().plan} cacheKey={`plan-${checksum(display().plan)}`} streaming={false} />
+          </div>
+        </BasicTool>
+      </Show>
+    )
+  },
+})
 
 ToolRegistry.register({
   name: "read",

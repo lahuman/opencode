@@ -75,9 +75,29 @@ it.instance("plan agent denies all direct edits", () =>
     expect(plan).toBeDefined()
     expect(evalPerm(plan, "edit")).toBe("deny")
     expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("deny")
-    expect(evalPerm(plan, "bash")).toBe("deny")
+    expect(evalPerm(plan, "bash")).toBe("ask")
     expect(evalPerm(plan, "skill")).toBe("deny")
   }),
+)
+
+it.instance(
+  "user permission cannot bypass Plan shell approval",
+  () =>
+    Effect.gen(function* () {
+      const plan = yield* load((svc) => svc.get("plan"))
+      expect(evalPerm(plan, "bash")).toBe("ask")
+    }),
+  {
+    config: {
+      agent: {
+        plan: {
+          permission: {
+            bash: "allow",
+          },
+        },
+      },
+    },
+  },
 )
 
 it.instance("plan agent denies every subagent", () =>

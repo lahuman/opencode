@@ -1,15 +1,14 @@
-Use this tool when the implementation plan is decision-complete and ready to be saved.
+Use this tool when the implementation plan is decision-complete and ready for user review.
 
-Pass the complete Markdown plan in the plan parameter. The tool saves it to the session's plan file, then asks whether to switch to Build and start implementing.
+Pass the complete Markdown plan in the plan parameter. The tool exposes that input as the authoritative plan in the conversation, then asks whether to switch to Build and start implementing. It saves a compatibility copy only after Build is approved.
 
 Call this tool:
-- After you have presented the same complete plan in the chat
 - After you have clarified any questions with the user
 - When you are confident the plan is ready for implementation
 
 Do NOT call this tool:
-- Before you have finalized and presented the plan
+- Before you have finalized the plan
 - If you still have unanswered questions about the implementation
 - If the user has indicated they want to continue planning
 
-Do not create or edit the plan file directly. This tool is the only write operation available in Plan mode.
+Do not repeat the plan in a normal assistant message and do not create or edit the plan file directly.
