@@ -20,7 +20,7 @@ document.body.innerHTML = '<div id="root"></div>'
 
 type CapturedPlatform = {
   fetch?: typeof fetch
-  openLink: (url: string) => void
+  openExternal: (url: string) => void
 }
 
 const providedPlatform = Promise.withResolvers<CapturedPlatform>()
@@ -51,7 +51,6 @@ mock.module("@opencode-ai/app", () => ({
   ACCEPTED_FILE_EXTENSIONS: [],
   AppBaseProviders: (props: { children?: unknown }) => props.children,
   AppInterface: (props: { children?: unknown }) => props.children,
-  handleNotificationClick() {},
   loadLocaleDict: async () => undefined,
   normalizeLocale: (value: string) => value,
   PlatformProvider: (props: { value: CapturedPlatform; children?: unknown }) => {
@@ -111,14 +110,14 @@ const api = {
   },
   getPinchZoomEnabled: async () => false,
   getWindowFullscreen: async () => false,
-  getWindowCount: async () => 1,
   getWindowID: async () => "renderer-index-window",
   onDeepLink: () => () => undefined,
   onMenuCommand() {},
   onPinchZoomEnabledChanged() {},
   onWindowFullscreenChanged() {},
   onZoomFactorChanged() {},
-  openLink: (url: string) => openLinkCalls.push(url),
+  openExternal: (url: string) => openLinkCalls.push(url),
+  openLocalFile: () => undefined,
   setBackgroundColor: async () => undefined,
   storeGet: async () => null,
   storeSet: async () => undefined,
@@ -151,8 +150,8 @@ if (!enterprise) {
   process.exit(0)
 }
 
-platform.openLink("https://opencode.ai/docs?token=renderer-index-open-secret")
-platform.openLink("https://llm.corp.example/docs")
+platform.openExternal("https://opencode.ai/docs?token=renderer-index-open-secret")
+platform.openExternal("https://llm.corp.example/docs")
 
 const rendererFetch = platform.fetch
 if (!rendererFetch) throw new Error("desktop platform fetch is unavailable")

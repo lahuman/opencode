@@ -22,7 +22,6 @@ export function createPlatform(
   updaterState: Accessor<UpdaterState>,
   runtime: {
     acceptedFileExtensions: string[]
-    handleNotificationClick: (href?: string) => void
     makeServerKey: (value: string) => ServerConnection.Key
     windowFullscreen: Platform["windowFullscreen"]
   },
@@ -81,7 +80,7 @@ export function createPlatform(
 
   const wslServersApi = os === "windows" && !ENTERPRISE_ENABLED ? window.api.wslServers : undefined
   const network = createEnterpriseRendererNetwork(ENTERPRISE_PROFILE, {
-    openLink: (url) => window.api.openLink(url),
+    openLink: (url) => window.api.openExternal(url),
     fetch: fetch.bind(globalThis),
   })
 
@@ -133,7 +132,8 @@ export function createPlatform(
       })
     },
 
-    openLink: network.openLink,
+    openExternal: network.openLink,
+    openLocalFile: (url) => window.api.openLocalFile(url),
     async openPath(path: string, app?: string) {
       if (os === "windows") {
         const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
@@ -142,14 +142,6 @@ export function createPlatform(
       return window.api.openPath(path, app)
     },
     revealPath: (path: string) => window.api.revealPath(path),
-
-    back() {
-      window.history.back()
-    },
-
-    forward() {
-      window.history.forward()
-    },
 
     storage,
 
@@ -170,7 +162,7 @@ export function createPlatform(
       window.api.relaunch()
     },
 
-    notify: async (title, description, href) => {
+    notify: async (title, description, onClick) => {
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())
       if (focused) return
 
@@ -181,7 +173,7 @@ export function createPlatform(
       notification.onclick = () => {
         void window.api.showWindow()
         void window.api.setWindowFocus()
-        runtime.handleNotificationClick(href)
+        onClick?.()
         notification.close()
       }
     },
@@ -209,8 +201,6 @@ export function createPlatform(
     setDisplayBackend: async (backend) => {
       await window.api.setDisplayBackend(backend)
     },
-
-    parseMarkdown: (markdown: string) => window.api.parseMarkdownCommand(markdown),
 
     webviewZoom,
 

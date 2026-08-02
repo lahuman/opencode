@@ -430,7 +430,7 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
                       enterprise: false,
                       href: "https://opencode.ai/desktop-feedback",
                       trigger: (id) => command?.trigger(id),
-                      openLink: platform.openLink,
+                      openLink: platform.openExternal,
                     })
                   }
                 >

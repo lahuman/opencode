@@ -128,7 +128,7 @@ export function createHomeProjectsController(home: HomeController) {
           enterprise: Boolean(platform.enterprise),
           href: "https://opencode.ai/desktop-feedback",
           trigger: command.trigger,
-          openLink: platform.openLink,
+          openLink: platform.openExternal,
         }),
     },
   }

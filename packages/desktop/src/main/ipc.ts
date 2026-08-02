@@ -18,7 +18,14 @@ import { parseEnterpriseProviderDiagnostic } from "./enterprise-readiness"
 import { setForceFocus } from "./debug"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
-import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import {
+  getPinchZoomEnabled,
+  getWindowID,
+  openLocalFileURL,
+  setPinchZoomEnabled,
+  setTitlebar,
+  updateTitlebar,
+} from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import type { EnterpriseProviderAPI } from "./enterprise-provider-runtime"
@@ -42,7 +49,6 @@ type Deps = {
   isOldLayoutEligible: () => Promise<boolean> | boolean
   getDisplayBackend: () => Promise<string | null>
   setDisplayBackend: (backend: string | null) => Promise<void> | void
-  parseMarkdown: (markdown: string) => Promise<string> | string
   checkAppExists: (appName: string) => Promise<boolean> | boolean
   resolveAppPath: (appName: string) => Promise<string | null>
   updater: UpdaterController
@@ -105,7 +111,6 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
   registry.handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) =>
     deps.setDisplayBackend(backend),
   )
-  registry.handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
   registry.handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) => deps.checkAppExists(appName))
   registry.handle("resolve-app-path", (_event: IpcMainInvokeEvent, appName: string) => deps.resolveAppPath(appName))
   registry.handle("updater-subscribe", (event) => {
@@ -266,6 +271,14 @@ export function registerIpcHandlers(deps: Deps, registry: IpcRegistry = ipcMain)
 
   registry.on("open-link", (_event: IpcMainEvent, url: string) => {
     void deps.openExternalURL(url)
+  })
+
+  registry.on("open-external", (_event: IpcMainEvent, url: string) => {
+    void deps.openExternalURL(url)
+  })
+
+  registry.on("open-local-file", (_event: IpcMainEvent, url: string) => {
+    openLocalFileURL(url)
   })
 
   registry.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {

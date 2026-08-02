@@ -43,7 +43,7 @@ test("enterprise createPlatform rejects renderer egress before IPC or native fet
   }
 })
 
-test("public createPlatform preserves openLink and fetch behavior", async () => {
+test("public createPlatform preserves external links and fetch behavior", async () => {
   const { result } = await run("public")
 
   expect(result).toEqual({

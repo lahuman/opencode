@@ -36,7 +36,8 @@ const api = {
   getPinchZoomEnabled: async () => false,
   onPinchZoomEnabledChanged() {},
   onZoomFactorChanged() {},
-  openLink: (url: string) => openLinkCalls.push(url),
+  openExternal: (url: string) => openLinkCalls.push(url),
+  openLocalFile: () => undefined,
   killSidecar: async () => {
     restartCalls.push("kill-sidecar")
   },
@@ -58,13 +59,12 @@ Object.defineProperty(globalThis, "fetch", { value: nativeFetch, configurable: t
 const { createPlatform } = await import("../src/renderer/platform")
 const platform = createPlatform({}, () => ({ status: "disabled" }), {
   acceptedFileExtensions: [],
-  handleNotificationClick() {},
   makeServerKey: (value) => value,
   windowFullscreen: () => false,
 })
 
-platform.openLink("https://opencode.ai/docs?token=open-link-secret")
-platform.openLink("https://llm.corp.example/docs")
+platform.openExternal("https://opencode.ai/docs?token=open-link-secret")
+platform.openExternal("https://llm.corp.example/docs")
 
 const rendererFetch = platform.fetch
 if (!rendererFetch) throw new Error("desktop platform fetch is unavailable")
