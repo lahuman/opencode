@@ -74,7 +74,7 @@ it.instance("plan agent denies all direct edits", () =>
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
     expect(evalPerm(plan, "edit")).toBe("deny")
-    expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("edit", "README.md", plan!.permission).action).toBe("deny")
     expect(evalPerm(plan, "bash")).toBe("ask")
     expect(evalPerm(plan, "skill")).toBe("deny")
   }),
