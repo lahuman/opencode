@@ -53,7 +53,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
   const reviewedCommit = await input.verifySource?.(options.cwd, env)
   const build = await input.spawn([env.BUN ?? "bun", "run", "build"], options).exited
   if (build !== 0) return build
-  const packageCode = await input.spawn([env.BUN ?? "bun", "run", "package:win", "--x64"], options).exited
+  const packageCode = await input.spawn([env.BUN ?? "bun", "run", "package:win", "--x64", "--dir"], options).exited
   if (packageCode !== 0) return packageCode
 
   const version =

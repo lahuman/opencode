@@ -205,7 +205,7 @@ test("returns the package exit code after a successful build", async () => {
   expect(code).toBe(23)
   expect(commands).toEqual([
     ["bun", "run", "build"],
-    ["bun", "run", "package:win", "--x64"],
+    ["bun", "run", "package:win", "--x64", "--dir"],
   ])
 })
 
