@@ -69,6 +69,7 @@ import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { useLocal } from "@/context/local"
 import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { sessionTitle } from "@/utils/session-title"
 import { scheduleConnectedMeasure } from "./measure"
@@ -264,6 +265,7 @@ export function MessageTimeline(props: {
   const serverSDK = useServerSDK()
   const sdk = useSDK()
   const sync = useSync()
+  const local = useLocal()
   const settings = useSettings()
   const tabs = useTabs()
   const dialog = useDialog()
@@ -1057,6 +1059,9 @@ export function MessageTimeline(props: {
                 deferToolContent
                 virtualizeDiff={false}
                 onContentRendered={onSizeChange}
+                onSwitchToBuild={
+                  local.agent.current()?.name === "plan" ? () => local.agent.set("build") : undefined
+                }
               />
             )}
           </Show>

@@ -202,6 +202,7 @@ export interface MessagePartProps {
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
   useV2Actions?: boolean
+  onSwitchToBuild?: () => void
 }
 
 function MessageActionButton(
@@ -1462,6 +1463,7 @@ export function Part(props: MessagePartProps) {
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
         useV2Actions={props.useV2Actions}
+        onSwitchToBuild={props.onSwitchToBuild}
       />
     </Show>
   )
@@ -1483,6 +1485,7 @@ export interface ToolProps {
   onContentRendered?: () => void
   forceOpen?: boolean
   locked?: boolean
+  onSwitchToBuild?: () => void
 }
 
 export type ToolComponent = Component<ToolProps>
@@ -1636,6 +1639,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
               deferContent={props.deferToolContent}
               virtualizeDiff={props.virtualizeDiff}
               onContentRendered={props.onContentRendered}
+              onSwitchToBuild={props.onSwitchToBuild}
             />
           </Match>
         </Switch>
@@ -1806,6 +1810,13 @@ ToolRegistry.register({
         >
           <div data-component="plan-part">
             <Markdown text={display().plan} cacheKey={`plan-${checksum(display().plan)}`} streaming={false} />
+            <Show when={display().ready && props.onSwitchToBuild}>
+              <div data-slot="plan-actions" class="flex justify-end pt-3">
+                <ButtonV2 type="button" size="small" variant="contrast" onClick={props.onSwitchToBuild}>
+                  Switch to Build
+                </ButtonV2>
+              </div>
+            </Show>
           </div>
         </BasicTool>
       </Show>

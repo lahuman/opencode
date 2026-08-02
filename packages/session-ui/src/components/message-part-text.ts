@@ -8,5 +8,6 @@ export function planExitDisplay(input: unknown, status?: string, output?: string
   return {
     plan,
     subtitle: status === "completed" ? output : undefined,
+    ready: status === "completed",
   }
 }
