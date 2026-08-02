@@ -1,25 +1,33 @@
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import { Question } from "../question"
+import { ToolJsonSchema } from "./json-schema"
 import DESCRIPTION from "./question.txt"
 
+const Questions = Schema.mutable(Schema.Array(Question.Prompt)).annotate({ description: "Questions to ask" })
+
 export const Parameters = Schema.Struct({
-  questions: Schema.mutable(Schema.Array(Question.Prompt)).annotate({ description: "Questions to ask" }),
+  questions: Questions,
+})
+
+const Input = Schema.Struct({
+  questions: Schema.Union([Questions, Schema.fromJsonString(Questions)]),
 })
 
 type Metadata = {
   answers: ReadonlyArray<Question.Answer>
 }
 
-export const QuestionTool = Tool.define<typeof Parameters, Metadata, Question.Service>(
+export const QuestionTool = Tool.define<typeof Input, Metadata, Question.Service>(
   "question",
   Effect.gen(function* () {
     const question = yield* Question.Service
 
     return {
       description: DESCRIPTION,
-      parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
+      parameters: Input,
+      jsonSchema: ToolJsonSchema.fromSchema(Parameters),
+      execute: (params: Schema.Schema.Type<typeof Input>, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,

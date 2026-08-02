@@ -214,6 +214,9 @@ describe("tool parameters", () => {
     test("rejects missing questions", () => {
       expect(accepts(Question, {})).toBe(false)
     })
+    test("rejects JSON-encoded questions in the wire schema", () => {
+      expect(accepts(Question, { questions: "[]" })).toBe(false)
+    })
   })
 
   describe("read", () => {

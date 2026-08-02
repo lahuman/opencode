@@ -1,10 +1,11 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Effect, Fiber, Queue } from "effect"
+import { Cause, Effect, Exit, Fiber, Queue } from "effect"
 import { QuestionTool } from "../../src/tool/question"
 import { Question } from "../../src/question"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { Agent } from "../../src/agent/agent"
+import { Tool } from "../../src/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { testEffect } from "../lib/effect"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
@@ -18,6 +19,10 @@ const ctx = {
   messages: [],
   metadata: () => Effect.void,
   ask: () => Effect.void,
+}
+
+function execute(tool: Tool.DefWithoutID, args: unknown) {
+  return (tool.execute as unknown as (args: unknown, context: typeof ctx) => ReturnType<typeof tool.execute>)(args, ctx)
 }
 
 const it = testEffect(
@@ -47,6 +52,7 @@ describe("tool.question", () => {
       const question = yield* Question.Service
       const toolInfo = yield* QuestionTool
       const tool = yield* toolInfo.init()
+      expect(tool.jsonSchema).toMatchObject({ properties: { questions: { type: "array" } } })
       const questions = [
         {
           question: "What is your favorite color?",
@@ -65,6 +71,43 @@ describe("tool.question", () => {
 
       const result = yield* Fiber.join(fiber)
       expect(result.title).toBe("Asked 1 question")
+    }),
+  )
+
+  it.instance("recovers JSON-encoded questions once", () =>
+    Effect.gen(function* () {
+      const question = yield* Question.Service
+      const toolInfo = yield* QuestionTool
+      const tool = yield* toolInfo.init()
+      const questions = [
+        {
+          question: "What is your favorite color?",
+          header: "Color",
+          options: [{ label: "Red", description: "The color of passion" }],
+        },
+      ]
+
+      const fiber = yield* execute(tool, { questions: `\n${JSON.stringify(questions)}\n` }).pipe(Effect.forkScoped)
+      const item = yield* pending(question)
+      yield* question.reply({ requestID: item.id, answers: [["Red"]] })
+
+      expect((yield* Fiber.join(fiber)).title).toBe("Asked 1 question")
+    }),
+  )
+
+  it.instance("rejects malformed JSON-encoded questions", () =>
+    Effect.gen(function* () {
+      const toolInfo = yield* QuestionTool
+      const tool = yield* toolInfo.init()
+
+      const exit = yield* execute(tool, {
+        questions: '[{"question":"Pick","description":"""invalid"""}]',
+      }).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+
+      const error = exit.cause.reasons.find(Cause.isDieReason)?.defect
+      expect(error).toBeInstanceOf(Tool.InvalidArgumentsError)
     }),
   )
 
