@@ -32,7 +32,6 @@ describe("planExitDisplay", () => {
     expect(planExitDisplay({ plan: "\n# Plan\n" }, status, "ignored")).toEqual({
       plan: "# Plan",
       subtitle: undefined,
-      ready: false,
     })
   })
 
@@ -40,7 +39,6 @@ describe("planExitDisplay", () => {
     expect(planExitDisplay({ plan: "# Plan" }, "completed", "Staying in Plan mode.")).toEqual({
       plan: "# Plan",
       subtitle: "Staying in Plan mode.",
-      ready: true,
     })
   })
 })

@@ -238,6 +238,17 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    createEffect(() => {
+      const unsubscribe = sdk().event.on("message.part.updated", (event) => {
+        const part = event.properties.part
+        if (part.type !== "tool" || part.tool !== "plan_exit") return
+        if (part.sessionID !== id() || part.state.status !== "completed") return
+        if (part.state.metadata?.agent !== "build") return
+        agent.set("build")
+      })
+      onCleanup(unsubscribe)
+    })
+
     const current = () => {
       const item = firstModel(
         () => scope()?.model,

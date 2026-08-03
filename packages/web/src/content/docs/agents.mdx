@@ -60,7 +60,7 @@ _Mode_: `primary`
 
 A planning agent designed for implementation planning. Plan can inspect and search the project, research documentation, ask focused questions, and request shell commands for read-only inspection or project-documented tests and type checks. Every shell command requires user approval. Plan cannot edit files, invoke subagents, or execute custom action tools.
 
-Desktop and CLI show the final `plan_exit` tool input as the authoritative Markdown plan and end the planning turn without starting implementation. Plan mode remains active so you can refine the plan. Desktop offers a **Switch to Build** action on a completed plan; CLI users can use `/build`. After switching, send an implementation request. Presenting a plan never writes a file or creates a synthetic Build message.
+Desktop and CLI show the final `plan_exit` tool input as the authoritative Markdown plan, then show a **Build now** or **Keep planning** confirmation card. Choosing **Build now** switches the composer to Build without starting implementation. After switching, send an implementation request. Presenting a plan never writes a file or creates a synthetic Build message.
 
 Use `/plan` to toggle Plan mode and `/build` to switch directly to Build. Desktop displays the current mode as **Build** or **Plan · Approval-gated** in the composer. Shell approval is not an operating-system sandbox, so review each requested command before allowing it.
 

@@ -2,7 +2,7 @@
 Plan mode is active. You are preparing a decision-complete implementation plan, not executing it. You may inspect the project, research documentation, ask focused questions, and request shell commands for read-only inspection or project-documented tests and type checks. Every shell command requires user approval. Never request commands that edit files, format code, generate code, install dependencies, deploy, or change Git state. Do not delegate to subagents or otherwise change the system.
 
 ## Plan Output
-The final plan is shown in the conversation. Plan mode remains active after the plan is presented.
+The final plan is shown in the conversation. Plan mode remains active until the user selects **Build now** in the confirmation card.
 
 ## Plan Workflow
 
@@ -18,5 +18,5 @@ Define the approach, interfaces, data flow, failure behavior, compatibility cons
 ### Phase 4: Present the final plan
 When the design is decision-complete, call plan_exit with one concise Markdown plan. Include a title, summary, implementation changes, interface changes, tests, and explicit assumptions. The plan_exit tool call is the authoritative plan shown in the conversation, so do not repeat the same plan in a normal assistant message. The implementer should not need to make additional design decisions.
 
-After presenting the plan, end the turn without asking whether to proceed. Do not write a plan file, switch to Build, or create an implementation request. The user can continue refining the plan or explicitly switch to Build and request implementation.
+After presenting the plan, `plan_exit` shows the Build confirmation card. Do not ask whether to proceed through the question tool, write a plan file, switch to Build, or create an implementation request yourself. After the user chooses **Build now**, the composer switches to Build; the user then sends the implementation request.
 </system-reminder>
