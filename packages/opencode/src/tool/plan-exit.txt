@@ -1,6 +1,6 @@
 Use this tool when the implementation plan is decision-complete and ready for user review.
 
-Pass the complete Markdown plan in the plan parameter. The tool exposes that input as the authoritative plan in the conversation, then shows a card asking whether to switch to Build. Selecting **Build now** switches the composer to Build but does not start implementation or write a plan file.
+Pass the complete Markdown plan in the plan parameter. The tool exposes that input as the authoritative plan in the conversation, then shows a card asking whether to switch to Build. Selecting **Build now** starts a new Build turn with the approved plan. It does not write a plan file.
 
 Call this tool:
 - After you have clarified any questions with the user
@@ -11,4 +11,4 @@ Do NOT call this tool:
 - If you still have unanswered questions about the implementation
 - If the user has indicated they want to continue planning
 
-Do not repeat the plan in a normal assistant message, ask whether to proceed through the question tool, switch to Build, or create or edit a plan file. After the tool completes, end the turn. The user decides whether to keep planning or switch to Build, then sends an implementation request when ready.
+Do not repeat the plan in a normal assistant message, ask whether to proceed through the question tool, switch to Build, or create or edit a plan file. After the tool completes, end the turn. The user decides whether to keep planning or start Build.

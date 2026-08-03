@@ -67,6 +67,8 @@ type ToolCall = {
 interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
+  shouldStop: boolean
+  shouldTransition: boolean
   snapshot: string | undefined
   blocked: boolean
   needsCompaction: boolean
@@ -106,6 +108,8 @@ const layer = Layer.effect(
         model: input.model,
         toolcalls: {},
         shouldBreak: false,
+        shouldStop: false,
+        shouldTransition: false,
         snapshot: initialSnapshot,
         blocked: false,
         needsCompaction: false,
@@ -410,6 +414,10 @@ const layer = Layer.effect(
               attachments: attachments.length ? attachments : undefined,
             }
             yield* completeToolCall(value.id, output)
+            if (value.name === "plan_exit") {
+              ctx.shouldStop = true
+              ctx.shouldTransition = output.metadata.agent === "build"
+            }
             return
           }
 
@@ -677,7 +685,8 @@ const layer = Layer.effect(
           )
 
           if (ctx.needsCompaction) return "compact"
-          if (ctx.blocked || ctx.assistantMessage.error) return "stop"
+          if (ctx.shouldTransition) return "continue"
+          if (ctx.shouldStop || ctx.blocked || ctx.assistantMessage.error) return "stop"
           return "continue"
         })
       })

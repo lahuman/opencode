@@ -154,6 +154,24 @@ describe("tool.registry", () => {
     }),
   )
 
+  withDesktop.instance("does not expose plan exit outside Plan mode", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const build = yield* agents.get("build")
+      if (!build) throw new Error("build agent not found")
+
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: build,
+        agentID: "build",
+      })
+
+      expect(tools.map((tool) => tool.id)).not.toContain("plan_exit")
+    }),
+  )
+
   it.instance("does not expose execute unless code mode is enabled", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

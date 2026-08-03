@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { Cause, Effect, Exit, Layer } from "effect"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Agent } from "@/agent/agent"
 import { MessageID, SessionID } from "@/session/schema"
 import { Question } from "@/question"
+import { Session } from "@/session/session"
+import { Provider } from "@/provider/provider"
 import { PlanExitTool } from "@/tool/plan"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
@@ -18,7 +21,7 @@ const ctx: Tool.Context = {
   ask: () => Effect.void,
 }
 
-function layer(choice?: "Build now" | "Keep planning") {
+function layer(choice?: "Build now" | "Keep planning", parts: SessionV1.Part[] = []) {
   return Layer.mergeAll(
     Layer.mock(Truncate.Service, {
       output: (text: string) => Effect.succeed({ content: text, truncated: false as const }),
@@ -29,14 +32,21 @@ function layer(choice?: "Build now" | "Keep planning") {
     Layer.mock(Question.Service, {
       ask: () => (choice ? Effect.succeed([[choice]]) : Effect.fail(new Question.RejectedError())),
     }),
+    Layer.mock(Session.Service, {
+      updateMessage: (message) => Effect.succeed(message),
+      updatePart: (part) => Effect.sync(() => parts.push(part)).pipe(Effect.as(part)),
+    }),
+    Layer.mock(Provider.Service, {
+      defaultModel: () => Effect.succeed({} as never),
+    }),
   )
 }
 
-function run(plan: string, choice?: "Build now" | "Keep planning") {
+function run(plan: string, choice?: "Build now" | "Keep planning", parts?: SessionV1.Part[]) {
   return PlanExitTool.pipe(
     Effect.flatMap(Tool.init),
     Effect.flatMap((tool) => tool.execute({ plan }, ctx)),
-    Effect.provide(layer(choice)),
+    Effect.provide(layer(choice, parts)),
   )
 }
 
@@ -58,13 +68,21 @@ describe("tool.plan_exit", () => {
   })
 
   test("switches to Build after the Build card is approved", async () => {
-    const result = await Effect.runPromise(run("# Plan\n\nDo the work.", "Build now"))
+    const parts: SessionV1.Part[] = []
+    const result = await Effect.runPromise(run("# Plan\n\nDo the work.", "Build now", parts))
 
     expect(result).toMatchObject({
-      title: "Build mode ready",
-      output: "Build mode is ready. Send an implementation request when ready.",
+      title: "Starting Build agent",
+      output: "The approved plan is now running in Build mode.",
       metadata: { agent: "build" },
     })
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: "text",
+        synthetic: true,
+        text: "The following plan has been approved. Implement it now.\n\n# Plan\n\nDo the work.",
+      }),
+    )
   })
 
   test("rejects whitespace-only plans", async () => {

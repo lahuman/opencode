@@ -322,7 +322,7 @@ const layer = Layer.effect(
       const available =
         input.agentID === "plan" || (!input.agentID && input.agent.name === "plan")
           ? filtered.filter((tool) => PLAN_TOOLS.has(tool.id))
-          : filtered
+          : filtered.filter((tool) => tool.id !== "plan_exit")
       const codeModeDescription = available.some((tool) => tool.id === "execute")
         ? yield* describeCodeMode(input)
         : undefined

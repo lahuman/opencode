@@ -1,6 +1,10 @@
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import { Question } from "../question"
+import { Session } from "@/session/session"
+import { Provider } from "@/provider/provider"
+import { MessageID, PartID } from "@/session/schema"
 import EXIT_DESCRIPTION from "./plan-exit.txt"
 
 export const Parameters = Schema.Struct({
@@ -11,10 +15,12 @@ type Metadata = {
   agent: "plan" | "build"
 }
 
-export const PlanExitTool = Tool.define<typeof Parameters, Metadata, Question.Service>(
+export const PlanExitTool = Tool.define<typeof Parameters, Metadata, Question.Service | Session.Service | Provider.Service>(
   "plan_exit",
   Effect.gen(function* () {
     const question = yield* Question.Service
+    const session = yield* Session.Service
+    const provider = yield* Provider.Service
 
     return {
       description: EXIT_DESCRIPTION,
@@ -48,9 +54,32 @@ export const PlanExitTool = Tool.define<typeof Parameters, Metadata, Question.Se
             }
           }
 
+          const lastUser = ctx.messages.findLast((item) => item.info.role === "user" && item.info.model)
+          const model =
+            lastUser?.info.role === "user" && lastUser.info.model
+              ? lastUser.info.model
+              : yield* provider.defaultModel().pipe(Effect.orDie)
+          const message: SessionV1.User = {
+            id: MessageID.ascending(),
+            sessionID: ctx.sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: "build",
+            model,
+          }
+          yield* session.updateMessage(message)
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: message.id,
+            sessionID: ctx.sessionID,
+            type: "text",
+            text: `The following plan has been approved. Implement it now.\n\n${params.plan.trim()}`,
+            synthetic: true,
+          } satisfies SessionV1.TextPart)
+
           return {
-            title: "Build mode ready",
-            output: "Build mode is ready. Send an implementation request when ready.",
+            title: "Starting Build agent",
+            output: "The approved plan is now running in Build mode.",
             metadata: { agent: "build" } satisfies Metadata,
           }
         }),
