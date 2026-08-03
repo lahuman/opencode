@@ -44,7 +44,7 @@ describe("current session timeline rows", () => {
       (messageID) => messages.get(messageID),
       (messageID) => normalized.parts.get(messageID) ?? [],
       true,
-      "busy",
+      { type: "busy" },
       true,
       normalized.messages.filter((message) => message.role === "user"),
     )
@@ -56,6 +56,7 @@ describe("current session timeline rows", () => {
       "turn-gap:msg_3",
       "user-message:msg_3",
       "assistant-part:msg_3:msg_4:reasoning:0",
+      "thinking:msg_3",
     ])
   })
 
@@ -80,7 +81,7 @@ describe("current session timeline rows", () => {
       (messageID) => messages.get(messageID),
       (messageID) => normalized.parts.get(messageID) ?? [],
       true,
-      "idle",
+      { type: "idle" },
       true,
       normalized.messages.filter((message) => message.role === "user"),
     )
@@ -121,7 +122,7 @@ describe("current session timeline rows", () => {
       (messageID) => messages.get(messageID),
       (messageID) => normalized.parts.get(messageID) ?? [],
       true,
-      "idle",
+      { type: "idle" },
       true,
       normalized.messages.filter((message) => message.role === "user"),
     )
@@ -154,7 +155,7 @@ describe("current session timeline rows", () => {
         messageID === optimistic.id ? optimistic : normalized.messages.find((message) => message.id === messageID),
       () => [],
       true,
-      "busy",
+      { type: "busy" },
       true,
       [...normalized.messages.filter((message) => message.role === "user"), optimistic],
     )

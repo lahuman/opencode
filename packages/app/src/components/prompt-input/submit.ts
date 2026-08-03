@@ -60,12 +60,12 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const images = draftImages(input.draft.prompt)
   const setBusy = () => {
     if (!input.optimisticBusy) return
-    input.serverSync.session.set("session_status", input.draft.sessionID, { type: "busy" })
+    input.serverSync.session.status.set(input.draft.sessionID, { type: "busy", phase: "preparing", since: Date.now() })
   }
 
   const setIdle = () => {
     if (!input.optimisticBusy) return
-    input.serverSync.session.set("session_status", input.draft.sessionID, { type: "idle" })
+    input.serverSync.session.status.set(input.draft.sessionID, { type: "idle" })
   }
 
   const wait = async () => {
@@ -267,9 +267,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       pending.delete(key)
       return Promise.resolve()
     }
-    return sdk()
-      .api.session.interrupt({ sessionID })
-      .catch(() => {})
+    return serverSync()
+      .interrupt(sessionID)
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err),
+        })
+      })
   }
 
   const restoreCommentItems = (
@@ -518,7 +523,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const customCommand = sync().data.command.find((c) => c.name === commandName)
       if (customCommand) {
         const messageID = Identifier.ascending("message")
-        serverSync().session.set("session_status", session.id, { type: "busy" })
+        serverSync().session.status.set(session.id, { type: "busy", phase: "preparing", since: Date.now() })
         sdk()
           .api.session.command({
             sessionID: session.id,
@@ -533,7 +538,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             })),
           })
           .catch((err) => {
-            serverSync().session.set("session_status", session.id, { type: "idle" })
+            serverSync().session.status.set(session.id, { type: "idle" })
             showToast({
               title: language.t("prompt.toast.commandSendFailed.title"),
               description: formatServerError(err, language.t, language.t("common.requestFailed")),

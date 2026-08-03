@@ -51,6 +51,7 @@ import type {
   Part as PartType,
   ToolPart,
   UserMessage,
+  SessionStatus,
 } from "@opencode-ai/sdk/v2"
 import { showToast } from "@/utils/toast"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
@@ -69,6 +70,7 @@ import { useTabs } from "@/context/tabs"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { useServerSync } from "@/context/server-sync"
 import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { sessionTitle } from "@/utils/session-title"
 import { scheduleConnectedMeasure } from "./measure"
@@ -128,12 +130,37 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSummaries: boolean }) {
+function TimelineThinkingRow(props: {
+  reasoningHeading?: string
+  showReasoningSummaries: boolean
+  activity?: "compacting" | "reasoning" | "responding" | "tool"
+  status: SessionStatus
+  connection: "connecting" | "connected" | "disconnected"
+  delayed: boolean
+  waitingUser: boolean
+  stopping: boolean
+}) {
   const language = useLanguage()
+  const text = () => {
+    if (props.connection === "disconnected") return language.t("ui.sessionTurn.status.disconnected")
+    if (props.connection === "connecting") return language.t("ui.sessionTurn.status.syncing")
+    if (props.stopping) return language.t("ui.sessionTurn.status.stopping")
+    if (props.waitingUser) return language.t("ui.sessionTurn.status.waitingUser")
+    if (props.delayed) return language.t("ui.sessionTurn.status.delayed")
+    if (props.activity === "compacting") return language.t("ui.sessionTurn.status.compacting")
+    if (props.activity === "tool") return language.t("ui.sessionTurn.status.runningCommands")
+    if (props.activity === "responding") return language.t("ui.sessionTurn.status.responding")
+    if (props.activity === "reasoning") return language.t("ui.sessionTurn.status.thinking")
+    if (props.status.type === "busy" && props.status.phase === "preparing")
+      return language.t("ui.sessionTurn.status.preparing")
+    if (props.status.type === "busy" && props.status.phase === "waiting_model")
+      return language.t("ui.sessionTurn.status.waitingModel")
+    return language.t("ui.sessionTurn.status.working")
+  }
 
   return (
-    <div data-slot="session-turn-thinking">
-      <TextShimmer text={language.t("ui.sessionTurn.status.thinking")} />
+    <div data-slot="session-turn-thinking" aria-live="polite">
+      <TextShimmer text={text()} />
       <Show when={!props.showReasoningSummaries}>
         <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
       </Show>
@@ -262,6 +289,7 @@ export function MessageTimeline(props: {
 
   const navigate = useNavigate()
   const serverSDK = useServerSDK()
+  const serverSync = useServerSync()
   const sdk = useSDK()
   const sync = useSync()
   const settings = useSettings()
@@ -281,6 +309,13 @@ export function MessageTimeline(props: {
     const id = sessionID()
     if (!id) return idle
     return sync().data.session_status[id] ?? idle
+  })
+  const sessionDelayed = createMemo(() => {
+    const id = sessionID()
+    const status = sessionStatus()
+    if (!id || status.type !== "busy") return false
+    const now = serverSync().activeSessions.now()
+    return now - (serverSync().session.data.session_activity[id] ?? status.since ?? now) >= 45_000
   })
   const sessionMessages = createMemo(() => (sessionID() ? (sync().data.message[sessionID()!] ?? []) : []))
   const projectedMessages = createMemo(() => {
@@ -1211,6 +1246,15 @@ export function MessageTimeline(props: {
               <TimelineThinkingRow
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
+                activity={thinkingRow().activity}
+                status={sessionStatus()}
+                connection={serverSDK().connection()}
+                waitingUser={
+                  (sync().data.permission[sessionID() ?? ""]?.length ?? 0) > 0 ||
+                  (sync().data.question[sessionID() ?? ""]?.length ?? 0) > 0
+                }
+                stopping={serverSync().interrupting(sessionID() ?? "")}
+                delayed={sessionDelayed()}
               />
             </div>
           </TimelineRowFrame>

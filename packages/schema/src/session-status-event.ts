@@ -28,6 +28,8 @@ export const Info = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("busy"),
+    phase: optional(Schema.Union([Schema.Literal("preparing"), Schema.Literal("waiting_model")])),
+    since: optional(NonNegativeInt),
   }),
 ]).annotate({ identifier: "SessionStatus" })
 export type Info = Schema.Schema.Type<typeof Info>

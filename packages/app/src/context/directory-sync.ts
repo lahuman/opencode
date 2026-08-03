@@ -37,6 +37,9 @@ export const createDirSyncContext = (
     },
   })
   const set = ((...input: unknown[]) => {
+    if (input[0] === "session_status" && typeof input[1] === "string" && typeof input[2] === "object") {
+      return serverSync.session.status.set(input[1], input[2] as Parameters<typeof serverSync.session.status.set>[1])
+    }
     if (typeof input[0] === "string" && sessionFields.has(input[0])) {
       return (serverSync.session.set as (...args: unknown[]) => unknown)(...input)
     }

@@ -3,7 +3,7 @@ import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { type Accessor, batch, createMemo, createResource, onCleanup, onMount } from "solid-js"
+import { type Accessor, batch, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { createApiForServer, createSdkForServer, type ServerApi } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
@@ -170,6 +170,7 @@ type ServerSDKBase = {
   scope: ServerScope
   protocol: Promise<ServerProtocol>
   protocolKind: Accessor<ServerProtocol | undefined>
+  connection: Accessor<"connecting" | "connected" | "disconnected">
   url: string
   client: ReturnType<typeof createSdkForServer>
   api: CompatibleApi
@@ -213,6 +214,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   const emitter = createGlobalEmitter<{
     [key: string]: ServerEvent
   }>()
+  const [connection, setConnection] = createSignal<"connecting" | "connected" | "disconnected">("connecting")
 
   type Queued = QueuedServerEvent
   const FLUSH_FRAME_MS = 16
@@ -266,6 +268,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
       if (previous) await previous
       // oxlint-disable-next-line no-unmodified-loop-condition -- `started` is set to false by stop() which also aborts; both flags are checked to allow graceful exit
       while (!abort.signal.aborted && started && generation === active) {
+        setConnection("connecting")
         attempt = new AbortController()
         const onAbort = () => {
           attempt?.abort()
@@ -284,6 +287,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
             if (legacy && event.payload.type === "sync") continue
             const directory = legacy ? (event.directory ?? "global") : (event.location?.directory ?? "global")
             const payload = legacy ? (event.payload as Event) : adaptServerEvent(event)
+            if (payload.type === "server.connected") setConnection("connected")
             if (enqueueServerEvent(queue, { directory, payload })) schedule()
 
             if (Date.now() - yielded < STREAM_YIELD_MS) continue
@@ -294,9 +298,8 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {
             streamErrorLogged = true
             console.error("[global-sdk] event stream failed", {
-              url: server.http.url,
               fetch: eventFetch ? "platform" : "webview",
-              error,
+              error: error instanceof Error ? error.name : "UnknownError",
             })
           }
         } finally {
@@ -305,6 +308,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
+        setConnection("disconnected")
         await wait(RECONNECT_DELAY_MS)
       }
     })().finally(() => {
@@ -353,6 +357,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     scope,
     protocol,
     protocolKind,
+    connection,
     url: server.http.url,
     client: sdk,
     api,

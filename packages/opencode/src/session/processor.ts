@@ -644,7 +644,7 @@ const layer = Layer.effect(
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
-            yield* status.set(ctx.sessionID, { type: "busy" })
+            yield* status.set(ctx.sessionID, { type: "busy", phase: "waiting_model", since: Date.now() })
             const stream = llm.stream(streamInput)
 
             yield* stream.pipe(

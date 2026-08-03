@@ -1086,7 +1086,7 @@ const layer = Layer.effect(
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
-          yield* status.set(sessionID, { type: "busy" })
+          yield* status.set(sessionID, { type: "busy", phase: "preparing", since: Date.now() })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(

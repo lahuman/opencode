@@ -1819,8 +1819,8 @@ export default function Page() {
 
   const halt = (sessionID: string) =>
     busy(sessionID)
-      ? sdk()
-          .api.session.interrupt({ sessionID })
+      ? serverSync()
+          .interrupt(sessionID)
           .catch(() => {})
       : Promise.resolve()
 

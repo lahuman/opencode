@@ -10,7 +10,12 @@ import type {
 import { QueryClient } from "@tanstack/solid-query"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./global-sync/eviction"
 import { estimateRootSessionTotal, loadRootSessions } from "./global-sync/session-load"
-import { loadActiveSessionsQuery, loadMcpQuery, loadMcpResourcesQuery, seedActiveSessionStatuses } from "./server-sync"
+import {
+  loadActiveSessionsQuery,
+  loadMcpQuery,
+  loadMcpResourcesQuery,
+  reconcileActiveSessionStatuses,
+} from "./server-sync"
 import { ServerScope } from "@/utils/server-scope"
 import { createServerSession } from "./server-session"
 import type { ServerApi } from "@/utils/server"
@@ -83,22 +88,69 @@ describe("active session query", () => {
     expect([...options.queryKey]).toEqual([ServerScope.local, "activeSessions"])
   })
 
-  test("does not overwrite statuses already written by events", () => {
+  test("finds stale busy sessions without clearing them before hydration", () => {
     const session = createServerSession({} as OpencodeClient)
-    session.set("session_status", "ses_retry", { type: "retry", attempt: 2, message: "retrying", next: 10 })
+    session.status.set("ses_stale", { type: "busy" })
+    const observed = new Map([["ses_stale", session.status.revision("ses_stale")]])
 
-    seedActiveSessionStatuses(session, {
-      ses_running: { type: "running" },
-      ses_retry: { type: "running" },
-    })
+    expect(reconcileActiveSessionStatuses(session, {}, observed)).toEqual(["ses_stale"])
+    expect(session.data.session_status.ses_stale).toEqual({ type: "busy" })
+  })
 
-    expect(session.data.session_status.ses_running).toEqual({ type: "busy" })
-    expect(session.data.session_status.ses_retry).toEqual({
-      type: "retry",
-      attempt: 2,
-      message: "retrying",
-      next: 10,
+  test("lets a status event received during the active request win", () => {
+    const session = createServerSession({} as OpencodeClient)
+    session.status.set("ses_running", { type: "busy", phase: "preparing", since: 1 })
+    const observed = new Map([["ses_running", session.status.revision("ses_running")]])
+    session.status.set("ses_running", { type: "busy", phase: "waiting_model", since: 2 })
+
+    expect(reconcileActiveSessionStatuses(session, {}, observed)).toEqual([])
+    expect(session.data.session_status.ses_running).toEqual({
+      type: "busy",
+      phase: "waiting_model",
+      since: 2,
     })
+  })
+
+  test("preserves retry and seeds active sessions missing locally", () => {
+    const session = createServerSession({} as OpencodeClient)
+    session.status.set("ses_retry", { type: "retry", attempt: 2, message: "retrying", next: 10 })
+    const observed = new Map([
+      ["ses_retry", session.status.revision("ses_retry")],
+      ["ses_missing", session.status.revision("ses_missing")],
+    ])
+
+    expect(
+      reconcileActiveSessionStatuses(
+        session,
+        { ses_retry: { type: "running" }, ses_missing: { type: "running" } },
+        observed,
+      ),
+    ).toEqual([])
+    expect(session.data.session_status.ses_retry?.type).toBe("retry")
+    expect(session.data.session_status.ses_missing).toEqual({ type: "busy" })
+  })
+
+  test("recovers a missed V1 retry status without overwriting same-type live detail", () => {
+    const session = createServerSession({} as OpencodeClient)
+    session.status.set("ses_retry", { type: "busy", phase: "waiting_model", since: 1 })
+    session.status.set("ses_busy", { type: "busy", phase: "waiting_model", since: 2 })
+    const observed = new Map([
+      ["ses_retry", session.status.revision("ses_retry")],
+      ["ses_busy", session.status.revision("ses_busy")],
+    ])
+
+    reconcileActiveSessionStatuses(
+      session,
+      { ses_retry: { type: "running" }, ses_busy: { type: "running" } },
+      observed,
+      {
+        ses_retry: { type: "retry", attempt: 1, message: "rate limited", next: 10 },
+        ses_busy: { type: "busy", phase: "preparing", since: 3 },
+      },
+    )
+
+    expect(session.data.session_status.ses_retry?.type).toBe("retry")
+    expect(session.data.session_status.ses_busy).toEqual({ type: "busy", phase: "waiting_model", since: 2 })
   })
 })
 

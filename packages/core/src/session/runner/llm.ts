@@ -39,6 +39,8 @@ import { MAX_STEPS_PROMPT } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
+import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
+import { Hash } from "../../util/hash"
 
 /**
  * Runs one durable coding-agent Session until it settles.
@@ -176,6 +178,14 @@ const layer = Layer.effect(
       step: number,
       recoverOverflow?: typeof compaction.compactAfterOverflow,
     ) {
+      yield* Effect.logDebug("session phase", {
+        "session.ref": Hash.sha256(sessionID).slice(0, 12),
+        phase: "preparing",
+      })
+      yield* events.publish(SessionStatusEvent.Status, {
+        sessionID,
+        status: { type: "busy", phase: "preparing", since: Date.now() },
+      })
       const session = yield* getSession(sessionID)
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)
         return yield* Effect.interrupt
@@ -229,6 +239,14 @@ const layer = Layer.effect(
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
+      yield* Effect.logDebug("session phase", {
+        "session.ref": Hash.sha256(session.id).slice(0, 12),
+        phase: "waiting_model",
+      })
+      yield* events.publish(SessionStatusEvent.Status, {
+        sessionID: session.id,
+        status: { type: "busy", phase: "waiting_model", since: Date.now() },
+      })
       const providerStream = llm.stream(request).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {

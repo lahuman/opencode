@@ -690,6 +690,8 @@ export type SessionStatus =
     }
   | {
       type: "busy"
+      phase?: "preparing" | "waiting_model"
+      since?: number
     }
 
 export type QuestionOption = {

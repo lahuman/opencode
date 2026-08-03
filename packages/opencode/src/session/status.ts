@@ -4,6 +4,7 @@ import { SessionID } from "./schema"
 import { Effect, Layer, Context } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
+import { Hash } from "@opencode-ai/core/util/hash"
 
 export const Info = SessionStatusEvent.Info
 export type Info = SessionStatusEvent.Info
@@ -38,6 +39,11 @@ const layer = Layer.effect(
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
+      yield* Effect.logDebug("session status", {
+        "session.ref": Hash.sha256(sessionID).slice(0, 12),
+        status: status.type,
+        phase: status.type === "busy" ? status.phase : undefined,
+      })
       yield* events.publish(Event.Status, { sessionID, status })
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })

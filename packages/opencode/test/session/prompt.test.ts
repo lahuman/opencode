@@ -1113,12 +1113,21 @@ it.instance(
 
       const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
       yield* llm.wait(1)
-      expect((yield* status.get(chat.id)).type).toBe("busy")
+      expect(
+        yield* pollWithTimeout(
+          status
+            .get(chat.id)
+            .pipe(
+              Effect.map((value) => (value.type === "busy" && value.phase === "waiting_model" ? value : undefined)),
+            ),
+          "timed out waiting for model response phase",
+        ),
+      ).toMatchObject({ type: "busy", phase: "waiting_model" })
       yield* prompt.cancel(chat.id)
       yield* Fiber.await(fiber)
       expect((yield* status.get(chat.id)).type).toBe("idle")
     }),
-  3_000,
+  10_000,
 )
 
 // Cancel semantics

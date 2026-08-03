@@ -27,6 +27,7 @@ export namespace TimelineRow {
   export class Thinking extends Data.TaggedClass("Thinking")<{
     userMessageID: string
     reasoningHeading?: string
+    activity?: "compacting" | "reasoning" | "responding" | "tool"
   }> {}
   export class DiffSummary extends Data.TaggedClass("DiffSummary")<{
     userMessageID: string

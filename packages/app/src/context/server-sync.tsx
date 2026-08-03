@@ -8,7 +8,17 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
-import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
+import {
+  type Accessor,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  getOwner,
+  onCleanup,
+  onMount,
+  untrack,
+} from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import type { InitError } from "../pages/error"
@@ -165,15 +175,25 @@ export const loadActiveSessionsQuery = (
     refetchOnWindowFocus: false,
   })
 
-export function seedActiveSessionStatuses(
-  session: Pick<ServerSession, "data" | "set">,
-  active: SessionActiveOutput | Record<string, SessionStatus>,
+export function reconcileActiveSessionStatuses(
+  session: Pick<ServerSession, "data" | "status">,
+  active: SessionActiveOutput,
+  observed: ReadonlyMap<string, number>,
+  detailed?: Record<string, SessionStatus>,
 ) {
   for (const sessionID of Object.keys(active)) {
-    if (session.data.session_status[sessionID] !== undefined) continue
-    const status = active[sessionID]
-    session.set("session_status", sessionID, status?.type === "running" ? { type: "busy" } : status)
+    if (session.status.revision(sessionID) !== (observed.get(sessionID) ?? 0)) continue
+    const current = session.data.session_status[sessionID]
+    const next = detailed?.[sessionID]
+    if (current?.type !== undefined && current.type !== "idle" && (!next || current.type === next.type)) continue
+    session.status.set(sessionID, next ?? { type: "busy" })
   }
+
+  return [...observed.keys()].filter((sessionID) => {
+    if (active[sessionID]) return false
+    if (session.status.revision(sessionID) !== observed.get(sessionID)) return false
+    return (session.data.session_status[sessionID]?.type ?? "idle") !== "idle"
+  })
 }
 
 function makeQueryOptionsApi(
@@ -238,30 +258,94 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   const [configQuery, providerQuery, pathQuery] = useQueries(() => ({
     queries: [queryOptionsApi.globalConfig(), queryOptionsApi.providers(null), queryOptionsApi.path(null)],
   }))
+  const fetchActiveSessions = async () => {
+    if ((await serverSDK.protocol) !== "v1")
+      return { active: await serverSDK.api.session.active(), detailed: undefined }
+    const statuses = (await serverSDK.client.session.status()).data ?? {}
+    return {
+      active: Object.fromEntries(
+        Object.entries(statuses).flatMap(([sessionID, status]) =>
+          status.type === "idle" ? [] : [[sessionID, { type: "running" as const }]],
+        ),
+      ),
+      detailed: statuses,
+    }
+  }
+  let activeCheck = 0
+  const refreshActiveSessions = async () => {
+    const check = ++activeCheck
+    const observed = new Map(
+      Object.keys(session.data.session_status).map((sessionID) => [sessionID, session.status.revision(sessionID)]),
+    )
+    const result = await fetchActiveSessions()
+    const active = result.active
+    if (check !== activeCheck) return active
+
+    const stale = reconcileActiveSessionStatuses(session, active, observed, result.detailed)
+    for (const sessionID of Object.keys(active)) void session.resolve(sessionID).catch(() => undefined)
+    const hydrated = await Promise.allSettled(stale.map((sessionID) => session.sync(sessionID, { force: true })))
+    if (check !== activeCheck) return active
+
+    hydrated.forEach((result, index) => {
+      const sessionID = stale[index]
+      if (!sessionID || result.status === "rejected") return
+      if (active[sessionID]) return
+      if (session.status.revision(sessionID) !== observed.get(sessionID)) return
+      session.status.set(sessionID, { type: "idle" })
+    })
+    return active
+  }
   const activeSessionsQuery = useQuery(() =>
     loadActiveSessionsQuery(serverSDK.scope, {
-      active: async () => {
-        if ((await serverSDK.protocol) === "v1") {
-          const statuses = (await serverSDK.client.session.status()).data ?? {}
-          seedActiveSessionStatuses(session, statuses)
-          for (const sessionID of Object.keys(statuses)) {
-            void session.resolve(sessionID).catch(() => undefined)
-          }
-          return Object.fromEntries(
-            Object.entries(statuses).flatMap(([sessionID, status]) =>
-              status.type === "idle" ? [] : [[sessionID, { type: "running" as const }]],
-            ),
-          )
-        }
-        const active = await serverSDK.api.session.active()
-        seedActiveSessionStatuses(session, active)
-        for (const sessionID of Object.keys(active)) {
-          void session.resolve(sessionID).catch(() => undefined)
-        }
-        return active
-      },
+      active: refreshActiveSessions,
     }),
   )
+  const interruptions = new Map<string, Promise<void>>()
+  const [interrupting, setInterrupting] = createStore<Record<string, boolean>>({})
+  const interrupt = (sessionID: string) => {
+    const existing = interruptions.get(sessionID)
+    if (existing) return existing
+    setInterrupting(sessionID, true)
+    const request = serverSDK.api.session
+      .interrupt({ sessionID })
+      .then(() => refreshActiveSessions())
+      .then(() => undefined)
+      .finally(() => {
+        interruptions.delete(sessionID)
+        setInterrupting(sessionID, false)
+      })
+    interruptions.set(sessionID, request)
+    return request
+  }
+  const [activityNow, setActivityNow] = createSignal(Date.now())
+  let watchdog: ReturnType<typeof setInterval> | undefined
+  let lastWatchdogCheck = 0
+  createEffect(() => {
+    const working = Object.values(session.data.session_status).some((status) => status.type !== "idle")
+    if (!working) {
+      if (watchdog) clearInterval(watchdog)
+      watchdog = undefined
+      return
+    }
+    if (watchdog) return
+    watchdog = setInterval(() => {
+      const now = Date.now()
+      setActivityNow(now)
+      if (serverSDK.connection() !== "connected") return
+      const delayed = Object.entries(session.data.session_status).some(([sessionID, status]) => {
+        if (status.type !== "busy") return false
+        if (session.data.permission[sessionID]?.length || session.data.question[sessionID]?.length) return false
+        const since = session.data.session_activity[sessionID] ?? status.since ?? now
+        return now - since >= 45_000
+      })
+      if (!delayed || now - lastWatchdogCheck < 30_000) return
+      lastWatchdogCheck = now
+      void activeSessionsQuery.refetch()
+    }, 1_000)
+  })
+  onCleanup(() => {
+    if (watchdog) clearInterval(watchdog)
+  })
 
   const [globalStore, setGlobalStore] = createStore<GlobalStore>({
     get ready() {
@@ -544,8 +628,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     if (eventType === "integration.connection.updated") void refreshProviders()
 
     if (directory === "global") {
-      if (eventType === "server.connected" && activeSessionsQuery.data === undefined && !activeSessionsQuery.isFetching)
-        void activeSessionsQuery.refetch()
+      if (eventType === "server.connected") void activeSessionsQuery.refetch()
       applyGlobalEvent({
         event,
         project: globalStore.project,
@@ -688,6 +771,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     updateConfig: updateConfigMutation.mutateAsync,
     project: projectApi,
     session,
+    activeSessions: {
+      refresh: refreshActiveSessions,
+      now: activityNow,
+    },
+    interrupt,
+    interrupting: (sessionID: string) => interrupting[sessionID] ?? false,
     homeSessions,
     mcp: {
       toggle: async (directory: string, name: string) => {

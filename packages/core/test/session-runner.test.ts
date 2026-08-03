@@ -55,6 +55,7 @@ import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -626,6 +627,27 @@ describe("SessionRunnerLLM", () => {
       expect(requests).toHaveLength(1)
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
+      ])
+    }),
+  )
+
+  it.effect("publishes live preparing and model wait phases", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Observe phases" }), resume: false })
+      const events = yield* EventV2.Service
+      const statuses = yield* events
+        .subscribe(SessionStatusEvent.Status)
+        .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
+      yield* Effect.yieldNow
+      response = []
+
+      yield* session.resume(sessionID)
+
+      expect(Array.from(yield* Fiber.join(statuses)).map((event) => event.data.status)).toEqual([
+        expect.objectContaining({ type: "busy", phase: "preparing" }),
+        expect.objectContaining({ type: "busy", phase: "waiting_model" }),
       ])
     }),
   )

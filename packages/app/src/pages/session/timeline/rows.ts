@@ -25,7 +25,11 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string }
+  Thinking: {
+    userMessageID: string
+    reasoningHeading?: string
+    activity?: "compacting" | "reasoning" | "responding" | "tool"
+  }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -37,7 +41,7 @@ export namespace Timeline {
     getMessage: (messageID: string) => UserMessage | AssistantMessage | undefined,
     getMessageParts: (messageID: string) => Part[],
     showReasoning: boolean,
-    status: SessionStatus["type"],
+    status: SessionStatus,
     inlineComments: boolean,
     projectedUserMessages: UserMessage[],
   ) {
@@ -103,7 +107,7 @@ export namespace Timeline {
     assistantMessages: AssistantMessage[],
     index: number,
     showReasoning: boolean,
-    status: SessionStatus["type"],
+    status: SessionStatus,
     isActive: boolean,
     // v2 renders comments inside the user message attachments row instead of a strip row
     inlineComments: boolean,
@@ -188,24 +192,35 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
+    if (isActive && status.type === "busy" && !error) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
         .find((value): value is string => !!value)
+      const latest = assistantPartRefs.at(-1)?.part
+      const activity = compaction
+        ? "compacting"
+        : latest?.type === "tool" && (latest.state.status === "pending" || latest.state.status === "running")
+          ? "tool"
+          : latest?.type === "reasoning"
+            ? "reasoning"
+            : latest?.type === "text"
+              ? "responding"
+              : undefined
 
       rows.push(
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
           reasoningHeading: heading,
+          activity,
         }),
       )
     }
 
-    if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
+    if (isActive && status.type === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
 
     const diffs = uniqueSummaryDiffs(userMessage.summary?.diffs)
-    if (diffs.length > 0 && (status === "idle" || !isActive)) {
+    if (diffs.length > 0 && (status.type === "idle" || !isActive)) {
       rows.push(
         new TimelineRow.DiffSummary({
           userMessageID: userMessage.id,

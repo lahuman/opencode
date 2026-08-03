@@ -227,6 +227,16 @@ describe("SessionStatus.Info", () => {
   test("idle / busy discriminators", () => {
     expect(decode({ type: "idle" })).toEqual({ type: "idle" })
     expect(decode({ type: "busy" })).toEqual({ type: "busy" })
+    expect(decode({ type: "busy", phase: "preparing", since: 100 })).toEqual({
+      type: "busy",
+      phase: "preparing",
+      since: 100,
+    })
+    expect(decode({ type: "busy", phase: "waiting_model", since: 200 })).toEqual({
+      type: "busy",
+      phase: "waiting_model",
+      since: 200,
+    })
   })
 
   test("retry carries attempt/message/action/next", () => {

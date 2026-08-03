@@ -196,6 +196,7 @@ export function createServerSession(
   const [data, setData] = createStore({
     info: {} as Record<string, Session | undefined>,
     session_status: {} as Record<string, SessionStatus>,
+    session_activity: {} as Record<string, number>,
     session_diff: {} as Record<string, FileDiffInfo[]>,
     todo: {} as Record<string, Todo[]>,
     permission: {} as Record<string, PermissionRequest[]>,
@@ -209,6 +210,7 @@ export function createServerSession(
     },
   })
   const requests = new Map<string, Promise<Session>>()
+  const statusRevisions = new Map<string, number>()
   const inflight = new Map<string, Promise<void>>()
   const inflightTodo = new Map<string, Promise<void>>()
   const optimistic = new Map<string, Map<string, OptimisticItem>>()
@@ -218,6 +220,12 @@ export function createServerSession(
   const orphanParts = new Map<string, Set<string>>()
   const removedMessages = new Map<string, Set<string>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
+  const markActivity = (sessionID: string) => setData("session_activity", sessionID, Date.now())
+  const setStatus = (sessionID: string, status: SessionStatus) => {
+    statusRevisions.set(sessionID, (statusRevisions.get(sessionID) ?? 0) + 1)
+    markActivity(sessionID)
+    setData("session_status", sessionID, reconcile(status))
+  }
   const deleteMessageParts = (
     cache: { part: Record<string, Part[] | undefined>; part_text_accum_delta: Record<string, string | undefined> },
     messageID: string,
@@ -485,6 +493,7 @@ export function createServerSession(
     }
     sessionIDs.forEach((sessionID) => {
       generations.delete(sessionID)
+      statusRevisions.delete(sessionID)
       clearOptimistic(sessionID)
       requests.delete(sessionID)
       inflight.delete(sessionID)
@@ -498,6 +507,7 @@ export function createServerSession(
     setData(
       produce((draft) => {
         dropSessionCaches(draft, sessionIDs)
+        sessionIDs.forEach((sessionID) => delete draft.session_activity[sessionID])
       }),
     )
     setMeta(
@@ -834,8 +844,10 @@ export function createServerSession(
     }
   }
 
-  const sync = (sessionID: string, options?: { force?: boolean; messageLimit?: number }) => {
+  const sync = (sessionID: string, options?: { force?: boolean; messageLimit?: number }): Promise<void> => {
     touch(sessionID)
+    const pending = inflight.get(sessionID)
+    if (pending && options?.force) return pending.then(() => sync(sessionID, options))
     return runInflight(inflight, sessionID, async () => {
       const cached = data.message[sessionID] !== undefined && meta.limit[sessionID] !== undefined
       if (cached && data.info[sessionID] && !options?.force) return
@@ -937,6 +949,7 @@ export function createServerSession(
   const applyV2 = (event: OpenCodeEvent) => {
     if (!("data" in event) || !("sessionID" in event.data) || typeof event.data.sessionID !== "string") return
     const sessionID = event.data.sessionID
+    markActivity(sessionID)
     const reduction = v2.reduce(data.session_message[sessionID] ?? [], event)
     if (reduction) {
       projectV2(reduction)
@@ -961,15 +974,15 @@ export function createServerSession(
     //   if (info) remember({ ...info, time: { ...info.time, archived: event.created, updated: event.created } })
     //   evict([sessionID])
     // }
-    if (event.type === "session.execution.started") setData("session_status", sessionID, { type: "busy" })
+    if (event.type === "session.execution.started") setStatus(sessionID, { type: "busy" })
     if (
       event.type === "session.execution.succeeded" ||
       event.type === "session.execution.failed" ||
       event.type === "session.execution.interrupted"
     )
-      setData("session_status", sessionID, { type: "idle" })
+      setStatus(sessionID, { type: "idle" })
     if (event.type === "session.retry.scheduled")
-      setData("session_status", sessionID, {
+      setStatus(sessionID, {
         type: "retry",
         attempt: event.data.attempt,
         message: event.data.error.message,
@@ -988,6 +1001,7 @@ export function createServerSession(
     const eventID = eventSessionID(event)
     if (eventID) {
       touch(eventID)
+      markActivity(eventID)
       if (
         !data.info[eventID] &&
         event.type !== "session.created" &&
@@ -1025,7 +1039,7 @@ export function createServerSession(
       }
       case "session.status": {
         const props = event.properties as { sessionID: string; status: SessionStatus }
-        setData("session_status", props.sessionID, reconcile(props.status))
+        setStatus(props.sessionID, props.status)
         return
       }
       case "message.updated": {
@@ -1297,6 +1311,10 @@ export function createServerSession(
   return {
     data,
     set: setData,
+    status: {
+      set: setStatus,
+      revision: (sessionID: string) => statusRevisions.get(sessionID) ?? 0,
+    },
     get: (sessionID: string) => data.info[sessionID],
     peek: (sessionID: string) => data.info[sessionID],
     remember,
