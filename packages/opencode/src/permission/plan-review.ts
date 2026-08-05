@@ -121,17 +121,19 @@ export const preflight = (input: PolicyInput): Effect.Effect<Preflight> =>
 
     const metadata = shellMetadata(input.request.metadata)
     if (!metadata || !metadata.parsed) return MANUAL
+    const classifications = input.request.patterns.map(classify)
+    if (classifications.includes("deny")) return HAZARD
     if (sensitiveText(metadata.command)) return MANUAL
     if (hasCwdTransition(metadata.command)) return MANUAL
     if (scopeLocation(metadata.cwd, input.context.directory) !== "inside") return MANUAL
 
     const results: Preflight[] = []
-    for (const pattern of input.request.patterns) {
+    for (const [index, pattern] of input.request.patterns.entries()) {
       if (sensitiveText(pattern)) {
         results.push(MANUAL)
         continue
       }
-      const deterministic = classify(pattern)
+      const deterministic = classifications[index]
       if (deterministic !== "review") {
         results.push(deterministic === "deny" ? HAZARD : MANUAL)
         continue
@@ -216,7 +218,7 @@ function classify(pattern: string): "review" | "ask" | "deny" {
   )
     return "deny"
   if (
-    /^(?:touch|mkdir|md|rd|rmdir|Set-Content|Add-Content|New-Item|Rename-Item|Move-Item|Copy-Item|Remove-Item|cp|mv|move|copy|ren|rename)(?:\s|$)/i.test(
+    /^(?:rm|unlink|del|erase|touch|mkdir|md|rd|rmdir|Set-Content|Add-Content|New-Item|Rename-Item|Move-Item|Copy-Item|Remove-Item|cp|mv|move|copy|ren|rename)(?:\s|$)/i.test(
       text,
     )
   )
@@ -378,8 +380,9 @@ function classifyValidation(pattern: string): "review" | "ask" | "deny" | undefi
     if (
       tokens.some(
         (value) =>
-          ["--preload", "--require", "-r", "--update-snapshots", "-u"].includes(value) ||
-          ["--preload=", "--require=", "-r="].some((prefix) => value.startsWith(prefix)),
+          ["--preload", "--require", "--import", "-r", "--update-snapshots", "-u"].includes(value) ||
+          ["--preload=", "--require=", "--import="].some((prefix) => value.startsWith(prefix)) ||
+          (value.startsWith("-r") && value.length > 2),
       )
     )
       return "deny"
