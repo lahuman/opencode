@@ -21,6 +21,7 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { preflight } from "@/permission/plan-review"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -161,8 +162,13 @@ const each = (
   }
 }
 
-const capture = (requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>, stop?: Error) => ({
+const capture = (
+  requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">>,
+  stop?: Error,
+  override?: Partial<Tool.Context>,
+) => ({
   ...ctx,
+  ...override,
   ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
     Effect.sync(() => {
       requests.push(req)
@@ -1196,4 +1202,199 @@ describe("tool.shell truncation", () => {
       }),
     ),
   )
+})
+describe("Plan shell permission metadata", () => {
+  each("reports normalized shell, parsed commands, and cwd", (item) =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        withShell(
+          item,
+          Effect.gen(function* () {
+            const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+            yield* run({ command: "echo first && echo second" }, capture(requests))
+            expect(requests.find((request) => request.permission === "bash")).toMatchObject({
+              patterns: expect.arrayContaining(["echo first", "echo second"]),
+              metadata: {
+                command: "echo first && echo second",
+                shell: item.label === "pwsh" ? "powershell" : item.label,
+                parsed: true,
+                cwd: tmp,
+              },
+            })
+          }),
+        ),
+      )
+    }),
+  )
+
+  each("retains an empty parse as a fallback only for native Plan", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const renamed: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          yield* run({ command: "cd ." }, capture(renamed, undefined, { agent: "renamed", extra: { agentID: "plan" } }))
+          expect(renamed.find((request) => request.permission === "bash")).toMatchObject({
+            patterns: ["cd ."],
+            metadata: { parsed: false, cwd: tmp },
+          })
+
+          const build: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          yield* run({ command: "cd ." }, capture(build, undefined, { agent: "plan", extra: { agentID: "build" } }))
+          expect(build.find((request) => request.permission === "bash")).toBeUndefined()
+        }),
+      )
+    }),
+  )
+
+  each("retains malformed Plan input as one fallback pattern", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const stop = new Error("stop after permission")
+          expect(
+            yield* fail(
+              { command: 'echo "' },
+              capture(requests, stop, { agent: "renamed", extra: { agentID: "plan" } }),
+            ),
+          ).toMatchObject({ message: stop.message })
+          expect(requests.find((request) => request.permission === "bash")).toMatchObject({
+            patterns: expect.arrayContaining(['echo "']),
+            metadata: { parsed: false, cwd: tmp },
+          })
+        }),
+      )
+    }),
+  )
+
+  each("uses resolved workdir for both permission boundaries without leaking it", (item) =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const nested = path.join(tmp, "nested")
+      const outside = yield* tmpdirScoped()
+      yield* Effect.promise(() => Bun.write(path.join(nested, "relative.txt"), "x"))
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const nestedRequests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          yield* run({ command: "cat relative.txt", workdir: "nested" }, capture(nestedRequests))
+          expect(nestedRequests.find((request) => request.permission === "bash")?.metadata).toMatchObject({
+            shell: item.label === "pwsh" ? "powershell" : item.label,
+            parsed: true,
+            cwd: nested,
+          })
+
+          const externalRequests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const stop = new Error("stop after permission")
+          expect(
+            yield* fail({ command: "echo external", workdir: outside }, capture(externalRequests, stop)),
+          ).toMatchObject({ message: stop.message })
+          expect(externalRequests[0]).toMatchObject({
+            permission: "external_directory",
+            metadata: {
+              shell: item.label === "pwsh" ? "powershell" : item.label,
+              parsed: true,
+              cwd: outside,
+            },
+          })
+
+          const following: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          yield* run({ command: "echo local" }, capture(following))
+          expect(following.find((request) => request.permission === "external_directory")).toBeUndefined()
+          expect(following.find((request) => request.permission === "bash")?.metadata).toMatchObject({
+            shell: item.label === "pwsh" ? "powershell" : item.label,
+            parsed: true,
+            cwd: tmp,
+          })
+        }),
+      )
+    }),
+  )
+
+  each("keeps compound cwd changes manual from a nested workdir", (item) =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const nested = path.join(tmp, "nested")
+      yield* Effect.promise(() => Bun.write(path.join(nested, "inside.txt"), "x"))
+      yield* runIn(
+        tmp,
+        withShell(
+          item,
+          Effect.gen(function* () {
+            const command =
+              item.label === "cmd"
+                ? "chdir .. & type ../outside/secret"
+                : PS.has(item.label)
+                  ? "Set-Location ..; Get-Content ../outside/secret"
+                  : "cd .. && cat ../outside/secret"
+            const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+            yield* run({ command, workdir: "nested" }, capture(requests))
+            const shell = requests.find((request) => request.permission === "bash")
+            expect(shell?.metadata).toMatchObject({
+              command,
+              shell: item.label === "pwsh" ? "powershell" : item.label,
+              parsed: true,
+              cwd: nested,
+            })
+            expect(
+              (yield* preflight({
+                request: {
+                  id: "per_test" as never,
+                  sessionID: "ses_test" as never,
+                  permission: "bash",
+                  patterns: shell?.patterns ?? [],
+                  metadata: shell?.metadata ?? {},
+                  always: shell?.always ?? [],
+                },
+                context: {
+                  agent: {} as never,
+                  agentID: "plan",
+                  model: {} as never,
+                  userMessageID: "msg_user" as never,
+                  assistantMessageID: "msg_assistant" as never,
+                  callID: "call",
+                  directory: tmp,
+                  abort: new AbortController().signal,
+                  approvalMode: "auto_review",
+                  messages: [],
+                  rulesetDigest: "rules",
+                },
+              })).type,
+            ).toBe("ask")
+          }),
+        ),
+      )
+    }),
+  )
+
+  for (const item of ps) {
+    it.live(`keeps the PowerShell sl cwd alias manual [${item.label}]`, () =>
+      withShell(
+        item,
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped()
+          const nested = path.join(tmp, "nested")
+          yield* Effect.promise(() => Bun.write(path.join(nested, "inside.txt"), "x"))
+          yield* runIn(
+            tmp,
+            Effect.gen(function* () {
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              yield* run({ command: "sl ..; Get-Content ../outside/secret", workdir: "nested" }, capture(requests))
+              expect(requests.find((request) => request.permission === "bash")?.metadata).toMatchObject({
+                shell: "powershell",
+                parsed: true,
+                cwd: nested,
+              })
+            }),
+          )
+        }),
+      ),
+    )
+  }
 })

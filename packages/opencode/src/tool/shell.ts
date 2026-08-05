@@ -260,7 +260,17 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
-const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
+const ask = Effect.fn("ShellTool.ask")(function* (
+  ctx: Tool.Context,
+  scan: Scan,
+  input: { command: string; cwd: string; shell: ShellID.Kind; parsed: boolean },
+) {
+  const metadata = {
+    command: input.command,
+    shell: input.shell === "pwsh" ? "powershell" : input.shell,
+    parsed: input.parsed,
+    cwd: input.cwd,
+  }
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -272,7 +282,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
       patterns: globs,
       always: globs,
       metadata: {
-        command: input.command,
+        ...metadata,
         directories,
         patterns: globs,
       },
@@ -284,9 +294,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     permission: ShellID.ToolID,
     patterns: Array.from(scan.patterns),
     always: Array.from(scan.always),
-    metadata: {
-      command: input.command,
-    },
+    metadata,
   })
 })
 
@@ -397,7 +405,6 @@ export const ShellTool = Tool.define(
         if (cmd && (FILES.has(cmd) || (shellKind === "cmd" && CMD_FILES.has(cmd)))) {
           for (const arg of pathArgs(command, ps, shellKind === "cmd")) {
             const resolved = yield* argPath(arg, cwd, ps, shell)
-            yield* Effect.logInfo("resolved path", { arg, resolved })
             if (!resolved || containsPath(resolved, instance)) continue
             const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
             scan.dirs.add(dir)
@@ -623,8 +630,15 @@ export const ShellTool = Tool.define(
                     Effect.sync(() => tree.delete()),
                   )
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
+                  const parsed = !tree.rootNode.hasError && scan.patterns.size > 0
+                  if (!parsed && ctx.extra?.agentID === "plan") scan.patterns.add(params.command)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
-                  yield* ask(ctx, scan, params)
+                  yield* ask(ctx, scan, {
+                    command: params.command,
+                    cwd,
+                    shell: ShellID.toKind(name),
+                    parsed,
+                  })
                 }),
               )
 
