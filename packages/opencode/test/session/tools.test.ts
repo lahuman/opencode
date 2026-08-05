@@ -20,18 +20,41 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
 
 describe("session tools", () => {
-  test("keeps only read-only tools for the Plan agent", () => {
+  test("keeps exactly the Plan-authorized tools", () => {
     const tools = restrictPlanTools("plan", {
       bash: 0,
-      read: 1,
-      plan_exit: 2,
+      glob: 1,
+      grep: 2,
       list_mcp_resources: 3,
-      todowrite: 4,
-      database_write: 5,
-      custom_plugin: 6,
+      list_mcp_resource_templates: 4,
+      plan_exit: 5,
+      question: 6,
+      read: 7,
+      read_mcp_resource: 8,
+      todowrite: 9,
+      webfetch: 10,
+      websearch: 11,
+      database_write: 12,
+      custom_plugin: 13,
+      edit: 14,
+      write: 15,
+      apply_patch: 16,
     })
 
-    expect(tools).toEqual({ bash: 0, read: 1, plan_exit: 2, list_mcp_resources: 3, todowrite: 4 })
+    expect(tools).toEqual({
+      bash: 0,
+      glob: 1,
+      grep: 2,
+      list_mcp_resources: 3,
+      list_mcp_resource_templates: 4,
+      plan_exit: 5,
+      question: 6,
+      read: 7,
+      read_mcp_resource: 8,
+      todowrite: 9,
+      webfetch: 10,
+      websearch: 11,
+    })
   })
 
   test("does not restrict Build tools", () => {

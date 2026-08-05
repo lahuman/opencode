@@ -23,6 +23,8 @@ import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
+import PLAN_MODE from "../../src/session/prompt/plan-mode.txt"
+import BUILD_SWITCH from "../../src/session/prompt/build-switch.txt"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([CrossSpawnSpawner.node, LayerNodePlatform.filesystem, InstanceStore.node]), [
@@ -357,4 +359,57 @@ describe("Instruction.systemPaths global config", () => {
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
   )
+})
+
+describe("Plan workflow reminders", () => {
+  test("requires evidence-backed read-only planning before Build", () => {
+    const prompt = PLAN_MODE.toLowerCase()
+    for (const invariant of [
+      "investigate before conclusions",
+      "for files over 10,000 lines, identify the file structure first, then inspect focused sections progressively",
+      "search all references and callers before planning moves, removals, or refactors",
+      "use exploration → planning whenever the work creates a new file, changes at least three files, or restructures responsibilities",
+      "execution begins only after the user selects build",
+      "plan remains read-only for repository, project, and external state",
+      "`todowrite` may update only task tracking",
+      "the permission boundary decides whether requested commands run",
+      "neither manual permission approval nor auto-review authorizes a plan mutation",
+    ]) {
+      expect(prompt).toContain(invariant)
+    }
+  })
+
+  test("requires direct interaction and one active task", () => {
+    const prompt = PLAN_MODE.toLowerCase()
+    for (const invariant of [
+      "be technically direct and avoid ornamental praise",
+      "structured questions only when blocked",
+      "respond in the same language as the user with polite, concise, and cli-friendly wording",
+      "use no emoji unless requested",
+      "prefer unicode notation instead of latex",
+      "keep exactly one task `in_progress`",
+    ]) {
+      expect(prompt).toContain(invariant)
+    }
+  })
+
+  test("executes the accepted scope immediately after switching to Build", () => {
+    const prompt = BUILD_SWITCH.toLowerCase()
+    for (const invariant of [
+      'the switch itself authorizes execution of the accepted plan: execute it immediately and without another confirmation or a "continue?" pause between tasks; the only exception is explicit user confirmation before destructive commands',
+      "execute simple single-file fixes directly without manufacturing a larger plan",
+      "read every existing file before overwriting it and prefer partial edits",
+      "use exact source text for replacements",
+      "search all callers, imports, and references before moving or deleting code",
+      "keep exactly one task `in_progress`",
+      "complete the full accepted scope",
+      "do not add unsolicited features, docstrings, comments, or type annotations",
+      "do not create one-use or speculative future abstractions",
+      "remove imports, functions, and variables made unused by the change",
+      "avoid known vulnerabilities, including the owasp top 10",
+      "run proportional verification before completion",
+    ]) {
+      expect(prompt).toContain(invariant)
+    }
+  })
 })
