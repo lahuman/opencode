@@ -58,6 +58,8 @@
 - Read: `packages/app/e2e/performance/AGENTS.md`
 - Modify: `packages/app/e2e/performance/playwright.config.ts`
 - Create: `packages/app/e2e/performance/unit/playwright-config.test.ts`
+- Modify: `packages/app/e2e/performance/timeline/home-tab-navigation-benchmark.spec.ts`
+- Modify: `packages/app/e2e/performance/timeline/session-parent-hydration-benchmark.spec.ts`
 - Record outside the repository: `$env:TEMP\opencode-plan-auto-review-base.txt`
 - Record outside the repository: `$env:TEMP\opencode-plan-auto-review-baseline.txt`
 
@@ -142,6 +144,60 @@
   git add packages/app/e2e/performance/playwright.config.ts packages/app/e2e/performance/unit/playwright-config.test.ts
   git diff --cached --check
   git commit -m "fix(app): isolate performance benchmark discovery"
+  ```
+
+- [ ] Preserve the two failing scenario results as the RED evidence for benchmark fixture repair.
+
+  The discovery-fixed production run must show these exact pre-existing failures before editing either scenario:
+
+  - `performance: home and tab navigation > stages the review body after cold session content` reports `{ contentBeforeReview: true, samples: 5 }` and then waits for the unopened legacy `[data-component="session-review"]`;
+  - `hydrates an orphaned latest turn after a cold session click` times out before `report()`, because its V1 raw part ID does not match the synthesized V2 ID and its 15-message fixture fits inside the current 20-message initial page.
+
+- [ ] Repair only the stale benchmark expectations.
+
+  In `home-tab-navigation-benchmark.spec.ts`, keep the reported `contentBeforeReview` metric and its `true` assertion, then delete only this impossible legacy-panel assertion:
+
+  ```ts
+  await expect(page.locator('[data-component="session-review"]')).toBeVisible()
+  ```
+
+  In `session-parent-hydration-benchmark.spec.ts`, keep the fixture explicitly on its existing V1 path. Replace the assistants array declaration with this exact line and leave its callback body unchanged:
+
+  ```ts
+  const assistants = Array.from({ length: 21 }, (_, index) => {
+  ```
+
+  Replace the conditional synthesized ID expression with:
+
+  ```ts
+  const lastPartID = lastPart.id
+  ```
+
+  After computing `requestCounts`, add the natural-mode assertion before the existing candidate-mode block:
+
+  ```ts
+  if (mode === "natural") expect(requestCounts.parent).toBe(1)
+  ```
+
+  Do not change product code, benchmark metrics, duration thresholds, protocol selection, or the candidate-mode assertions.
+
+- [ ] Run only the repaired production scenarios.
+
+  Run from `packages/app` with no other benchmark/server process active:
+
+  ```powershell
+  $env:PLAYWRIGHT_WORKERS="1"
+  bun.cmd x playwright test --config e2e/performance/playwright.config.ts timeline/home-tab-navigation-benchmark.spec.ts timeline/session-parent-hydration-benchmark.spec.ts
+  ```
+
+  Expected: all selected scenarios pass and both benchmarks report metrics. If the Windows preview wrapper does not exit after Playwright has reported the final result, record the complete result first and terminate only that command's verified process tree.
+
+- [ ] Commit the benchmark fixture repair.
+
+  ```powershell
+  git add packages/app/e2e/performance/timeline/home-tab-navigation-benchmark.spec.ts packages/app/e2e/performance/timeline/session-parent-hydration-benchmark.spec.ts
+  git diff --cached --check
+  git commit -m "fix(app): repair performance benchmark fixtures"
   ```
 
 - [ ] Capture the serial production benchmark baseline.

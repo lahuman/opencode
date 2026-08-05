@@ -213,6 +213,8 @@ Prefer pure policy tests and the repository's existing test provider and permiss
 
 The production benchmark discovery must exclude both its Bun unit-test directory and the separately configured `timeline-stability` suite. Add one Node Playwright `--list` regression that proves benchmark discovery succeeds without loading `bun:test` fixtures and still lists the timeline benchmark scenarios. This is a harness prerequisite only; it does not change benchmark scenarios, measurements, or thresholds.
 
+Keep the benchmark scenarios aligned with the current V2 UI and V1 fixture contracts before taking the baseline. The cold-navigation staging scenario measures that session content appears before optional review work; it must not wait for an unopened legacy review panel. The V1 parent-hydration scenario must use raw V1 part IDs, provide 21 assistant messages so the 20-message initial page omits the parent, and verify exactly one parent fetch in natural mode. These are benchmark-only fixture repairs and do not authorize product-code changes.
+
 ## Security invariants
 
 - Static deny rules remain authoritative and cannot be weakened by the reviewer.
