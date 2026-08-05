@@ -113,14 +113,17 @@ const legacyRequest = {
 }
 
 describe("PermissionV1 contracts", () => {
-  test("preserves typed review on request and ask input", () => {
-    const review = { risk: "critical" as const, reason: "writes outside the workspace" }
+  test.each(["low", "medium", "high", "critical"] as const)(
+    "preserves %s review risk on request and ask input",
+    (risk) => {
+      const review = { risk, reason: "writes outside the workspace" }
 
-    expect(Schema.decodeUnknownSync(PermissionV1.Request)({ ...legacyRequest, review }).review).toEqual(review)
-    expect(
-      Schema.decodeUnknownSync(PermissionV1.AskInput)({ ...legacyRequest, ruleset: [], review }).review,
-    ).toEqual(review)
-  })
+      expect(Schema.decodeUnknownSync(PermissionV1.Request)({ ...legacyRequest, review }).review).toEqual(review)
+      expect(
+        Schema.decodeUnknownSync(PermissionV1.AskInput)({ ...legacyRequest, ruleset: [], review }).review,
+      ).toEqual(review)
+    },
+  )
 
   test("rejects unknown review risk", () => {
     expect(() =>

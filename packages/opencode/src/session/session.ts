@@ -42,6 +42,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { ApprovalMode } from "@opencode-ai/schema/session-v1"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -266,7 +267,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
-    approvalMode: Schema.optional(SessionV1.SessionInfo.fields.approvalMode),
+    approvalMode: Schema.optional(ApprovalMode),
     workspaceID: Schema.optional(WorkspaceV2.ID),
   }),
 )
@@ -294,7 +295,7 @@ export const SetPermissionInput = Schema.Struct({
 })
 export const SetApprovalModeInput = Schema.Struct({
   sessionID: SessionID,
-  approvalMode: SessionV1.SessionInfo.fields.approvalMode,
+  approvalMode: ApprovalMode,
 })
 export const SetRevertInput = Schema.Struct({
   sessionID: SessionID,

@@ -45,7 +45,18 @@ describe("Session schema", () => {
   })
 
   test("retains approval mode in create input", () => {
+    expect(Schema.decodeUnknownSync(Session.CreateInput)({})).toEqual({})
     expect(Schema.decodeUnknownSync(Session.CreateInput)({ approvalMode: "auto_review" })).toEqual({
+      approvalMode: "auto_review",
+    })
+  })
+
+  test("requires approval mode in update input", () => {
+    const sessionID = SessionID.descending()
+
+    expect(() => Schema.decodeUnknownSync(Session.SetApprovalModeInput)({ sessionID })).toThrow()
+    expect(Schema.decodeUnknownSync(Session.SetApprovalModeInput)({ sessionID, approvalMode: "auto_review" })).toEqual({
+      sessionID,
       approvalMode: "auto_review",
     })
   })
