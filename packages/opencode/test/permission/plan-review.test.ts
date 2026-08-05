@@ -871,6 +871,20 @@ describe("PlanReview evidence boundary", () => {
         type: "sensitive",
         reason: "evidence_budget",
       })
+      let beyondBudgetReads = 0
+      const million = Array.from({ length: 1_000_000 }, () => 0)
+      Object.defineProperty(million, "999999", {
+        enumerable: true,
+        configurable: true,
+        get() {
+          beyondBudgetReads++
+          return new Proxy({}, { ownKeys: () => { throw new Error("beyond-budget trap") } })
+        },
+      })
+      const started = performance.now()
+      expect(PlanReview.sanitizeEvidence(million)).toEqual({ type: "sensitive", reason: "evidence_budget" })
+      expect(performance.now() - started).toBeLessThan(1_000)
+      expect(beyondBudgetReads).toBe(0)
       expect(PlanReview.sanitizeEvidence({ ["k".repeat(32_769)]: "value" })).toEqual({
         type: "sensitive",
         reason: "evidence_budget",
@@ -1531,6 +1545,7 @@ describe("PlanReview reviewer", () => {
           preparationMutation = sessions.remove(input.request.sessionID).pipe(Effect.orDie)
         }
         if (scenario === "steer") {
+          expected = { type: "cancel" }
           preparationMutation = sessions.updateMessage({
             id: MessageID.ascending(),
             sessionID: input.request.sessionID,
@@ -1689,6 +1704,109 @@ describe("PlanReview reviewer", () => {
     }),
   )
 
+  it.instance("cancels stale manual preflight requests before publishing a permission prompt", () =>
+    Effect.gen(function* () {
+      const review = yield* PlanReview.Service
+      const sessions = yield* Session.Service
+
+      const mismatched = yield* fixture()
+      expect(
+        yield* review.review({
+          ...mismatched,
+          request: {
+            ...mismatched.request,
+            permission: "external_directory",
+            tool: { messageID: mismatched.context.assistantMessageID, callID: "different-call" },
+          },
+          findings,
+          isActive: () => Effect.succeed(true),
+        }),
+      ).toEqual({ type: "cancel" })
+
+      const completed = yield* fixture()
+      yield* sessions.updatePart({
+        ...completed.toolPart,
+        state: {
+          status: "completed",
+          input: completed.toolPart.state.input,
+          output: "done",
+          title: "done",
+          metadata: {},
+          time: { start: completed.toolPart.state.time.start, end: Date.now() },
+        },
+      })
+      expect(
+        yield* review.review({
+          ...completed,
+          request: {
+            ...completed.request,
+            patterns: ["ambiguous-command"],
+            always: ["ambiguous-command"],
+            metadata: { ...completed.request.metadata, command: "ambiguous-command" },
+          },
+          findings,
+          isActive: () => Effect.succeed(true),
+        }),
+      ).toEqual({ type: "cancel" })
+
+      const missing = yield* fixture()
+      yield* sessions.removePart({
+        sessionID: missing.request.sessionID,
+        messageID: missing.assistant.id,
+        partID: missing.toolPart.id,
+      })
+      expect(
+        yield* review.review({
+          ...missing,
+          request: {
+            ...missing.request,
+            patterns: ["ambiguous-command"],
+            always: ["ambiguous-command"],
+            metadata: { ...missing.request.metadata, command: "ambiguous-command" },
+          },
+          findings,
+          isActive: () => Effect.succeed(true),
+        }),
+      ).toEqual({ type: "cancel" })
+
+      const steered = yield* fixture()
+      yield* sessions.updateMessage({
+        id: MessageID.ascending(),
+        sessionID: steered.request.sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "plan",
+        model: { providerID: provider.model.providerID, modelID: provider.model.id },
+      })
+      const command = "Get-Content .env.local"
+      expect(
+        yield* review.review({
+          ...steered,
+          request: {
+            ...steered.request,
+            patterns: [command],
+            always: [command],
+            metadata: { ...steered.request.metadata, command },
+          },
+          findings,
+          isActive: () => Effect.succeed(true),
+        }),
+      ).toEqual({ type: "cancel" })
+
+      const live = yield* fixture()
+      expect(
+        yield* review.review({
+          ...live,
+          request: { ...live.request, permission: "external_directory" },
+          findings,
+          isActive: () => Effect.succeed(true),
+        }),
+      ).toEqual({ type: "manual" })
+      expect(languageRequests).toBe(0)
+      expect(language.doGenerateCalls).toHaveLength(0)
+    }),
+  )
+
   it.instance("keeps authority precedence for a structurally safe sensitive request", () =>
     Effect.gen(function* () {
       const review = yield* PlanReview.Service
@@ -1832,6 +1950,29 @@ describe("PlanReview reviewer", () => {
           },
         }),
         ProviderTest.model({
+          providerID: ProviderV2.ID.make("openai"),
+          id: ModelV2.ID.make("gpt-5-search-api"),
+          api: { id: ModelV2.ID.make("gpt-5-search-api"), url: "https://example.com", npm: "@ai-sdk/openai" },
+        }),
+        ProviderTest.model({
+          providerID: ProviderV2.ID.make("custom"),
+          id: ModelV2.ID.make("search-alias"),
+          api: {
+            id: ModelV2.ID.make("openai/gpt-5-search-api-2026-08-01"),
+            url: "https://example.com",
+            npm: "@ai-sdk/openai-compatible",
+          },
+        }),
+        ProviderTest.model({
+          providerID: ProviderV2.ID.make("gateway"),
+          id: ModelV2.ID.make("openai/gpt-5-search-api"),
+          api: {
+            id: ModelV2.ID.make("openai/gpt-5-search-api"),
+            url: "https://example.com",
+            npm: "@ai-sdk/gateway",
+          },
+        }),
+        ProviderTest.model({
           providerID: ProviderV2.ID.make("groq"),
           api: { id: ModelV2.ID.make("compound-mini"), url: "https://example.com", npm: "@ai-sdk/groq" },
         }),
@@ -1938,8 +2079,12 @@ describe("PlanReview reviewer", () => {
         "line\nfeed",
         "ansi\u001b[31m",
         "unicode\u2028separator",
+        "arabic\u061cmark",
+        "left\u200emark",
+        "override\u202etext",
+        "isolate\u2066text",
         "Authorization: Bearer abcdefghijklmnop",
-      ].map((reason, index) => [reason, index === 5 ? "low" : "medium"] as const)) {
+      ].map((reason, index, values) => [reason, index === values.length - 1 ? "low" : "medium"] as const)) {
         language = output({ decision: "ask", risk: "low", reason })
         const input = yield* fixture()
         expect(yield* review.review({ ...input, findings, isActive: () => Effect.succeed(true) })).toEqual({
@@ -1947,6 +2092,13 @@ describe("PlanReview reviewer", () => {
           review: { risk, reason: "This request needs manual review." },
         })
       }
+
+      language = output({ decision: "deny", risk: "high", reason: "Unsafe", alternative: "safe\u2069text" })
+      const invalidAlternative = yield* fixture()
+      expect(yield* review.review({ ...invalidAlternative, findings, isActive: () => Effect.succeed(true) })).toEqual({
+        type: "ask",
+        review: { risk: "medium", reason: "This request needs manual review." },
+      })
     }),
   )
 
@@ -2266,6 +2418,100 @@ describe("PlanReview reviewer", () => {
     20_000,
   )
 
+  it.instance("revalidates messages after the last committed authority row read", () =>
+    Effect.gen(function* () {
+      const review = yield* PlanReview.Service
+      const sessions = yield* Session.Service
+      const originalGet = sessions.get
+      const originalMessages = sessions.messages
+      let providerCompleted = false
+      language = new MockLanguageModelV3({
+        doGenerate: async () => {
+          providerCompleted = true
+          return {
+            content: [{ type: "text", text: JSON.stringify({ decision: "allow", risk: "low", reason: "Safe" }) }],
+            finishReason: { unified: "stop", raw: undefined },
+            usage: {
+              inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 1, text: 1, reasoning: undefined },
+            },
+            warnings: [],
+          }
+        },
+      })
+      let armed = false
+      let loads = 0
+      let mutate = Effect.void
+      Object.defineProperty(sessions, "messages", {
+        configurable: true,
+        value: (request: Parameters<typeof originalMessages>[0]) =>
+          originalMessages(request).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                if (!providerCompleted) return
+                loads++
+                if (loads === 2) armed = true
+              }),
+            ),
+          ),
+      })
+      Object.defineProperty(sessions, "get", {
+        configurable: true,
+        value: (sessionID: Parameters<typeof originalGet>[0]) =>
+          Effect.gen(function* () {
+            const row = yield* originalGet(sessionID)
+            if (!armed) return row
+            armed = false
+            yield* mutate
+            return row
+          }),
+      })
+
+      for (const scenario of ["evidence", "tool", "steer"] as const) {
+        providerCompleted = false
+        const input = yield* fixture()
+        loads = 0
+        if (scenario === "steer") {
+          mutate = sessions.updateMessage({
+            id: MessageID.ascending(),
+            sessionID: input.request.sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: "plan",
+            model: { providerID: provider.model.providerID, modelID: provider.model.id },
+          }).pipe(Effect.asVoid)
+        }
+        if (scenario === "tool") {
+          mutate = sessions.updatePart({
+            ...input.toolPart,
+            state: {
+              status: "completed",
+              input: input.toolPart.state.input,
+              output: "done",
+              title: "done",
+              metadata: {},
+              time: { start: input.toolPart.state.time.start, end: Date.now() },
+            },
+          }).pipe(Effect.asVoid)
+        }
+        if (scenario === "evidence") {
+          mutate = sessions.updatePart({
+            id: PartID.ascending(),
+            sessionID: input.request.sessionID,
+            messageID: input.assistant.id,
+            type: "text",
+            text: "Added after the final session row read",
+          }).pipe(Effect.asVoid)
+        }
+        expect(yield* review.review({ ...input, findings, isActive: () => Effect.succeed(true) })).toEqual(
+          scenario === "evidence" ? { type: "manual" } : { type: "cancel" },
+        )
+      }
+      expect(languageRequests).toBe(3)
+      expect(language.doGenerateCalls).toHaveLength(3)
+    }),
+  )
+
   it.instance("revalidates persisted mode, steering, rules, payload, evidence, liveness, and session existence", () =>
     Effect.gen(function* () {
       const review = yield* PlanReview.Service
@@ -2285,7 +2531,7 @@ describe("PlanReview reviewer", () => {
         agent: "plan",
         model: { providerID: provider.model.providerID, modelID: provider.model.id },
       })
-      expect(yield* review.review({ ...steered, findings, isActive: () => Effect.succeed(true) })).toEqual({ type: "manual" })
+      expect(yield* review.review({ ...steered, findings, isActive: () => Effect.succeed(true) })).toEqual({ type: "cancel" })
       expect(language.doGenerateCalls).toHaveLength(0)
 
       const denied = yield* fixture()
@@ -2452,7 +2698,7 @@ describe("PlanReview reviewer", () => {
         release.resolve()
         const result = yield* Fiber.join(run)
         if (scenario === "mutation") expect(result).toMatchObject({ type: "read_only" })
-        else expect(result).toEqual({ type: "manual" })
+        else expect(result).toEqual(scenario === "tool" ? { type: "cancel" } : { type: "manual" })
         expect((yield* sessions.get(input.request.sessionID)).tokens).toMatchObject({ input: 1, output: 1 })
       }
     }),
@@ -2511,7 +2757,7 @@ describe("PlanReview reviewer", () => {
         model: { providerID: provider.model.providerID, modelID: provider.model.id },
       })
       release.resolve()
-      expect(yield* Fiber.join(run)).toEqual({ type: "manual" })
+      expect(yield* Fiber.join(run)).toEqual({ type: "cancel" })
       expect(language.doGenerateCalls).toHaveLength(1)
     }),
   )
@@ -2606,7 +2852,7 @@ describe("PlanReview reviewer", () => {
           findings,
           isActive: () => Effect.succeed(true),
         }),
-      ).toEqual({ type: "manual" })
+      ).toEqual({ type: "cancel" })
       expect(
         yield* review.review({
           context: { ...first.context, callID, messages },
@@ -2876,7 +3122,7 @@ describe("PlanReview reviewer", () => {
         model: { providerID: provider.model.providerID, modelID: provider.model.id },
       })
       release.resolve()
-      expect(yield* Fiber.join(run)).toEqual({ type: "manual" })
+      expect(yield* Fiber.join(run)).toEqual({ type: "cancel" })
       expect(language.doGenerateCalls).toHaveLength(1)
     }),
   )

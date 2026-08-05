@@ -145,7 +145,9 @@ const ReviewText = Schema.Trim.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(240),
   Schema.makeFilter((value) =>
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) ? "control characters are not allowed" : undefined,
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u.test(value)
+      ? "control characters are not allowed"
+      : undefined,
   ),
 )
 const Output = Schema.Struct({
@@ -254,71 +256,88 @@ function evidenceVisitor(rejectSensitive = true) {
     }
     if (array) {
       let proto: object | null
-      let keys: PropertyKey[]
-      let descriptors: PropertyDescriptorMap
+      let length: PropertyDescriptor | undefined
       try {
         proto = Object.getPrototypeOf(input)
-        keys = Reflect.ownKeys(input)
-        descriptors = Object.getOwnPropertyDescriptors(input)
+        length = Object.getOwnPropertyDescriptor(input, "length")
       } catch {
         return fail("unsupported_structure")
       }
-      if (proto !== Array.prototype || keys.some((key) => typeof key === "symbol")) {
-        return fail("unsupported_structure")
-      }
-      const length = descriptors.length
       if (!length || !("value" in length) || !Number.isSafeInteger(length.value) || length.value < 0) {
         return fail("unsupported_structure")
       }
-      if (
-        keys.some(
-          (key) =>
-            key !== "length" &&
-            (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= length.value),
-        )
-      ) {
+      if (proto !== Array.prototype) return fail("unsupported_structure")
+      if (length.value > EVIDENCE_NODES - nodes) return fail("evidence_budget")
+      const result: unknown[] = []
+      let index = 0
+      try {
+        for (const key in input) {
+          const descriptor = Object.getOwnPropertyDescriptor(input, key)
+          if (!descriptor) continue
+          if (key !== String(index) || !("value" in descriptor) || !descriptor.enumerable) {
+            return fail("unsupported_structure")
+          }
+          const next = visit(descriptor.value, depth + 1, collect)
+          if (next.type === "sensitive") return next
+          if (collect) result.push(next.value)
+          index++
+        }
+      } catch {
         return fail("unsupported_structure")
       }
-      const result: unknown[] = []
-      for (let index = 0; index < length.value; index++) {
-        const descriptor = descriptors[String(index)]
-        if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return fail("unsupported_structure")
-        const next = visit(descriptor.value, depth + 1, collect)
-        if (next.type === "sensitive") return next
-        if (collect) result.push(next.value)
+      if (index !== length.value) return fail("unsupported_structure")
+      let keys: PropertyKey[]
+      try {
+        keys = Reflect.ownKeys(input)
+      } catch {
+        return fail("unsupported_structure")
+      }
+      if (keys.length !== length.value + 1 || keys.some((key) => typeof key === "symbol")) {
+        return fail("unsupported_structure")
       }
       return { type: "safe", value: result }
     }
 
     let proto: object | null
-    let keys: PropertyKey[]
-    let descriptors: PropertyDescriptorMap
     try {
       proto = Object.getPrototypeOf(input)
-      keys = Reflect.ownKeys(input)
-      descriptors = Object.getOwnPropertyDescriptors(input)
     } catch {
       return fail("unsupported_structure")
     }
     if (proto !== Object.prototype && proto !== null) return fail("unsupported_structure")
-    if (keys.some((key) => typeof key === "symbol")) return fail("unsupported_structure")
 
     const result: Record<string, unknown> = {}
-    for (const key of keys) {
-      if (typeof key !== "string") return fail("unsupported_structure")
-      const descriptor = descriptors[key]
-      if (!descriptor || !("value" in descriptor)) return fail("unsupported_structure")
-      if (!descriptor.enumerable) continue
-      const normalized = canonicalKey(key)
-      if (OMITTED_TRANSPORT_KEYS.has(normalized)) continue
-      if (descriptor.value === undefined) return fail("unsupported_structure")
-      if (!count(key)) return fail("evidence_budget")
-      if (rejectSensitive && normalized && SENSITIVE_KEY_PARTS.some((part) => normalized.includes(part))) {
-        return fail("credential_key")
+    const processed = new Set<string>()
+    let entries = 0
+    try {
+      for (const key in input) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, key)
+        if (!descriptor) continue
+        entries++
+        if (entries > EVIDENCE_NODES) return fail("evidence_budget")
+        processed.add(key)
+        if (!("value" in descriptor) || !descriptor.enumerable) return fail("unsupported_structure")
+        if (!count(key)) return fail("evidence_budget")
+        const normalized = canonicalKey(key)
+        if (OMITTED_TRANSPORT_KEYS.has(normalized)) continue
+        if (descriptor.value === undefined) return fail("unsupported_structure")
+        if (rejectSensitive && normalized && SENSITIVE_KEY_PARTS.some((part) => normalized.includes(part))) {
+          return fail("credential_key")
+        }
+        const next = visit(descriptor.value, depth + 1, collect)
+        if (next.type === "sensitive") return next
+        if (collect) result[key] = next.value
       }
-      const next = visit(descriptor.value, depth + 1, collect)
-      if (next.type === "sensitive") return next
-      if (collect) result[key] = next.value
+      for (const key of Reflect.ownKeys(input)) {
+        if (typeof key === "symbol") return fail("unsupported_structure")
+        if (processed.has(key)) continue
+        entries++
+        if (entries > EVIDENCE_NODES || !count(key)) return fail("evidence_budget")
+        const descriptor = Object.getOwnPropertyDescriptor(input, key)
+        if (!descriptor || !("value" in descriptor) || descriptor.enumerable) return fail("unsupported_structure")
+      }
+    } catch {
+      return fail("unsupported_structure")
     }
     return { type: "safe", value: result }
   }
@@ -335,50 +354,74 @@ function evidenceVisitor(rejectSensitive = true) {
     seen.add(input)
     let array: boolean
     let proto: object | null
-    let keys: PropertyKey[]
-    let descriptors: PropertyDescriptorMap
     try {
       array = Array.isArray(input)
       proto = Object.getPrototypeOf(input)
-      keys = Reflect.ownKeys(input)
-      descriptors = Object.getOwnPropertyDescriptors(input)
     } catch {
       return fail("unsupported_structure")
     }
     if (array ? proto !== Array.prototype : proto !== Object.prototype && proto !== null) {
       return fail("unsupported_structure")
     }
-    if (keys.some((key) => typeof key === "symbol")) return fail("unsupported_structure")
     if (array) {
-      const length = descriptors.length
+      let length: PropertyDescriptor | undefined
+      try {
+        length = Object.getOwnPropertyDescriptor(input, "length")
+      } catch {
+        return fail("unsupported_structure")
+      }
       if (!length || !("value" in length) || !Number.isSafeInteger(length.value) || length.value < 0) {
         return fail("unsupported_structure")
       }
-      if (
-        keys.some(
-          (key) =>
-            key !== "length" &&
-            (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= length.value),
-        )
-      ) {
+      if (length.value > EVIDENCE_NODES - nodes) return fail("evidence_budget")
+      let index = 0
+      try {
+        for (const key in input) {
+          const descriptor = Object.getOwnPropertyDescriptor(input, key)
+          if (!descriptor) continue
+          if (key !== String(index) || !("value" in descriptor) || !descriptor.enumerable) {
+            return fail("unsupported_structure")
+          }
+          if (!count(key)) return fail("evidence_budget")
+          index++
+        }
+      } catch {
         return fail("unsupported_structure")
       }
-      for (let index = 0; index < length.value; index++) {
-        const key = String(index)
-        const descriptor = descriptors[key]
-        if (!descriptor || !("value" in descriptor) || !descriptor.enumerable || !count(key)) {
-          return descriptor && "value" in descriptor && descriptor.enumerable
-            ? fail("evidence_budget")
-            : fail("unsupported_structure")
-        }
+      if (index !== length.value) return fail("unsupported_structure")
+      let keys: PropertyKey[]
+      try {
+        keys = Reflect.ownKeys(input)
+      } catch {
+        return fail("unsupported_structure")
+      }
+      if (keys.length !== length.value + 1 || keys.some((key) => typeof key === "symbol")) {
+        return fail("unsupported_structure")
       }
       return { type: "safe", value: input }
     }
-    for (const key of keys) {
-      if (typeof key !== "string") return fail("unsupported_structure")
-      const descriptor = descriptors[key]
-      if (!descriptor || !("value" in descriptor)) return fail("unsupported_structure")
-      if (descriptor.enumerable && include(key) && !count(key)) return fail("evidence_budget")
+    const processed = new Set<string>()
+    let entries = 0
+    try {
+      for (const key in input) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, key)
+        if (!descriptor) continue
+        entries++
+        if (entries > EVIDENCE_NODES) return fail("evidence_budget")
+        processed.add(key)
+        if (!("value" in descriptor) || !descriptor.enumerable) return fail("unsupported_structure")
+        if (include(key) && !count(key)) return fail("evidence_budget")
+      }
+      for (const key of Reflect.ownKeys(input)) {
+        if (typeof key === "symbol") return fail("unsupported_structure")
+        if (processed.has(key)) continue
+        entries++
+        if (entries > EVIDENCE_NODES) return fail("evidence_budget")
+        const descriptor = Object.getOwnPropertyDescriptor(input, key)
+        if (!descriptor || !("value" in descriptor) || descriptor.enumerable) return fail("unsupported_structure")
+      }
+    } catch {
+      return fail("unsupported_structure")
     }
     return { type: "safe", value: input }
   }
@@ -418,16 +461,8 @@ function sanitizeRequest(value: unknown): { request: ReviewRequest; invalid: boo
     return
   }
   if (typeof value !== "object" || value === null) return
-  let descriptors: PropertyDescriptorMap
-  try {
-    if (Object.getPrototypeOf(value) !== Object.prototype || Reflect.ownKeys(value).some((key) => typeof key === "symbol")) {
-      return
-    }
-    descriptors = Object.getOwnPropertyDescriptors(value)
-  } catch {
-    return
-  }
-  if (Object.values(descriptors).some((descriptor) => !("value" in descriptor))) return
+  const descriptors = recordDescriptors(value)
+  if (!descriptors) return
   const metadata = descriptors.metadata
   if (!metadata || !("value" in metadata)) return
   const fallback = evidenceVisitor(false).sanitize({
@@ -548,42 +583,127 @@ function recordDescriptors(value: unknown) {
     ) {
       return
     }
-    if (Reflect.ownKeys(value).some((key) => typeof key === "symbol")) return
-    const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(value)
-    return Object.values(descriptors).every((descriptor) => "value" in descriptor) ? descriptors : undefined
+    const descriptors: PropertyDescriptorMap = Object.create(null)
+    let entries = 0
+    for (const key in value) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (!descriptor) continue
+      entries++
+      if (entries > EVIDENCE_NODES || !("value" in descriptor) || !descriptor.enumerable) return
+      descriptors[key] = descriptor
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key === "symbol") return
+      if (descriptors[key]) continue
+      entries++
+      if (entries > EVIDENCE_NODES) return
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (!descriptor || !("value" in descriptor) || descriptor.enumerable) return
+      descriptors[key] = descriptor
+    }
+    return descriptors
   } catch {
     return
   }
 }
 
-function arrayValues(value: unknown) {
-  if (typeof value !== "object" || value === null) return
+function arrayLength(value: unknown): number | undefined {
+  if (typeof value !== "object" || value === null) return undefined
   try {
-    if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return
-    const keys = Reflect.ownKeys(value)
-    if (keys.some((key) => typeof key === "symbol")) return
-    const descriptors = Object.getOwnPropertyDescriptors(value as object)
-    const length = descriptors.length
+    if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return undefined
+    const length = Object.getOwnPropertyDescriptor(value, "length")
     const size = length && "value" in length && typeof length.value === "number" ? length.value : undefined
-    if (size === undefined || !Number.isSafeInteger(size) || size < 0) return
-    if (
-      keys.some(
-        (key) =>
-          key !== "length" &&
-          (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= size),
-      )
-    )
-      return
+    return size !== undefined && Number.isSafeInteger(size) && size >= 0 ? size : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function arrayValues(value: unknown) {
+  const size = arrayLength(value)
+  if (size === undefined || size > EVIDENCE_NODES || typeof value !== "object" || value === null) return
+  try {
     const result: unknown[] = []
-    for (let index = 0; index < size; index++) {
-      const descriptor = descriptors[String(index)]
-      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return
+    let index = 0
+    for (const key in value) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (!descriptor) continue
+      if (key !== String(index) || !("value" in descriptor) || !descriptor.enumerable) return
       result.push(descriptor.value)
+      index++
     }
+    if (index !== size) return
+    const keys = Reflect.ownKeys(value)
+    if (keys.length !== size + 1 || keys.some((key) => typeof key === "symbol")) return
     return result
   } catch {
     return
   }
+}
+
+function currentTurnActive(input: { messages: ReadonlyArray<SessionV1.WithParts>; context: ReviewContext }) {
+  const rawMessages = arrayValues(input.messages)
+  if (!rawMessages) return false
+  const headers: Array<{
+    info: PropertyDescriptorMap
+    parts: unknown[]
+    id: SessionV1.MessageID
+    sessionID: SessionV1.SessionInfo["id"]
+    role: "user" | "assistant"
+  }> = []
+  for (const raw of rawMessages) {
+    const message = recordDescriptors(raw)
+    if (!message) return false
+    const info = recordDescriptors(message.info?.value)
+    const parts = arrayValues(message.parts?.value)
+    if (!info || !parts) return false
+    const id = Option.getOrUndefined(Schema.decodeUnknownOption(SessionV1.MessageID)(info.id?.value))
+    const sessionID = Option.getOrUndefined(Schema.decodeUnknownOption(SessionV1.SessionInfo.fields.id)(info.sessionID?.value))
+    const role = info.role?.value
+    if (!id || !sessionID || (role !== "user" && role !== "assistant")) return false
+    headers.push({ info, parts, id, sessionID, role })
+  }
+  const start = headers.findIndex((message) => message.id === input.context.userMessageID && message.role === "user")
+  if (start === -1) return false
+  const selected = headers.slice(start)
+  if (selected.slice(1).some((message) => message.role === "user")) return false
+  const user = selected[0]
+  const assistants = selected.filter((message) => message.role === "assistant")
+  const assistant = assistants[0]
+  if (
+    !user ||
+    assistants.length !== 1 ||
+    !assistant ||
+    assistant.id !== input.context.assistantMessageID ||
+    assistant.sessionID !== user.sessionID ||
+    assistant.info.parentID?.value !== input.context.userMessageID ||
+    assistant.info.error?.value !== undefined ||
+    assistant.info.providerID?.value !== input.context.model.providerID ||
+    assistant.info.modelID?.value !== input.context.model.id
+  ) {
+    return false
+  }
+
+  let currentTools = 0
+  for (const raw of assistant.parts) {
+    const part = recordDescriptors(raw)
+    if (
+      !part ||
+      part.sessionID?.value !== assistant.sessionID ||
+      part.messageID?.value !== assistant.id ||
+      typeof part.type?.value !== "string"
+    ) {
+      return false
+    }
+    if (part.type.value !== "tool") continue
+    const callID = part.callID?.value
+    const state = recordDescriptors(part.state?.value)
+    if (typeof callID !== "string" || !state) return false
+    if (callID !== input.context.callID) continue
+    if (state.status?.value !== "pending" && state.status?.value !== "running") return false
+    currentTools++
+  }
+  return currentTools === 1
 }
 
 function snapshotTurnEvidence(input: {
@@ -593,6 +713,8 @@ function snapshotTurnEvidence(input: {
 }): SnapshotTurn {
   const manual = (reason: string): SnapshotTurn => ({ type: "manual", reason })
   const scanner = evidenceVisitor()
+  const messageCount = arrayLength(input.messages)
+  if (messageCount !== undefined && messageCount > EVIDENCE_NODES) return manual("evidence_budget")
   const root = scanner.container(input.messages, 0)
   if (root.type === "sensitive") return manual(root.reason)
   const rawMessages = arrayValues(input.messages)
@@ -610,6 +732,8 @@ function snapshotTurnEvidence(input: {
     const message = recordDescriptors(raw)
     if (!message) return manual("unsupported_structure")
     const info = recordDescriptors(message.info?.value)
+    const partCount = arrayLength(message.parts?.value)
+    if (partCount !== undefined && partCount > EVIDENCE_NODES) return manual("evidence_budget")
     const parts = arrayValues(message.parts?.value)
     if (!info || !parts || typeof raw !== "object" || raw === null || typeof message.parts?.value !== "object" || message.parts.value === null) {
       return manual("unsupported_structure")
@@ -1089,12 +1213,7 @@ function projectModelToolOutput(output: unknown) {
 }
 
 function hasOnlyDataProperties(value: object) {
-  try {
-    if (Reflect.ownKeys(value).some((key) => typeof key === "symbol")) return false
-    return Object.values(Object.getOwnPropertyDescriptors(value)).every((descriptor) => "value" in descriptor)
-  } catch {
-    return false
-  }
+  return recordDescriptors(value) !== undefined
 }
 
 function truncateEvidenceOutput(value: string) {
@@ -1104,8 +1223,9 @@ function truncateEvidenceOutput(value: string) {
 }
 
 function errorEvidenceMetadata(value: Readonly<Record<string, unknown>> | undefined) {
-  if (!value || !hasOnlyDataProperties(value)) return undefined
-  const descriptors = Object.getOwnPropertyDescriptors(value)
+  if (!value) return undefined
+  const descriptors = recordDescriptors(value)
+  if (!descriptors) return undefined
   if (descriptors.interrupted?.value !== true || typeof descriptors.output?.value !== "string") return undefined
   return { interrupted: true, output: truncateEvidenceOutput(descriptors.output.value) }
 }
@@ -1119,6 +1239,7 @@ type LiveAuthority = {
 }
 
 type Authority = { type: "live"; value: LiveAuthority } | { type: "outcome"; value: Outcome }
+type CommittedPass = { type: "candidate"; value: Outcome } | { type: "outcome"; value: Outcome }
 
 type ReviewBaseline = {
   evidenceDigest: string
@@ -1216,7 +1337,9 @@ function unavailableModel(model: Provider.Model) {
   if (npm === "@ai-sdk/perplexity" || identifiers.includes("perplexity") || upstream === "perplexity") return true
   if (
     /(?:^|\/)(?:gpt-4o|gpt-4o-mini)-search-preview(?:-|$)/.test(api) ||
-    /(?:^|\/)(?:gpt-4o|gpt-4o-mini)-search-preview(?:-|$)/.test(id)
+    /(?:^|\/)(?:gpt-4o|gpt-4o-mini)-search-preview(?:-|$)/.test(id) ||
+    /(?:^|\/)gpt-5-search-api(?:-|$)/.test(api) ||
+    /(?:^|\/)gpt-5-search-api(?:-|$)/.test(id)
   )
     return true
   const groq = npm === "@ai-sdk/groq" || provider === "groq" || upstream === "groq"
@@ -1366,9 +1489,6 @@ const layer = Layer.effect(
           value: { type: "read_only", reason: checked.reason, alternative: checked.alternative },
         }
       }
-      if (checked.type === "ask") return { type: "outcome", value: { type: "manual" } }
-      if (!observed || observed.invalid) return { type: "outcome", value: { type: "manual" } }
-      if (fresh.value.approvalMode !== "auto_review") return { type: "outcome", value: { type: "manual" } }
       if (
         request.sessionID !== input.review.context.messages[0]?.info.sessionID ||
         request.tool?.messageID !== input.review.context.assistantMessageID ||
@@ -1376,6 +1496,9 @@ const layer = Layer.effect(
       ) {
         return { type: "outcome", value: { type: "cancel" } }
       }
+      if (checked.type === "ask") return { type: "outcome", value: { type: "manual" } }
+      if (!observed || observed.invalid) return { type: "outcome", value: { type: "manual" } }
+      if (fresh.value.approvalMode !== "auto_review") return { type: "outcome", value: { type: "manual" } }
       if (
         fresh.value.directory !== input.review.context.directory ||
         (fresh.value.agent !== undefined && fresh.value.agent !== input.review.context.agentID) ||
@@ -1394,63 +1517,64 @@ const layer = Layer.effect(
       return { type: "live", value: { context: current, findings: checked.findings, normalized, request, ruleset } }
     })
 
+    const committed = Effect.fn("PlanReview.committed")(function* (input: {
+      review: ReviewInput
+      candidate: Outcome
+      baseline?: ReviewBaseline
+      state: AssistantReviewState
+    }): Effect.fn.Return<CommittedPass> {
+      const checked = yield* authority({ review: input.review, normalized: input.baseline?.normalized })
+      if (checked.type === "outcome" && checked.value.type !== "manual") {
+        return { type: "outcome", value: checked.value }
+      }
+      const candidate = checked.type === "outcome" ? ({ type: "manual" } as const) : input.candidate
+      const messages = yield* sessions.messages({ sessionID: input.review.request.sessionID, limit: 64 }).pipe(Effect.option)
+      if (Option.isNone(messages)) return { type: "outcome", value: { type: "cancel" } }
+      if (!currentTurnActive({ messages: messages.value, context: input.review.context })) {
+        return { type: "outcome", value: { type: "cancel" } }
+      }
+      const evidence = yield* captureEvidence({
+        messages: messages.value,
+        context: checked.type === "live" ? checked.value.context : input.review.context,
+        deniedCallIDs: input.state.deniedCallIDs,
+      })
+      if (evidence.type === "manual") {
+        if (input.review.context.abort.aborted || !(yield* input.review.isActive())) {
+          return { type: "outcome", value: { type: "cancel" } }
+        }
+        return { type: "candidate", value: { type: "manual" } }
+      }
+      const verified = (() => {
+        if (!input.baseline || checked.type !== "live") return candidate
+        const material = permissionMaterial(input.review, checked.value, evidence.digest)
+        if (material.type === "sensitive") return { type: "manual" } as const
+        if (
+          evidence.digest !== input.baseline.evidenceDigest ||
+          material.permissionDigest !== input.baseline.permissionDigest ||
+          material.envelopeDigest !== input.baseline.envelopeDigest
+        ) {
+          return { type: "manual" } as const
+        }
+        return candidate
+      })()
+      if (input.review.context.abort.aborted || !(yield* input.review.isActive())) {
+        return { type: "outcome", value: { type: "cancel" } }
+      }
+      return { type: "candidate", value: verified }
+    })
+
     const finalize = Effect.fn("PlanReview.finalize")(function* (input: {
       review: ReviewInput
       candidate: Outcome
       baseline?: ReviewBaseline
       state: AssistantReviewState
     }): Effect.fn.Return<Outcome> {
-      const checked = yield* authority({ review: input.review, normalized: input.baseline?.normalized })
-      if (checked.type === "outcome") return checked.value
-      const messages = yield* sessions.messages({ sessionID: input.review.request.sessionID, limit: 64 }).pipe(Effect.option)
-      if (Option.isNone(messages)) return { type: "cancel" }
-      const evidence = yield* captureEvidence({
-        messages: messages.value,
-        context: checked.value.context,
-        deniedCallIDs: input.state.deniedCallIDs,
-      })
-      if (evidence.type === "manual") {
-        if (input.review.context.abort.aborted || !(yield* input.review.isActive())) return { type: "cancel" }
-        return { type: "manual" }
-      }
-      if (input.baseline) {
-        const material = permissionMaterial(input.review, checked.value, evidence.digest)
-        if (material.type === "sensitive") return { type: "manual" }
-        if (
-          evidence.digest !== input.baseline.evidenceDigest ||
-          material.permissionDigest !== input.baseline.permissionDigest ||
-          material.envelopeDigest !== input.baseline.envelopeDigest
-        ) {
-          return { type: "manual" }
-        }
-      }
-      const finalAuthority = yield* authority({ review: input.review, normalized: input.baseline?.normalized })
-      if (finalAuthority.type === "outcome") return finalAuthority.value
-      const finalMessages = yield* sessions.messages({ sessionID: input.review.request.sessionID, limit: 64 }).pipe(Effect.option)
-      if (Option.isNone(finalMessages)) return { type: "cancel" }
-      const finalEvidence = yield* captureEvidence({
-        messages: finalMessages.value,
-        context: finalAuthority.value.context,
-        deniedCallIDs: input.state.deniedCallIDs,
-      })
-      if (finalEvidence.type === "manual") {
-        if (input.review.context.abort.aborted || !(yield* input.review.isActive())) return { type: "cancel" }
-        return { type: "manual" }
-      }
-      if (input.baseline) {
-        const material = permissionMaterial(input.review, finalAuthority.value, finalEvidence.digest)
-        if (material.type === "sensitive") return { type: "manual" }
-        if (
-          finalEvidence.digest !== input.baseline.evidenceDigest ||
-          material.permissionDigest !== input.baseline.permissionDigest ||
-          material.envelopeDigest !== input.baseline.envelopeDigest
-        ) {
-          return { type: "manual" }
-        }
-      }
-      const committedAuthority = yield* authority({ review: input.review, normalized: input.baseline?.normalized })
-      if (committedAuthority.type === "outcome") return committedAuthority.value
-      return input.candidate
+      const first = yield* committed(input)
+      if (first.type === "outcome") return first.value
+      const second = yield* committed({ ...input, candidate: first.value })
+      if (second.type === "outcome") return second.value
+      const third = yield* committed({ ...input, candidate: second.value })
+      return third.value
     })
 
     const account = Effect.fn("PlanReview.account")(function* (input: {
