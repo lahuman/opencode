@@ -56,6 +56,8 @@
 
 - Read: `packages/app/AGENTS.md`
 - Read: `packages/app/e2e/performance/AGENTS.md`
+- Modify: `packages/app/e2e/performance/playwright.config.ts`
+- Create: `packages/app/e2e/performance/unit/playwright-config.test.ts`
 - Record outside the repository: `$env:TEMP\opencode-plan-auto-review-base.txt`
 - Record outside the repository: `$env:TEMP\opencode-plan-auto-review-baseline.txt`
 
@@ -72,6 +74,75 @@
   Expected: only the approved design and this plan commits are present; any unrelated working-tree changes are recorded and left untouched.
 
 - [ ] Read the two app benchmark instruction files completely and confirm no app or server restart is required.
+
+- [ ] Add a failing Node-discovery regression before changing the performance config.
+
+  Create `packages/app/e2e/performance/unit/playwright-config.test.ts`:
+
+  ```ts
+  import { expect, test } from "bun:test"
+  import path from "node:path"
+
+  test("production benchmark discovery excludes the separate stability suite", () => {
+    const result = Bun.spawnSync(
+      [
+        "node",
+        "node_modules/@playwright/test/cli.js",
+        "test",
+        "--list",
+        "--config",
+        "e2e/performance/playwright.config.ts",
+      ],
+      {
+        cwd: path.resolve(import.meta.dir, "../../.."),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    const output = `${new TextDecoder().decode(result.stdout)}${new TextDecoder().decode(result.stderr)}`
+
+    expect(result.exitCode).toBe(0)
+    expect(output).toContain("session-timeline-benchmark.spec.ts")
+    expect(output).not.toContain("timeline-stability")
+  })
+  ```
+
+  Run from `packages/app`:
+
+  ```powershell
+  bun.cmd test e2e/performance/unit/playwright-config.test.ts
+  ```
+
+  Expected failure: Playwright discovers `timeline-stability/fixture.test.ts` and Node rejects its `bun:test` import.
+
+- [ ] Exclude the independently configured stability suite from production benchmark discovery.
+
+  In `packages/app/e2e/performance/playwright.config.ts`, replace the single ignore string with:
+
+  ```ts
+  testIgnore: ["unit/**", "timeline-stability/**"],
+  ```
+
+  Keep `testDir`, benchmark scenarios, serial workers, production build/serve command, measurements, and thresholds unchanged.
+
+- [ ] Verify the focused regression and all performance unit tests.
+
+  Run from `packages/app`:
+
+  ```powershell
+  bun.cmd test e2e/performance/unit/playwright-config.test.ts
+  bun.cmd test e2e/performance/unit
+  ```
+
+  Expected: both pass with pristine output.
+
+- [ ] Commit the benchmark discovery prerequisite.
+
+  ```powershell
+  git add packages/app/e2e/performance/playwright.config.ts packages/app/e2e/performance/unit/playwright-config.test.ts
+  git diff --cached --check
+  git commit -m "fix(app): isolate performance benchmark discovery"
+  ```
 
 - [ ] Capture the serial production benchmark baseline.
 

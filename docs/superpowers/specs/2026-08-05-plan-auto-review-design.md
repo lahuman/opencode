@@ -211,6 +211,8 @@ Add focused coverage for:
 
 Prefer pure policy tests and the repository's existing test provider and permission event paths over global mocks. Run tests and `bun typecheck` from each affected package, never the repository root. Because app session and timeline paths are affected, set `PLAYWRIGHT_WORKERS` to `1` and run the existing production benchmark suite with `bun run test:bench` from `packages/app` before implementation, preserve its `BENCHMARK` output as the baseline, and run the same suite after the change for comparison. Do not add a machine-dependent pass threshold. Regenerate public clients from `packages/client` and any affected legacy SDK through their documented scripts.
 
+The production benchmark discovery must exclude both its Bun unit-test directory and the separately configured `timeline-stability` suite. Add one Node Playwright `--list` regression that proves benchmark discovery succeeds without loading `bun:test` fixtures and still lists the timeline benchmark scenarios. This is a harness prerequisite only; it does not change benchmark scenarios, measurements, or thresholds.
+
 ## Security invariants
 
 - Static deny rules remain authoritative and cannot be weakened by the reviewer.
