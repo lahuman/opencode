@@ -21,7 +21,7 @@ const user = {
   })),
 }
 const assistantSeed = fixture.messages[fixture.targetID][3]!
-const assistants = Array.from({ length: 14 }, (_, index) => {
+const assistants = Array.from({ length: 21 }, (_, index) => {
   const messageID = `msg_parent_hydration_${String(index).padStart(2, "0")}`
   return {
     ...assistantSeed,
@@ -43,10 +43,7 @@ const target = fixture.sessions.find((session) => session.id === fixture.targetI
 const lastID = userID
 const lastAssistant = assistants.at(-1)!
 const lastPart = lastAssistant.parts.at(-1)!
-const lastPartID =
-  lastPart.type === "tool"
-    ? lastPart.id
-    : `${lastAssistant.info.id}:${lastPart.type}:${lastAssistant.parts.filter((part) => part.type === lastPart.type).length - 1}`
+const lastPartID = lastPart.id
 
 benchmark("hydrates an orphaned latest turn after a cold session click", async ({ browser, report }, testInfo) => {
   benchmark.setTimeout(180_000)
@@ -164,6 +161,7 @@ async function trial(page: Page, mode: ParentHydrationBenchmarkMode) {
     list: requests.filter((request) => request.type === "list").length,
     parent: requests.filter((request) => request.type === "parent").length,
   }
+  if (mode === "natural") expect(requestCounts.parent).toBe(1)
   if (mode === "candidate") {
     expect(requestCounts.parent).toBe(0)
     expect(historyGates).toBe(0)

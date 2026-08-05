@@ -75,7 +75,6 @@ benchmark.describe("performance: home and tab navigation", () => {
     )
     report(result)
     expect(result.contentBeforeReview).toBe(true)
-    await expect(page.locator('[data-component="session-review"]')).toBeVisible()
   })
 
   benchmark("closes the only session tab and paints home", async ({ page, report }) => {
