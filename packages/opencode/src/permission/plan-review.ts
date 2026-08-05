@@ -206,7 +206,7 @@ function hasCwdTransition(command: string) {
 function classify(pattern: string): "review" | "ask" | "deny" {
   const text = pattern.trim()
   if (!text) return "ask"
-  if (/(?:^|[\s"'])~(?:[\\/]|[A-Za-z])/.test(text)) return "ask"
+  if (/(?:^|[\s"'])~/.test(text)) return "ask"
   if (/\s(?:>|>>)(?:\s|$)|(?:>|>>)\s*\S/.test(text)) return "deny"
   if (/(?:^|\s)(?:tee|Tee-Object|Out-File)(?:\s|$)/i.test(text)) return "deny"
   if (
@@ -375,7 +375,13 @@ function classifyValidation(pattern: string): "review" | "ask" | "deny" | undefi
   const command = tokens[0].toLowerCase()
   if (command === "bun" && tokens[1] === "typecheck") return tokens.length === 2 ? "review" : "ask"
   if (command === "bun" && tokens[1] === "test") {
-    if (tokens.some((value) => ["--preload", "--require", "-r", "--update-snapshots", "-u"].includes(value)))
+    if (
+      tokens.some(
+        (value) =>
+          ["--preload", "--require", "-r", "--update-snapshots", "-u"].includes(value) ||
+          ["--preload=", "--require=", "-r="].some((prefix) => value.startsWith(prefix)),
+      )
+    )
       return "deny"
     if (tokens.slice(2).some((value) => value.startsWith("-"))) return "ask"
     return tokens.length > 2 ? "review" : "ask"
@@ -404,8 +410,9 @@ function classifyValidation(pattern: string): "review" | "ask" | "deny" | undefi
     if (!script || !["test", "lint", "typecheck"].includes(script)) return
     if (tokens.some((value) => value === "--output-file" || value.startsWith("--output-file="))) return "deny"
     const rest = tokens.slice(tokens[1] === "run" ? 3 : 2)
+    if (script === "test") return "ask"
     if (rest.some((value) => value.startsWith("-"))) return "ask"
-    return script === "test" ? (rest.length ? "review" : "ask") : rest.length ? "ask" : "review"
+    return rest.length ? "ask" : "review"
   }
 }
 
@@ -475,7 +482,12 @@ function targetValues(pattern: string, shell: "bash" | "powershell" | "cmd"): Ta
   }
   if (["npm", "pnpm", "yarn"].includes(command)) return { type: "none" }
   if (command === "find") {
-    const start = ["-H", "-L", "-P"].includes(tokens[1]) ? 2 : 1
+    const firstRoot = tokens.findIndex((value, index) => index > 0 && !["-H", "-L", "-P"].includes(value))
+    const afterOptions = firstRoot === -1 ? tokens.length : firstRoot
+    const delimiter = tokens[afterOptions] === "--"
+    const start = delimiter ? afterOptions + 1 : afterOptions
+    if (start === tokens.length) return start === 1 ? { type: "none" } : { type: "uncertain" }
+    if (delimiter && tokens[start].startsWith("-")) return { type: "uncertain" }
     const expression = tokens.findIndex(
       (value, index) => index >= start && (value.startsWith("-") || value === "!" || value === "("),
     )

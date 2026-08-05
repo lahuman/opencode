@@ -484,6 +484,9 @@ describe("plan shell preflight", () => {
     const cases = [
       ["bun test ../outside/outside.test.ts", "ask"],
       ["bun test test/unit.test.ts --preload ../outside/evil.ts", "deny"],
+      ["bun test test/unit.test.ts --preload=../outside/evil.ts", "deny"],
+      ["bun test test/unit.test.ts --require=../outside/evil.ts", "deny"],
+      ["bun test test/unit.test.ts -r=../outside/evil.ts", "deny"],
       ["go test -o ../outside/testbin ./pkg", "deny"],
       ["go test ./pkg -exec ../outside/wrapper", "deny"],
       ["go test ../outside", "ask"],
@@ -500,6 +503,29 @@ describe("plan shell preflight", () => {
         }),
       )
       expect(result.type).toBe(expected)
+      if (command.includes("evil.ts")) expect(JSON.stringify(result)).not.toContain("../outside/evil.ts")
+    }
+  })
+
+  test("keeps package-runner test arguments manual", async () => {
+    const commands = [
+      "npm test ../outside/evil.test.js",
+      "npm test -- ../outside/evil.test.js",
+      "npm run test ../outside/evil.test.js",
+      "npm run test -- ../outside/evil.test.js",
+      "pnpm test ../outside/evil.test.js",
+      "pnpm test -- ../outside/evil.test.js",
+      "yarn test ../outside/evil.test.js",
+      "yarn test -- ../outside/evil.test.js",
+    ]
+    for (const command of commands) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell: "bash", parsed: true, cwd: process.cwd() }),
+          context,
+        }),
+      )
+      expect(result.type).toBe("ask")
     }
   })
 
@@ -537,6 +563,11 @@ describe("plan shell preflight", () => {
     const scopedContext = { ...context, directory: repo }
     const cases = [
       ["find -H ../outside -name needle", "ask"],
+      ["find -H -L ../outside -name needle", "ask"],
+      ["find -P -H ../outside -name needle", "ask"],
+      ["find -- ../outside -name needle", "ask"],
+      ["find -H -- ../outside -name needle", "ask"],
+      ["find -- -H ../outside -name needle", "ask"],
       ["find . -fprint ../outside/list.txt", "deny"],
       ["find . -fprint0 ../outside/list.txt", "deny"],
       ["find . -fprintf ../outside/list.txt fixed", "deny"],
@@ -551,6 +582,24 @@ describe("plan shell preflight", () => {
         }),
       )
       expect(result.type).toBe(expected)
+    }
+  })
+
+  test("keeps bare home aliases manual for each shell", async () => {
+    const commands = [
+      ["cat ~", "bash"],
+      ['cat "~"', "bash"],
+      ["Get-Content ~", "powershell"],
+      ['Get-Content "~"', "powershell"],
+    ] as const
+    for (const [command, shell] of commands) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell, parsed: true, cwd: process.cwd() }),
+          context,
+        }),
+      )
+      expect(result.type).toBe("ask")
     }
   })
 
