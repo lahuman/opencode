@@ -1,7 +1,8 @@
-import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@opencode-ai/llm"
+import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue, Usage } from "@opencode-ai/llm"
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { errorMessage } from "@/util/error"
+import { isRecord } from "@/util/record"
 
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
@@ -22,26 +23,24 @@ function finishReason(value: string | undefined): FinishReason {
   return Schema.is(FinishReason)(value) ? value : "unknown"
 }
 
-function providerMetadata(value: unknown): ProviderMetadata | undefined {
+export function providerMetadata(value: unknown): ProviderMetadata | undefined {
   if (value == null) return undefined
   return Schema.is(ProviderMetadata)(value) ? value : undefined
 }
 
 // Temporary AI SDK bridge: Copilot billing survives only in raw provider chunks here.
 // Move this extraction into @opencode-ai/llm when Copilot is handled by the native runtime.
-function copilotTotalNanoAiu(value: unknown) {
-  if (!value || typeof value !== "object") return
-  const raw = value as Record<string, unknown>
-  const response =
-    raw.response && typeof raw.response === "object" ? (raw.response as Record<string, unknown>) : undefined
-  const usage = raw.copilot_usage ?? response?.copilot_usage
-  if (!usage || typeof usage !== "object") return
-  const total = (usage as Record<string, unknown>).total_nano_aiu
-  if (typeof total !== "number" || !Number.isFinite(total) || total < 0) return
+export function copilotTotalNanoAiu(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined
+  const response = isRecord(value.response) ? value.response : undefined
+  const usage = value.copilot_usage ?? response?.copilot_usage
+  if (!isRecord(usage)) return undefined
+  const total = usage.total_nano_aiu
+  if (typeof total !== "number" || !Number.isFinite(total) || total < 0) return undefined
   return total
 }
 
-function usage(value: unknown) {
+export function usage(value: unknown) {
   if (!value || typeof value !== "object") return undefined
   const item = value as {
     inputTokens?: number
@@ -60,7 +59,7 @@ function usage(value: unknown) {
     cacheReadInputTokens: item.inputTokenDetails?.cacheReadTokens ?? item.cachedInputTokens,
     cacheWriteInputTokens: item.inputTokenDetails?.cacheWriteTokens,
   }).filter((entry) => entry[1] !== undefined)
-  return entries.length === 0 ? undefined : Object.fromEntries(entries)
+  return entries.length === 0 ? undefined : Usage.from(Object.fromEntries(entries))
 }
 
 function currentTextID(state: ReturnType<typeof adapterState>, id: string | undefined) {

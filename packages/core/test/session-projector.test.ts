@@ -99,6 +99,7 @@ describe("SessionProjector", () => {
       expect(yield* db.select().from(EventTable).all().pipe(Effect.orDie)).toEqual([])
       expect(yield* db.select().from(MessageTable).all().pipe(Effect.orDie)).toEqual([])
       expect(yield* db.select().from(PartTable).all().pipe(Effect.orDie)).toEqual([])
+      expect(yield* db.select().from(SessionInputTable).all().pipe(Effect.orDie)).toEqual([])
       expect(yield* db.select().from(SessionMessageTable).all().pipe(Effect.orDie)).toEqual([])
     }),
   )

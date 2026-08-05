@@ -5,7 +5,6 @@ import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceState } from "@/effect/instance-state"
 import { Permission } from "@/permission"
 import type { Agent } from "@/agent/agent"
-import type { MessageV2 } from "../message-v2"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { SystemPrompt } from "../system"
@@ -33,6 +32,7 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  readonly skipSystemTransform?: boolean
 }
 
 export type Prepared = {
@@ -47,6 +47,10 @@ export type Prepared = {
     readonly options: Record<string, any>
   }
   readonly messageTransformOptions: Record<string, any>
+  readonly privacy: {
+    readonly inferenceGeo?: "us" | "global"
+    readonly invalidInferenceGeo: boolean
+  }
   readonly headers: Record<string, string>
 }
 
@@ -66,11 +70,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   ]
 
   const header = system[0]
-  yield* input.plugin.trigger(
-    "experimental.chat.system.transform",
-    { sessionID: input.sessionID, model: input.model },
-    { system },
-  )
+  if (!input.skipSystemTransform) {
+    yield* input.plugin.trigger(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system },
+    )
+  }
   if (system.length > 2 && system[0] === header) {
     const rest = system.slice(1)
     system.length = 0
@@ -89,6 +95,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  const hasInferenceGeo = Object.prototype.hasOwnProperty.call(options, "inferenceGeo")
+  const inferenceGeo = options.inferenceGeo === "us" || options.inferenceGeo === "global" ? options.inferenceGeo : undefined
+  const privacy = Object.freeze({
+    ...(inferenceGeo ? { inferenceGeo } : {}),
+    invalidInferenceGeo: hasInferenceGeo && !inferenceGeo,
+  })
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)
@@ -184,6 +196,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
+    privacy,
     headers: {
       ...(input.model.providerID.startsWith("opencode")
         ? {

@@ -180,6 +180,62 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.system[0]).not.toContain("https://opencode.ai")
   })
 
+  test("request preparation can skip only system transforms and snapshots residency before params hooks", async () => {
+    const calls: string[] = []
+    const plugin = {
+      trigger: (name: string, _input: unknown, output: unknown) =>
+        Effect.sync(() => {
+          calls.push(name)
+          if (name === "experimental.chat.system.transform") {
+            ;(output as { system: string[] }).system.push("Injected authority")
+          }
+          if (name === "chat.params") {
+            ;(output as { options: Record<string, unknown> }).options.inferenceGeo = "global"
+          }
+          return output
+        }),
+      list: () => Effect.succeed([]),
+      init: () => Effect.void,
+    } as unknown as Parameters<typeof LLMRequestPrep.prepare>[0]["plugin"]
+    const input = {
+      user: {
+        id: "msg_privacy-test",
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "test",
+        model: { providerID: "anthropic", modelID: "claude" },
+      },
+      sessionID,
+      model: {
+        ...mockModel,
+        providerID: "anthropic",
+        api: { id: "claude", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+        options: { inferenceGeo: "us" },
+      },
+      agent: { name: "test", mode: "primary", options: {}, permission: [], prompt: "Reviewer policy" },
+      system: [],
+      messages: [{ role: "user", content: "bounded evidence" }],
+      tools: {},
+      provider: { id: "anthropic", options: {} },
+      auth: undefined,
+      plugin,
+      flags: { outputTokenMax: 32_000, client: "test" },
+      isWorkflow: false,
+    } as unknown as Parameters<typeof LLMRequestPrep.prepare>[0]
+
+    const ordinary = await Effect.runPromise(LLMRequestPrep.prepare(input))
+    const skipped = await Effect.runPromise(LLMRequestPrep.prepare({ ...input, skipSystemTransform: true }))
+
+    expect(ordinary.system).toEqual(["Reviewer policy", "Injected authority"])
+    expect(skipped.system).toEqual(["Reviewer policy"])
+    expect(skipped.params.options.inferenceGeo).toBe("global")
+    expect(skipped.privacy).toEqual({ inferenceGeo: "us", invalidInferenceGeo: false })
+    expect(calls.filter((name) => name === "chat.params")).toHaveLength(2)
+    expect(calls.filter((name) => name === "chat.headers")).toHaveLength(2)
+    expect(calls.filter((name) => name === "experimental.chat.system.transform")).toHaveLength(1)
+  })
+
   test("should set promptCacheKey for the xAI SDK by default regardless of provider ID", () => {
     const xaiModel = {
       ...mockModel,
