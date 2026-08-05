@@ -2305,6 +2305,7 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
   const args = tokens.slice(1)
   const separator = args.indexOf("--")
   const before = separator === -1 ? args : args.slice(0, separator)
+  if (command === "config") return classifyGitConfig(args)
   if (command === "status") {
     if (before.some((value) => !["--short", "-s", "--porcelain", "--branch", "-b", "--show-stash"].includes(value)))
       return "ask"
@@ -2345,11 +2346,7 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
   )
     return "review"
   if (/^tag\s*$|^tag\s+(?:-n|-l|--list)$|^tag\s+(?:--contains|--points-at)(?:\s+\S+)?$/i.test(text)) return "review"
-  if (
-    /^stash\s+list$|^worktree\s+list(?:\s+--porcelain)?$|^config\s+(?:(?:--get|--get-all)\s+\S+|(?:--list|-l))$|^remote(?:\s*$|\s+-v$|\s+get-url\s+\S+?$)/i.test(
-      text,
-    )
-  )
+  if (/^stash\s+list$|^worktree\s+list(?:\s+--porcelain)?$|^remote\s*$/i.test(text))
     return "review"
   if (
     /^(?:add|rm|mv|apply|am|revert|init|clone|fetch|pull|push|reset|checkout|switch|restore|commit|merge|rebase|cherry-pick|update-index)(?:\s|$)/i.test(
@@ -2358,7 +2355,7 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
   )
     return "deny"
   if (
-    /^config\s+(?:--\S+\s+)*\S+\s+\S+|^remote\s+(?:add|remove|rename|set-url|prune|update)(?:\s|$)|^submodule\s+update(?:\s|$)|^sparse-checkout(?:\s|$)|^bisect(?:\s|$)|^stash(?:\s|$)|^worktree\s+(?:add|remove|move)(?:\s|$)/i.test(
+    /^remote\s+(?:add|remove|rename|set-head|set-branches|set-url|prune|update)(?:\s|$)|^submodule\s+update(?:\s|$)|^sparse-checkout(?:\s|$)|^bisect(?:\s|$)|^stash(?:\s|$)|^worktree\s+(?:add|remove|move)(?:\s|$)/i.test(
       text,
     )
   )
@@ -2368,6 +2365,40 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
   if (/^(?:branch|tag)\s+-/i.test(text)) return "ask"
   if (/^(?:branch|tag)\s+\S+/i.test(text)) return "deny"
   return "ask"
+}
+
+function classifyGitConfig(args: string[]): "ask" | "deny" {
+  const values = args.map((value) => value.toLowerCase())
+  if (
+    values.some((value) =>
+      [
+        "--add",
+        "--replace-all",
+        "--unset",
+        "--unset-all",
+        "--rename-section",
+        "--remove-section",
+        "--edit",
+        "-e",
+      ].includes(value),
+    )
+  )
+    return "deny"
+  if (
+    values.some((value) =>
+      ["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "--list", "-l"].includes(
+        value,
+      ),
+    )
+  )
+    return "ask"
+  const valueOptions = ["--file", "-f", "--blob", "--type", "-t", "--default", "--value", "--url"]
+  const operands = values.filter(
+    (value, index) => !value.startsWith("-") && !valueOptions.includes(values[index - 1] ?? ""),
+  )
+  if (["set", "unset", "rename-section", "remove-section", "edit"].includes(operands[0] ?? "")) return "deny"
+  if (["get", "get-all", "get-regexp", "get-urlmatch", "list"].includes(operands[0] ?? "")) return "ask"
+  return operands.length > 1 ? "deny" : "ask"
 }
 
 function classifyValidation(pattern: string): "review" | "ask" | "deny" | undefined {

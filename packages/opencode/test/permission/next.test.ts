@@ -85,6 +85,59 @@ const planEnv = AppNodeBuilder.build(
 )
 const planIt = testEffect(planEnv)
 
+const mappingReview = Layer.succeed(
+  PlanReview.Service,
+  PlanReview.Service.of({
+    review: (input) =>
+      Effect.succeed(
+        input.request.metadata.mapping === "read_only"
+          ? {
+              type: "read_only" as const,
+              reason: "Plan mode cannot modify files.",
+              alternative: "Switch to Build mode to make changes.",
+            }
+          : { type: "manual" as const },
+      ),
+    captureExecution: (input) =>
+      Effect.succeed({
+        type: "ready" as const,
+        value: {
+          requestID: input.request.id,
+          sessionID: input.request.sessionID,
+          userMessageID: input.context.userMessageID,
+          assistantMessageID: input.context.assistantMessageID,
+          callID: input.context.callID,
+          agentID: input.context.agentID,
+          directory: input.context.directory,
+          requestDigest: "request",
+          rulesetDigest: input.context.rulesetDigest,
+          policyDigest: "policy",
+          turnDigest: "turn",
+          reviewer: input.reviewer,
+        },
+      }),
+    revalidateExecution: (input) =>
+      Effect.succeed(
+        input.request.metadata.mapping === "mutation"
+          ? {
+              type: "read_only" as const,
+              reason: "Plan mode cannot modify files.",
+              alternative: "Switch to Build mode to make changes.",
+            }
+          : { type: "allow" as const },
+      ),
+    findEvictableTurn: () => Effect.succeed(undefined),
+  }),
+)
+const mappingEnv = AppNodeBuilder.build(
+  LayerNode.group([Permission.node, EventV2Bridge.node, CrossSpawnSpawner.node, InstanceStore.node]),
+  [
+    [PlanReview.node, mappingReview],
+    [InstanceStore.bootstrapNode, noopBootstrap],
+  ],
+)
+const mappingIt = testEffect(mappingEnv)
+
 const planFixture = (input?: {
   approvalMode?: "ask" | "auto_review"
   agentPermission?: PermissionV1.Ruleset
@@ -200,11 +253,69 @@ const planFixture = (input?: {
     }
   })
 
+function reviewMappingRequest(mapping: "manual" | "read_only" | "mutation") {
+  const sessionID = SessionID.make(`session_review_mapping_${mapping}`)
+  const userMessageID = MessageID.make(`msg_review_mapping_${mapping}_user`)
+  const assistantMessageID = MessageID.make(`msg_review_mapping_${mapping}_assistant`)
+  const callID = `call-review-mapping-${mapping}`
+  const directory = "C:\\workspace"
+  const abort = new AbortController()
+  const agent: Agent.Info = { name: "plan", mode: "primary", native: true, permission: [], options: {} }
+  const messages: SessionV1.WithParts[] = [
+    {
+      info: {
+        id: userMessageID,
+        sessionID,
+        role: "user",
+        time: { created: 1 },
+        agent: "plan",
+        model: { providerID: planProvider.model.providerID, modelID: planProvider.model.id },
+      },
+      parts: [],
+    },
+  ]
+  const seed: PlanReview.ContextSeed = {
+    agent,
+    agentID: "plan",
+    model: planProvider.model,
+    userMessageID,
+    assistantMessageID,
+    callID,
+    directory,
+    abort: abort.signal,
+  }
+  const context: PlanReview.Context = {
+    ...seed,
+    approvalMode: "auto_review",
+    messages,
+    rulesetDigest: PlanReview.rulesetDigest([]),
+  }
+  return {
+    abort,
+    id: PermissionV1.ID.make(`per_review_mapping_${mapping}`),
+    sessionID,
+    permission: "bash",
+    patterns: ["git status"],
+    metadata: { command: "git status", shell: "powershell", parsed: true, cwd: directory, mapping },
+    always: ["git status"],
+    tool: { messageID: assistantMessageID, callID },
+    plan: {
+      seed,
+      load: () => Effect.succeed({ type: "loaded" as const, value: { ruleset: [], context } }),
+    },
+  }
+}
+
 const resolvePlanProbe = Effect.fn("PermissionTest.resolvePlanProbe")(function* (input: {
   fixture: {
     session: Session.Info
     assistant: SessionV1.Assistant
-    request: { plan: PlanReview.ContextInput }
+    request: {
+      patterns: string[]
+      metadata: Record<string, unknown>
+      always: string[]
+      plan: PlanReview.ContextInput
+    }
   }
   execute: () => void
   beforeAsk?: Effect.Effect<void>
@@ -220,14 +331,9 @@ const resolvePlanProbe = Effect.fn("PermissionTest.resolvePlanProbe")(function* 
         if (input.beforeAsk) yield* input.beforeAsk
         yield* ctx.ask({
           permission: "bash",
-          patterns: ["git status"],
-          always: ["git status"],
-          metadata: {
-            command: "git status",
-            shell: "powershell",
-            parsed: true,
-            cwd: input.fixture.session.directory,
-          },
+          patterns: input.fixture.request.patterns,
+          always: input.fixture.request.always,
+          metadata: input.fixture.request.metadata,
         })
         input.execute()
         return { title: "bash", metadata: {}, output: "ok" }
@@ -1272,6 +1378,111 @@ it.instance(
 )
 
 it.instance(
+  "reply - addressed reject event keeps pure legacy siblings visible",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const permission = yield* Permission.Service
+      const sessionID = SessionID.make("session_legacy_reject_order")
+      const firstID = PermissionV1.ID.make("per_legacy_reject_order_first")
+      const siblingID = PermissionV1.ID.make("per_legacy_reject_order_sibling")
+      const first = yield* ask({
+        id: firstID,
+        sessionID,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      const sibling = yield* ask({
+        id: siblingID,
+        sessionID,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(2)
+      let visible: PermissionV1.ID[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type !== Permission.Event.Replied.type) return Effect.void
+        const data = event.data as { requestID: PermissionV1.ID }
+        if (data.requestID !== firstID) return Effect.void
+        return permission.list().pipe(
+          Effect.tap((items) => Effect.sync(() => (visible = items.map((item) => item.id)))),
+          Effect.asVoid,
+        )
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      yield* reply({ requestID: firstID, reply: "reject" })
+      expect(visible).toEqual([siblingID])
+      expect(Exit.isFailure(yield* Fiber.await(first))).toBe(true)
+      expect(Exit.isFailure(yield* Fiber.await(sibling))).toBe(true)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "reply - addressed Build reject hides Plan ownership but keeps legacy siblings visible",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const paused = yield* pausePlanLoad(fixture.request, 1)
+      const events = yield* EventV2Bridge.Service
+      const permission = yield* Permission.Service
+      const firstID = PermissionV1.ID.make("per_mixed_reject_order_first")
+      const siblingID = PermissionV1.ID.make("per_mixed_reject_order_sibling")
+      const provisional = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+      const first = yield* ask({
+        id: firstID,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      const sibling = yield* ask({
+        id: siblingID,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(2)
+      let visible: PermissionV1.ID[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type !== Permission.Event.Replied.type) return Effect.void
+        const data = event.data as { requestID: PermissionV1.ID }
+        if (data.requestID !== firstID) return Effect.void
+        return permission.list().pipe(
+          Effect.tap((items) => Effect.sync(() => (visible = items.map((item) => item.id)))),
+          Effect.asVoid,
+        )
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      yield* reply({ requestID: firstID, reply: "reject" })
+      yield* Deferred.succeed(paused.release, undefined)
+      expect(visible).toEqual([siblingID])
+      expect(Exit.isFailure(yield* Fiber.await(first))).toBe(true)
+      expect(Exit.isFailure(yield* Fiber.await(sibling))).toBe(true)
+      expect(Exit.isFailure(yield* Fiber.await(provisional))).toBe(true)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+it.instance(
   "reply - always resolves matching pending requests in same session",
   () =>
     Effect.gen(function* () {
@@ -1729,12 +1940,50 @@ planIt.instance(
   { git: true },
 )
 
+planIt.instance(
+  "plan - multi-pattern configured allow with one ambiguous pattern cannot fast path",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        patterns: ["git status", "Get-Content *.txt"],
+        sessionPermission: [{ permission: "bash", pattern: "*", action: "allow" }],
+      })
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      let executions = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type) asked++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++ })
+      const fiber = yield* executePlanProbe(
+        tool,
+        fixture.request.plan.seed.callID,
+        fixture.abort.signal,
+      ).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(asked).toBe(1)
+      expect(executions).toBe(0)
+      expect(planLanguageRequests).toBe(0)
+      yield* reply({ requestID: pending[0].id, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+)
+
 for (const [name, pattern, parsed] of [
   ["parser failure", "git status", false],
   ["shell alias", "alias gs='git status'", true],
   ["encoded command", "powershell -EncodedCommand Z2l0IHN0YXR1cw==", true],
   ["unresolved redirection", "Get-Content < missing.txt", true],
   ["ambiguous wildcard", "Get-Content *.txt", true],
+  ["git config header read", "git config --get http.extraHeader", true],
+  ["git config list", "git config --list", true],
+  ["git remote URL list", "git remote -v", true],
+  ["git remote URL read", "git remote get-url origin", true],
 ] as const) {
   planIt.instance(
     `plan - configured bash allow hands ${name} to manual approval`,
@@ -1754,11 +2003,29 @@ for (const [name, pattern, parsed] of [
             cwd: fixture.request.plan.seed.directory,
           },
         }
-        const fiber = yield* ask(request as never).pipe(Effect.forkScoped)
+        const events = yield* EventV2Bridge.Service
+        let asked = 0
+        let executions = 0
+        const unsub = yield* events.listen((event) => {
+          if (event.type === Permission.Event.Asked.type) asked++
+          return Effect.void
+        })
+        yield* Effect.addFinalizer(() => unsub)
+        const tool = yield* resolvePlanProbe({
+          fixture: { ...fixture, request },
+          execute: () => executions++,
+        })
+        const fiber = yield* executePlanProbe(
+          tool,
+          fixture.request.plan.seed.callID,
+          fixture.abort.signal,
+        ).pipe(Effect.forkScoped)
         const pending = yield* waitForPending(1)
 
         expect(pending[0].review).toBeUndefined()
         expect(planLanguageRequests).toBe(0)
+        expect(asked).toBe(1)
+        expect(executions).toBe(0)
         yield* reply({ requestID: pending[0].id, reply: "reject" })
         expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
       }),
@@ -1856,6 +2123,214 @@ planIt.instance(
     }),
   { git: true },
 )
+
+mappingIt.instance(
+  "plan - maps an injected reviewer manual outcome to human approval",
+  () =>
+    Effect.gen(function* () {
+      const request = reviewMappingRequest("manual")
+      const fiber = yield* ask(request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(pending.map((item) => item.id)).toEqual([request.id])
+      expect(pending[0].review).toBeUndefined()
+      yield* reply({ requestID: request.id, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+)
+
+mappingIt.instance(
+  "plan - caller abort during the asking log does not publish a stale request",
+  () => {
+    let abort: AbortController | undefined
+    const logger = Logger.make((options) => {
+      if (Array.isArray(options.message) && options.message[0] === "asking") abort?.abort()
+    })
+
+    return Effect.gen(function* () {
+      const request = reviewMappingRequest("manual")
+      abort = request.abort
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      let replied = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === request.id)
+          asked++
+        if (
+          event.type === Permission.Event.Replied.type &&
+          (event.data as { requestID: PermissionV1.ID }).requestID === request.id
+        )
+          replied++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      expect(yield* fail(ask(request as never))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(asked).toBe(0)
+      expect(replied).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }).pipe(Effect.provide(Logger.layer([logger])))
+  },
+  { git: true },
+)
+
+mappingIt.instance(
+  "plan - sibling reject during the asking log does not publish a stale request",
+  () => {
+    let reject: (() => void) | undefined
+    const logger = Logger.make((options) => {
+      if (Array.isArray(options.message) && options.message[0] === "asking") reject?.()
+    })
+
+    return Effect.gen(function* () {
+      const request = reviewMappingRequest("manual")
+      const permission = yield* Permission.Service
+      const siblingID = PermissionV1.ID.make("per_review_mapping_log_sibling")
+      const sibling = yield* permission
+        .ask({
+          id: siblingID,
+          sessionID: request.sessionID,
+          permission: "bash",
+          patterns: ["git status"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        })
+        .pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      const events = yield* EventV2Bridge.Service
+      const services = yield* Effect.context<never>()
+      let asked = 0
+      let replied = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === request.id)
+          asked++
+        if (
+          event.type === Permission.Event.Replied.type &&
+          (event.data as { requestID: PermissionV1.ID }).requestID === request.id
+        )
+          replied++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      reject = () => {
+        Effect.runSyncWith(services)(permission.reply({ requestID: siblingID, reply: "reject" }))
+      }
+
+      expect(yield* fail(ask(request as never).pipe(Effect.timeout("2 seconds")))).toBeInstanceOf(
+        PermissionV1.RejectedError,
+      )
+      expect(yield* fail(Fiber.join(sibling).pipe(Effect.timeout("2 seconds")))).toBeInstanceOf(
+        PermissionV1.RejectedError,
+      )
+      expect(asked).toBe(0)
+      expect(replied).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }).pipe(Effect.provide(Logger.layer([logger])))
+  },
+  { git: true },
+)
+
+mappingIt.instance(
+  "plan - rejects a reply from the asking log before publishing",
+  () => {
+    let attempt: (() => void) | undefined
+    let result: unknown
+    const logger = Logger.make((options) => {
+      if (Array.isArray(options.message) && options.message[0] === "asking") attempt?.()
+    })
+
+    return Effect.gen(function* () {
+      const request = reviewMappingRequest("manual")
+      const permission = yield* Permission.Service
+      const services = yield* Effect.context<never>()
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      let replied = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === request.id)
+          asked++
+        if (
+          event.type === Permission.Event.Replied.type &&
+          (event.data as { requestID: PermissionV1.ID }).requestID === request.id
+        )
+          replied++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      attempt = () => {
+        const exit = Effect.runSyncWith(services)(
+          permission.reply({ requestID: request.id, reply: "once" }).pipe(Effect.exit),
+        )
+        result = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      }
+
+      const fiber = yield* ask(request as never).pipe(Effect.forkScoped)
+      expect((yield* waitForPending(1)).map((item) => item.id)).toEqual([request.id])
+      expect(result).toBeInstanceOf(PermissionV1.NotFoundError)
+      expect(asked).toBe(1)
+      expect(replied).toBe(0)
+
+      yield* permission.reply({ requestID: request.id, reply: "once" })
+      expect(yield* Fiber.join(fiber)).toBeUndefined()
+    }).pipe(Effect.provide(Logger.layer([logger])))
+  },
+  { git: true },
+)
+
+mappingIt.instance(
+  "plan - accepts a synchronous reply from the Asked listener",
+  () =>
+    Effect.gen(function* () {
+      const request = reviewMappingRequest("manual")
+      const permission = yield* Permission.Service
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      let replied = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === request.id) {
+          asked++
+          return permission.reply({ requestID: request.id, reply: "once" }).pipe(Effect.orDie)
+        }
+        if (
+          event.type === Permission.Event.Replied.type &&
+          (event.data as { requestID: PermissionV1.ID }).requestID === request.id
+        )
+          replied++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      expect(yield* ask(request as never)).toBeUndefined()
+      expect(asked).toBe(1)
+      expect(replied).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+for (const mapping of ["read_only", "mutation"] as const) {
+  mappingIt.instance(
+    `plan - maps injected ${mapping} authority to PlanReadOnly without Asked`,
+    () =>
+      Effect.gen(function* () {
+        const request = reviewMappingRequest(mapping)
+        const events = yield* EventV2Bridge.Service
+        let asked = 0
+        const unsub = yield* events.listen((event) => {
+          if (event.type === Permission.Event.Asked.type) asked++
+          return Effect.void
+        })
+        yield* Effect.addFinalizer(() => unsub)
+
+        expect(yield* fail(ask(request as never))).toBeInstanceOf(PermissionV1.PlanReadOnlyError)
+        expect(asked).toBe(0)
+        expect(yield* list()).toHaveLength(0)
+      }),
+    { git: true },
+  )
+}
 
 planIt.instance(
   "plan - auto review allow completes one request without publishing or approval mutation",
@@ -2328,6 +2803,44 @@ planIt.instance(
       expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.DeniedError)
       expect(yield* list()).toHaveLength(0)
       expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - transient approval revalidates a fresh deny before returning authority",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const seedID = PermissionV1.ID.ascending()
+      const seedFiber = yield* ask({
+        id: seedID,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: ["git status"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: seedID, reply: "always" })
+      yield* Fiber.join(seedFiber)
+      const paused = yield* pausePlanLoad(fixture.request, 2)
+      const sessions = yield* Session.Service
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+      })
+      yield* Deferred.succeed(paused.release, undefined)
+
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
     }),
   { git: true },
   10_000,

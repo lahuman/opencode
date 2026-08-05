@@ -467,8 +467,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
 
   if (flags.experimentalCodeMode) return restrictPlanTools(input.agentID, tools)
 
-  for (const [key, entry] of Object.entries(yield* mcp.tools())) {
-    if (input.agentID === "plan" && Object.hasOwn(tools, key)) continue
+  const mcpTools = yield* mcp.tools()
+  for (const key of Object.keys(mcpTools)) {
+    if (input.agentID === "plan" && PLAN_TOOLS.has(key)) continue
+    const entry = mcpTools[key]
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
     const execute = item.execute
     if (!execute) continue

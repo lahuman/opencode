@@ -395,7 +395,6 @@ const layer = Layer.effect(
             }
             const gate = yield* revalidate(humanEnvelope)
             if (gate.type !== "allow") return gate
-            const deferred = Deferred.makeUnsafe<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
             const info: PermissionV1.Request = {
               id,
               sessionID: request.sessionID,
@@ -406,30 +405,46 @@ const layer = Layer.effect(
               tool: request.tool,
               ...(review ? { review } : {}),
             }
+            const entry = yield* Effect.sync(() => {
+              if (current.reviewing.get(id) !== ownership || ownership.settled || current.pending.has(id)) return
+              const item: PendingEntry = {
+                info,
+                deferred: Deferred.makeUnsafe<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>(),
+                alwaysAsk: Boolean(input.alwaysAsk),
+                planEnvelope: humanEnvelope,
+                planOwnership: ownership,
+                published: false,
+              }
+              current.pending.set(id, item)
+              return item
+            })
+            if (!entry) return { type: "cancel" } as const
             yield* Effect.logInfo("asking", {
               id,
               permission: info.permission,
               patternCount: info.patterns.length,
             })
-            const entry: PendingEntry = {
-              info,
-              deferred,
-              alwaysAsk: Boolean(input.alwaysAsk),
-              planEnvelope: humanEnvelope,
-              planOwnership: ownership,
-              published: false,
-            }
-            const inserted = yield* Effect.sync(() => {
-              if (current.reviewing.get(id) !== ownership || ownership.settled || current.pending.has(id)) return false
-              current.pending.set(id, entry)
-              return true
+            const publish = yield* Effect.sync(() => {
+              if (
+                current.pending.get(id) === entry &&
+                current.reviewing.get(id) === ownership &&
+                !ownership.settled
+              ) {
+                entry.published = true
+                return true
+              }
+              if (current.pending.get(id) === entry) current.pending.delete(id)
+              Deferred.doneUnsafe(
+                entry.deferred,
+                Effect.fail(ownership.failure ?? new PermissionV1.RejectedError()),
+              )
+              return false
             })
-            if (!inserted) return { type: "cancel" } as const
+            if (!publish) return { type: "cancel" } as const
             yield* Effect.uninterruptible(
               Effect.gen(function* () {
                 yield* events.publish(Event.Asked, info)
                 const orphaned = yield* Effect.sync(() => {
-                  entry.published = true
                   if (current.pending.get(id) === entry || entry.replied) return false
                   entry.replied = true
                   return true
@@ -442,7 +457,7 @@ const layer = Layer.effect(
                 })
               }),
             )
-            yield* Deferred.await(deferred)
+            yield* Deferred.await(entry.deferred)
             return yield* revalidate(humanEnvelope)
           })
 
@@ -507,6 +522,9 @@ const layer = Layer.effect(
       const current = yield* InstanceState.get(state)
       const existing = current.pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      if (existing.planOwnership && existing.published === false) {
+        return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      }
       if (
         existing.planOwnership &&
         (current.reviewing.get(input.requestID) !== existing.planOwnership || existing.planOwnership.settled)
@@ -521,26 +539,27 @@ const layer = Layer.effect(
         const error = input.message
           ? new PermissionV1.CorrectedError({ feedback: input.message })
           : new PermissionV1.RejectedError()
-        const siblings = yield* Effect.sync(() => {
-          current.pending.delete(input.requestID)
-          existing.replied = true
-          if (existing.planOwnership) existing.planOwnership.failure = error
+        const planSiblings = yield* Effect.sync(() => {
+          if (existing.planOwnership) {
+            current.pending.delete(input.requestID)
+            existing.replied = true
+            existing.planOwnership.failure = error
+            Deferred.doneUnsafe(existing.deferred, Effect.fail(error))
+          }
           const items: PendingEntry[] = []
           for (const [id, item] of current.pending.entries()) {
             if (item.info.sessionID !== existing.info.sessionID) continue
+            if (!item.planOwnership) continue
             current.pending.delete(id)
-            if (item.planOwnership) item.planOwnership.failure = new PermissionV1.RejectedError()
+            item.planOwnership.failure = new PermissionV1.RejectedError()
             if (item.published !== false) item.replied = true
+            Deferred.doneUnsafe(item.deferred, Effect.fail(new PermissionV1.RejectedError()))
             items.push(item)
           }
           for (const [id, ownership] of current.reviewing.entries()) {
             if (ownership.sessionID !== existing.info.sessionID) continue
             recordRejectedTurn(current, ownership)
             invalidate(current, id, ownership)
-          }
-          if (existing.planOwnership) Deferred.doneUnsafe(existing.deferred, Effect.fail(error))
-          for (const item of items) {
-            if (item.planOwnership) Deferred.doneUnsafe(item.deferred, Effect.fail(new PermissionV1.RejectedError()))
           }
           return items
         })
@@ -549,22 +568,31 @@ const layer = Layer.effect(
           reply: response,
           patternCount: existing.info.patterns.length,
         })
+        if (!existing.planOwnership) current.pending.delete(input.requestID)
         yield* events.publish(Event.Replied, {
           sessionID: existing.info.sessionID,
           requestID: existing.info.id,
           reply: response,
         })
-        if (!existing.planOwnership) Deferred.doneUnsafe(existing.deferred, Effect.fail(error))
-        for (const item of siblings) {
+        if (!existing.planOwnership) yield* Deferred.fail(existing.deferred, error)
+        for (const item of planSiblings) {
           if (item.published === false) continue
           yield* events.publish(Event.Replied, {
             sessionID: item.info.sessionID,
             requestID: item.info.id,
             reply: "reject",
           })
-          if (!item.planOwnership) {
-            Deferred.doneUnsafe(item.deferred, Effect.fail(new PermissionV1.RejectedError()))
-          }
+        }
+        for (const [id, item] of current.pending.entries()) {
+          if (item.info.sessionID !== existing.info.sessionID) continue
+          if (item.planOwnership) continue
+          current.pending.delete(id)
+          yield* events.publish(Event.Replied, {
+            sessionID: item.info.sessionID,
+            requestID: item.info.id,
+            reply: "reject",
+          })
+          yield* Deferred.fail(item.deferred, new PermissionV1.RejectedError())
         }
         return
       }

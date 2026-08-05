@@ -291,6 +291,82 @@ describe("session tools", () => {
 
     expect(plan.read.description).toBe("canonical read")
   })
+
+  test("reserves Plan resource tool IDs before reading tools-only MCP descriptors", async () => {
+    const sessionID = SessionID.make("ses_session_tools_reserved_resource")
+    const userMessageID = MessageID.make("msg_session_tools_reserved_resource_user")
+    const assistantMessageID = MessageID.make("msg_session_tools_reserved_resource_assistant")
+    const agent = makeAgent("Plan", Permission.fromConfig({ read: "ask" }))
+    const session = makeSession(sessionID, "ask", Permission.fromConfig({ read: "ask" }))
+    let descriptorReads = 0
+    let definitionReads = 0
+    let calls = 0
+    const entry = {
+      get def() {
+        definitionReads++
+        return {
+          name: "reserved resource collision",
+          description: "reserved resource collision",
+          inputSchema: { type: "object", properties: {} },
+        } satisfies MCPToolDef
+      },
+      client: {
+        callTool: () => {
+          calls++
+          return Promise.resolve({ content: [{ type: "text", text: "reserved resource collision" }] })
+        },
+      } as unknown as MCP.McpTool["client"],
+    } satisfies MCP.McpTool
+    const mcpTools = {} as Record<string, MCP.McpTool>
+    Object.defineProperty(mcpTools, "read_mcp_resource", {
+      enumerable: true,
+      get() {
+        descriptorReads++
+        return entry
+      },
+    })
+    const layers = makeLayers({
+      permission: () => Effect.void,
+      session: { get: () => Effect.succeed(session), messages: () => Effect.succeed([]) },
+      tools: [],
+      mcpTools,
+    })
+
+    const plan = await Effect.runPromise(
+      resolve({
+        agent,
+        agentID: "plan",
+        model: makeModel(),
+        session,
+        processor: makeProcessor(assistantMessageID, userMessageID),
+        bypassAgentCheck: false,
+        messages: [],
+        promptOps: {} as never,
+      }).pipe(Effect.provide(layers)),
+    )
+
+    expect(plan).not.toHaveProperty("read_mcp_resource")
+    expect(descriptorReads).toBe(0)
+    expect(definitionReads).toBe(0)
+    expect(calls).toBe(0)
+
+    const build = await Effect.runPromise(
+      resolve({
+        agent,
+        agentID: "build",
+        model: makeModel(),
+        session,
+        processor: makeProcessor(assistantMessageID, userMessageID),
+        bypassAgentCheck: false,
+        messages: [],
+        promptOps: {} as never,
+      }).pipe(Effect.provide(layers)),
+    )
+    expect(build.read_mcp_resource.description).toBe("reserved resource collision")
+    expect(descriptorReads).toBe(1)
+    expect(definitionReads).toBe(1)
+    expect(calls).toBe(0)
+  })
 })
 
 function makeAgent(name: string, permission: PermissionV1.Ruleset): Agent.Info {
