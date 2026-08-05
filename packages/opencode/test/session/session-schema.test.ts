@@ -29,6 +29,21 @@ const info = {
 } satisfies Session.Info
 
 describe("Session schema", () => {
+  test("defaults legacy approval mode before row mapping", () => {
+    const decoded = Schema.decodeUnknownSync(Session.Info)({
+      id: info.id,
+      slug: "legacy-session",
+      projectID: info.projectID,
+      directory: "/tmp/legacy",
+      title: "Legacy session",
+      version: "0.1.0",
+      time: { created: 1, updated: 2 },
+    })
+
+    expect(decoded.approvalMode).toBe("ask")
+    expect(Session.toRow(decoded).approval_mode).toBe("ask")
+  })
+
   test("retains approval mode in create input", () => {
     expect(Schema.decodeUnknownSync(Session.CreateInput)({ approvalMode: "auto_review" })).toEqual({
       approvalMode: "auto_review",

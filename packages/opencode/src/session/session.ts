@@ -42,7 +42,6 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { ApprovalMode } from "@opencode-ai/schema/session-v1"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -117,7 +116,7 @@ export function fromRow(row: SessionRow): Info {
   }
 }
 
-export function toRow(info: Info) {
+export function toRow(info: Schema.Schema.Type<typeof Info>) {
   return {
     id: info.id,
     project_id: info.projectID,
@@ -135,8 +134,8 @@ export function toRow(info: Info) {
     summary_additions: info.summary?.additions,
     summary_deletions: info.summary?.deletions,
     summary_files: info.summary?.files,
-    summary_diffs: info.summary?.diffs,
-    metadata: info.metadata,
+    summary_diffs: info.summary?.diffs ? [...info.summary.diffs] : undefined,
+    metadata: info.metadata ? { ...info.metadata } : undefined,
     cost: info.cost ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
@@ -151,7 +150,7 @@ export function toRow(info: Info) {
           diff: info.revert.diff,
         }
       : null,
-    permission: info.permission,
+    permission: info.permission ? [...info.permission] : undefined,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
@@ -235,7 +234,7 @@ export const Info = Schema.Struct({
   tokens: optional(Tokens),
   share: optional(Share),
   title: Schema.String,
-  approvalMode: optional(ApprovalMode),
+  approvalMode: SessionV1.SessionInfo.fields.approvalMode,
   agent: optional(Schema.String),
   model: optional(Model),
   version: Schema.String,
@@ -244,9 +243,7 @@ export const Info = Schema.Struct({
   permission: optional(PermissionV1.Ruleset),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
-export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>> & {
-  approvalMode: typeof ApprovalMode.Type
-}
+export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export const ProjectInfo = Schema.Struct({
   id: ProjectV2.ID,
@@ -259,9 +256,7 @@ export const GlobalInfo = Schema.Struct({
   ...Info.fields,
   project: Schema.NullOr(ProjectInfo),
 }).annotate({ identifier: "GlobalSession" })
-export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>> & {
-  approvalMode: typeof ApprovalMode.Type
-}
+export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>>
 
 export const CreateInput = Schema.optional(
   Schema.Struct({
@@ -271,7 +266,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
-    approvalMode: Schema.optional(ApprovalMode),
+    approvalMode: Schema.optional(SessionV1.SessionInfo.fields.approvalMode),
     workspaceID: Schema.optional(WorkspaceV2.ID),
   }),
 )
@@ -299,7 +294,7 @@ export const SetPermissionInput = Schema.Struct({
 })
 export const SetApprovalModeInput = Schema.Struct({
   sessionID: SessionID,
-  approvalMode: ApprovalMode,
+  approvalMode: SessionV1.SessionInfo.fields.approvalMode,
 })
 export const SetRevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -426,7 +421,7 @@ export interface Interface {
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
-    approvalMode?: typeof ApprovalMode.Type
+    approvalMode?: Info["approvalMode"]
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
@@ -515,7 +510,7 @@ const layer: Layer.Layer<
       path?: string
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
-      approvalMode?: typeof ApprovalMode.Type
+      approvalMode?: Info["approvalMode"]
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
@@ -681,7 +676,7 @@ const layer: Layer.Layer<
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
-      approvalMode?: typeof ApprovalMode.Type
+      approvalMode?: Info["approvalMode"]
       workspaceID?: WorkspaceV2.ID
     }) {
       const ctx = yield* InstanceState.context

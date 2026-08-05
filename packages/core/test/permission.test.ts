@@ -1,5 +1,5 @@
-import { describe, expect } from "bun:test"
-import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
+import { describe, expect, test } from "bun:test"
+import { Cause, Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -7,6 +7,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { PermissionV2 } from "@opencode-ai/core/permission"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { PermissionTable } from "@opencode-ai/core/permission/sql"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { Project } from "@opencode-ai/core/project"
@@ -101,6 +102,51 @@ function waitForRequest() {
     return { service, fiber, request }
   })
 }
+
+const legacyRequest = {
+  id: PermissionV1.ID.ascending("per_test"),
+  sessionID: SessionV2.ID.make("ses_test"),
+  permission: "bash",
+  patterns: ["pwd"],
+  metadata: {},
+  always: ["pwd"],
+}
+
+describe("PermissionV1 contracts", () => {
+  test("preserves typed review on request and ask input", () => {
+    const review = { risk: "critical" as const, reason: "writes outside the workspace" }
+
+    expect(Schema.decodeUnknownSync(PermissionV1.Request)({ ...legacyRequest, review }).review).toEqual(review)
+    expect(
+      Schema.decodeUnknownSync(PermissionV1.AskInput)({ ...legacyRequest, ruleset: [], review }).review,
+    ).toEqual(review)
+  })
+
+  test("rejects unknown review risk", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(PermissionV1.AskInput)({
+        ...legacyRequest,
+        ruleset: [],
+        review: { risk: "extreme", reason: "unsupported risk" },
+      }),
+    ).toThrow()
+  })
+
+  test("denial messages identify their source and safe next action", () => {
+    expect(new PermissionV1.PlanReadOnlyError({ reason: "mutation", alternative: "inspect files" }).message).toContain(
+      "Plan read-only denial: mutation. Safe alternative: inspect files",
+    )
+    expect(new PermissionV1.PlanReadOnlyError({ reason: "mutation" }).message).toContain(
+      "must not retry an equivalent request",
+    )
+    expect(
+      new PermissionV1.ReviewedDeniedError({ reason: "unsafe command", alternative: "ask the user" }).message,
+    ).toContain("Automatic-review denial: unsafe command. Safe alternative: ask the user")
+    expect(new PermissionV1.ReviewedDeniedError({ reason: "unsafe command" }).message).toContain(
+      "must not retry an equivalent request",
+    )
+  })
+})
 
 describe("PermissionV2", () => {
   it.effect("returns the evaluated effect and only queues prompts", () =>

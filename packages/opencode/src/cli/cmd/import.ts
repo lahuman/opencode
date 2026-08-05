@@ -181,7 +181,7 @@ const runImport = Effect.fn("Cli.import.body")(function* (file: string, ctx: Ins
     projectID: ctx.project.id,
     directory: ctx.directory,
     path: path.relative(path.resolve(ctx.worktree), ctx.directory).replaceAll("\\", "/"),
-  }) as Session.Info
+  })
   const row = Session.toRow(info)
   yield* db
     .insert(SessionTable)
