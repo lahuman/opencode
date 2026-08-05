@@ -21,7 +21,7 @@ const currentForMake = {
   location: { directory: AbsolutePath.make("/tmp") },
 }
 
-const legacyWithoutMode = SessionV1.SessionInfo.make({
+const legacyWithoutMode = {
   id: Session.ID.create(),
   slug: "session",
   projectID: Project.ID.global,
@@ -29,7 +29,9 @@ const legacyWithoutMode = SessionV1.SessionInfo.make({
   title: "Session",
   version: "1",
   time: { created: 0, updated: 0 },
-})
+}
+
+const legacyForMake = { ...legacyWithoutMode }
 
 const decodeCurrent = Schema.decodeUnknownSync(Session.Info)
 const decodeLegacy = Schema.decodeUnknownSync(SessionV1.SessionInfo)
@@ -45,7 +47,7 @@ describe("session approval mode", () => {
     expect(decodeCurrent({ ...currentWithoutMode, approvalMode: "auto_review" }).approvalMode).toBe("auto_review")
     expect(() => decodeCurrent({ ...currentWithoutMode, approvalMode: "always" })).toThrow()
     expect(Session.Info.make(currentForMake).approvalMode).toBe("ask")
-    expect(SessionV1.SessionInfo.make({ ...legacyWithoutMode }).approvalMode).toBe("ask")
+    expect(SessionV1.SessionInfo.make(legacyForMake).approvalMode).toBe("ask")
     expectApprovalMode(decodeCurrent(currentWithoutMode).approvalMode)
   })
 })
