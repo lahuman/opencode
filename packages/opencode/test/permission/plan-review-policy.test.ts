@@ -473,6 +473,121 @@ describe("plan shell preflight", () => {
     )
     expect(JSON.stringify(result)).not.toContain(raw)
   })
+
+  test("scopes validation operands and rejects execution or output options", async () => {
+    await using tmp = await tmpdir()
+    const repo = path.join(tmp.path, "repo")
+    const outside = path.join(tmp.path, "outside")
+    await mkdir(repo)
+    await mkdir(outside)
+    const scopedContext = { ...context, directory: repo }
+    const cases = [
+      ["bun test ../outside/outside.test.ts", "ask"],
+      ["bun test test/unit.test.ts --preload ../outside/evil.ts", "deny"],
+      ["go test -o ../outside/testbin ./pkg", "deny"],
+      ["go test ./pkg -exec ../outside/wrapper", "deny"],
+      ["go test ../outside", "ask"],
+      ["cargo check --target-dir ../outside", "deny"],
+      ["cargo check --manifest-path ../outside/Cargo.toml", "ask"],
+      ["npm run lint -- --output-file ../outside/report.txt", "deny"],
+      ["npm run lint -- --unknown-flag", "ask"],
+    ] as const
+    for (const [command, expected] of cases) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell: "bash", parsed: true, cwd: repo }),
+          context: scopedContext,
+        }),
+      )
+      expect(result.type).toBe(expected)
+    }
+  })
+
+  test("rejects unverified Git flags and scopes external content operands", async () => {
+    await using tmp = await tmpdir()
+    const repo = path.join(tmp.path, "repo")
+    await mkdir(repo)
+    const scopedContext = { ...context, directory: repo }
+    const cases = [
+      ["git status --unknown-read-flag", "ask"],
+      ["git log --output=leak.txt", "deny"],
+      ["git show --output ../outside/leak.txt", "deny"],
+      ["git stash list --output=leak.txt", "deny"],
+      ["git blame --contents ../outside/secret.txt -- tracked.txt", "ask"],
+      ["git diff --ext-diff", "ask"],
+      ["git show --ext-diff", "ask"],
+      ["git cat-file --filters HEAD:file", "ask"],
+      ["git diff -- ../outside/secret.txt", "ask"],
+    ] as const
+    for (const [command, expected] of cases) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell: "bash", parsed: true, cwd: repo }),
+          context: scopedContext,
+        }),
+      )
+      expect(result.type).toBe(expected)
+    }
+  })
+
+  test("parses find roots and rejects file-writing actions", async () => {
+    await using tmp = await tmpdir()
+    const repo = path.join(tmp.path, "repo")
+    await mkdir(repo)
+    const scopedContext = { ...context, directory: repo }
+    const cases = [
+      ["find -H ../outside -name needle", "ask"],
+      ["find . -fprint ../outside/list.txt", "deny"],
+      ["find . -fprint0 ../outside/list.txt", "deny"],
+      ["find . -fprintf ../outside/list.txt fixed", "deny"],
+      ["find . -fls ../outside/list.txt", "deny"],
+      ["find . -unknown-action", "ask"],
+    ] as const
+    for (const [command, expected] of cases) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell: "bash", parsed: true, cwd: repo }),
+          context: scopedContext,
+        }),
+      )
+      expect(result.type).toBe(expected)
+    }
+  })
+
+  test("keeps home paths, credential caches, and literal tokens out of review and normalization", async () => {
+    const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    const commands = [
+      "cat ~/outside.txt",
+      "cat $HOME/outside.txt",
+      "Get-Content ~/outside.txt",
+      "Get-Content $HOME/outside.txt",
+      "cat ~/.azure/msal_http_cache.bin",
+      "cat ~/.azure/msal_token_cache.bin",
+      "cat ~/.config/gh/hosts.yml",
+      `echo ${token}`,
+      "echo Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+      "echo X-API-Key: abcdefghijklmnopqrstuvwxyz0123456789",
+    ]
+    for (const command of commands) {
+      const input = {
+        request: request("bash", [command], { command, shell: "bash", parsed: true, cwd: process.cwd() }),
+        context,
+      }
+      const result = await Effect.runPromise(preflight(input))
+      expect(result.type).toBe("ask")
+      expect(JSON.stringify(result)).not.toContain(token)
+    }
+    const tokenInput = {
+      request: request("bash", [`echo ${token}`], {
+        command: `echo ${token}`,
+        shell: "bash",
+        parsed: true,
+        cwd: process.cwd(),
+      }),
+      context,
+    }
+    expect(await Effect.runPromise(normalize(tokenInput))).not.toContain(token)
+  })
 })
 
 test("ruleset digest is canonical and preserves native Plan env patterns", () => {

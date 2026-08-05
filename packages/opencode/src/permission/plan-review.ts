@@ -83,16 +83,26 @@ const HAZARD = {
 }
 
 const CREDENTIAL_PATH =
-  /(?:^|[\s"'\\/])(?:\.env[^\s"'\\/]*|\.npmrc|\.yarnrc[^\s"'\\/]*|\.pypirc|\.netrc|\.git-credentials|\.docker[\\/]config\.json|\.kube[\\/]config|application_default_credentials\.json|[^\s"'\\/]*service[-_]?account[^\s"'\\/]*\.json|\.azure[\\/](?:accessTokens|azureProfile|msal_token_cache)[^\s"'\\/]*\.json|\.ssh[\\/][^\s"'\\/]+|\.aws[\\/](?:credentials|config))(?=$|[\s"'\\/])|[\\/]proc[\\/][^\\/]+[\\/]environ(?:$|[\\/])/i
+  /(?:^|[\s"'\\/])(?:\.env[^\s"'\\/]*|\.npmrc|\.yarnrc[^\s"'\\/]*|\.pypirc|\.netrc|\.git-credentials|\.docker[\\/]config\.json|\.kube[\\/]config|application_default_credentials\.json|[^\s"'\\/]*service[-_]?account[^\s"'\\/]*\.json|\.azure[\\/](?:accessTokens|azureProfile|msal_(?:token|http)_cache)[^\s"'\\/]*(?:\.json|\.bin)?|\.config[\\/]gh[\\/]hosts\.yml|\.ssh[\\/][^\s"'\\/]+|\.aws[\\/](?:credentials|config))(?=$|[\s"'\\/])|[\\/]proc[\\/][^\\/]+[\\/]environ(?:$|[\\/])/i
 const CREDENTIAL_COMMAND =
   /^(?:env|printenv|set|export\s+-p|(?:Get-ChildItem|gci|dir)\s+Env:|git\s+credential\s+fill|gh\s+auth\s+token|npm\s+config\s+get\s+\S*(?:auth|token|password)\S*|gcloud\s+auth\s+print-access-token|az\s+account\s+get-access-token|aws\s+configure\s+get|kubectl\s+config\s+view\b[^\r\n]*\s--raw)(?:\s|$)/i
 const CREDENTIAL_NAME = /(?:token|secret|password|api[_-]?key|authorization|credential)/i
+const LITERAL_SECRET =
+  /(?:\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{40,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b|\b(?:X-API-Key|API[_ -]?Key)\s*[:=]\s*[A-Za-z0-9._~+/=-]{16,}\b)/i
 
 export function sensitiveText(value: string) {
   return (
     CREDENTIAL_PATH.test(value) ||
     CREDENTIAL_COMMAND.test(value.trim()) ||
+    LITERAL_SECRET.test(value) ||
     (/(?:\$\{?|%|\$env:)[A-Za-z_][A-Za-z0-9_]*(?:\}?%?)/i.test(value) && CREDENTIAL_NAME.test(value))
+  )
+}
+
+function sensitiveRequest(request: ReviewRequest) {
+  return (
+    request.patterns.some(sensitiveText) ||
+    (typeof request.metadata.command === "string" && sensitiveText(request.metadata.command))
   )
 }
 
@@ -151,14 +161,16 @@ export const preflight = (input: PolicyInput): Effect.Effect<Preflight> =>
 
 export const normalize = (input: PolicyInput): Effect.Effect<string> =>
   Effect.succeed(
-    canonical({
-      request: input.request,
-      directory: path.resolve(input.context.directory),
-      rulesetDigest: input.context.rulesetDigest,
-      targets: input.request.patterns.map((pattern) =>
-        targetFact(pattern, input.request.metadata.cwd, input.request.metadata.shell),
-      ),
-    }),
+    sensitiveRequest(input.request)
+      ? canonical({ type: "sensitive" })
+      : canonical({
+          request: input.request,
+          directory: path.resolve(input.context.directory),
+          rulesetDigest: input.context.rulesetDigest,
+          targets: input.request.patterns.map((pattern) =>
+            targetFact(pattern, input.request.metadata.cwd, input.request.metadata.shell),
+          ),
+        }),
   )
 
 export const rulesetDigest = (ruleset: PermissionV1.Ruleset) =>
@@ -194,6 +206,7 @@ function hasCwdTransition(command: string) {
 function classify(pattern: string): "review" | "ask" | "deny" {
   const text = pattern.trim()
   if (!text) return "ask"
+  if (/(?:^|[\s"'])~(?:[\\/]|[A-Za-z])/.test(text)) return "ask"
   if (/\s(?:>|>>)(?:\s|$)|(?:>|>>)\s*\S/.test(text)) return "deny"
   if (/(?:^|\s)(?:tee|Tee-Object|Out-File)(?:\s|$)/i.test(text)) return "deny"
   if (
@@ -235,6 +248,7 @@ function classify(pattern: string): "review" | "ask" | "deny" {
     )
   )
     return "deny"
+  if (/^find\b[^\r\n]*\s-(?:fprint|fprint0|fprintf|fls)(?:\s|$)/i.test(text)) return "deny"
   if (/^find\b[^\r\n]*\s-(?:exec|execdir|ok|okdir)(?:\s|$)/i.test(text)) return "ask"
   if (/(?:^|\s)(?:--fix|--write|--update-snapshots|-u)(?:\s|$)/i.test(text)) return "deny"
   if (/^(?:curl|Invoke-WebRequest|Invoke-RestMethod|scp|sftp|rsync)(?:\s|$)/i.test(text)) return "ask"
@@ -245,12 +259,32 @@ function classify(pattern: string): "review" | "ask" | "deny" {
   if (/[<|]/.test(text)) return "ask"
 
   if (/^git(?:\s|$)/i.test(text)) return classifyGit(text)
-  if (
-    /^bun\s+typecheck(?:\s|$)|^bun\s+test\s+(?!-)(?:test[\\/]|[^\s]+\.(?:test|spec)\.)|^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:typecheck|lint)(?:\s|$)|^(?:npm|pnpm|yarn)\s+test\s+\S+|^cargo\s+(?:test\s+\S+|check(?:\s|$))|^go\s+test\s+\S+/i.test(
-      text,
+  const validation = classifyValidation(text)
+  if (validation) return validation
+  if (/^find(?:\s|$)/i.test(text)) {
+    const options = Array.from(text.matchAll(/(?:^|\s)(-[A-Za-z][A-Za-z0-9-]*)/g), (match) => match[1])
+    if (
+      options.some(
+        (value) =>
+          ![
+            "-H",
+            "-L",
+            "-P",
+            "-name",
+            "-iname",
+            "-path",
+            "-ipath",
+            "-type",
+            "-maxdepth",
+            "-mindepth",
+            "-empty",
+            "-print",
+            "-print0",
+          ].includes(value),
+      )
     )
-  )
-    return "review"
+      return "ask"
+  }
   if (
     /^(?:cat|type|Get-Content|ls|dir|Get-ChildItem|find|fd|rg|grep|head|tail|stat|Test-Path|pwd|Get-Location|echo|Write-Output|Write-Host)(?:\s|$)/i.test(
       text,
@@ -262,9 +296,47 @@ function classify(pattern: string): "review" | "ask" | "deny" {
 
 function classifyGit(pattern: string): "review" | "ask" | "deny" {
   const text = pattern.replace(/^git\s+/i, "").trim()
-  if (/^(?:status|log|show|blame|rev-parse|ls-files|ls-tree|cat-file)(?:\s|$)/i.test(text)) return "review"
-  if (/^diff\b[^\r\n]*(?:--output(?:=|\s)|--no-index\b[^\r\n]*\s--output(?:=|\s))/i.test(text)) return "deny"
-  if (/^diff(?:\s|$)/i.test(text)) return "review"
+  if (/(?:^|\s)--output(?:=|\s)/i.test(text)) return "deny"
+  if (/(?:^|\s)(?:--ext-diff|--textconv|--contents|--filters)(?:=|\s|$)/i.test(text)) return "ask"
+  const tokens = tokenize(text)
+  if (!tokens?.length) return "ask"
+  const command = tokens[0].toLowerCase()
+  const args = tokens.slice(1)
+  const separator = args.indexOf("--")
+  const before = separator === -1 ? args : args.slice(0, separator)
+  if (command === "status") {
+    if (before.some((value) => !["--short", "-s", "--porcelain", "--branch", "-b", "--show-stash"].includes(value)))
+      return "ask"
+    return separator === -1 || separator < args.length - 1 ? "review" : "ask"
+  }
+  if (command === "log" || command === "show") {
+    if (
+      before.some(
+        (value) =>
+          !/^(?:--oneline|--stat|--name-only|--name-status|--decorate|-\d+|-n\d+|--max-count=\d+|--format=[^\r\n]+)$/.test(
+            value,
+          ),
+      )
+    )
+      return "ask"
+    return separator === -1 || separator < args.length - 1 ? "review" : "ask"
+  }
+  if (command === "diff") {
+    if (before.some((value) => !/^(?:--no-index|--stat|--name-only|--name-status|--cached|--staged)$/.test(value)))
+      return "ask"
+    if (before.includes("--no-index")) return before.length === 1 && args.length === 3 ? "review" : "ask"
+    return separator === -1 || separator < args.length - 1 ? "review" : "ask"
+  }
+  if (command === "blame")
+    return separator !== -1 && before.length === 0 && separator < args.length - 1 ? "review" : "ask"
+  if (command === "cat-file") return args.length === 2 && /^(?:-t|-s|-e|-p)$/.test(args[0]) ? "review" : "ask"
+  if (command === "rev-parse")
+    return args.length === 1 && /^(?:--show-toplevel|--show-prefix|--git-dir|--is-inside-work-tree|HEAD)$/.test(args[0])
+      ? "review"
+      : "ask"
+  if (command === "ls-files")
+    return args.length === 0 || (separator !== -1 && separator < args.length - 1) ? "review" : "ask"
+  if (command === "ls-tree") return args.length === 1 && !args[0].startsWith("-") ? "review" : "ask"
   if (
     /^branch\s*$|^branch\s+(?:-a|-r|-v|-vv|--all|--remotes|--verbose|--show-current|--list|-l)$|^branch\s+(?:--contains|--merged|--no-merged)(?:\s+\S+)?$/i.test(
       text,
@@ -273,7 +345,7 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
     return "review"
   if (/^tag\s*$|^tag\s+(?:-n|-l|--list)$|^tag\s+(?:--contains|--points-at)(?:\s+\S+)?$/i.test(text)) return "review"
   if (
-    /^stash\s+list(?:\s|$)|^worktree\s+list(?:\s|$)|^config\s+(?:--get|--get-all|--list|-l\b)(?:\s|$)|^remote(?:\s*$|\s+-v(?:\s|$)|\s+get-url(?:\s|$))/i.test(
+    /^stash\s+list$|^worktree\s+list(?:\s+--porcelain)?$|^config\s+(?:(?:--get|--get-all)\s+\S+|(?:--list|-l))$|^remote(?:\s*$|\s+-v$|\s+get-url\s+\S+?$)/i.test(
       text,
     )
   )
@@ -295,6 +367,46 @@ function classifyGit(pattern: string): "review" | "ask" | "deny" {
   if (/^(?:branch|tag)\s+-/i.test(text)) return "ask"
   if (/^(?:branch|tag)\s+\S+/i.test(text)) return "deny"
   return "ask"
+}
+
+function classifyValidation(pattern: string): "review" | "ask" | "deny" | undefined {
+  const tokens = tokenize(pattern)
+  if (!tokens?.length) return
+  const command = tokens[0].toLowerCase()
+  if (command === "bun" && tokens[1] === "typecheck") return tokens.length === 2 ? "review" : "ask"
+  if (command === "bun" && tokens[1] === "test") {
+    if (tokens.some((value) => ["--preload", "--require", "-r", "--update-snapshots", "-u"].includes(value)))
+      return "deny"
+    if (tokens.slice(2).some((value) => value.startsWith("-"))) return "ask"
+    return tokens.length > 2 ? "review" : "ask"
+  }
+  if (command === "go" && tokens[1] === "test") {
+    if (
+      tokens.some(
+        (value) => value === "-o" || value.startsWith("-o=") || value === "-exec" || value.startsWith("-exec="),
+      )
+    )
+      return "deny"
+    if (tokens.slice(2).some((value) => value.startsWith("-"))) return "ask"
+    return tokens.length > 2 ? "review" : "ask"
+  }
+  if (command === "cargo" && (tokens[1] === "check" || tokens[1] === "test")) {
+    if (tokens.some((value) => value === "--target-dir" || value.startsWith("--target-dir="))) return "deny"
+    const allowed = tokens
+      .slice(2)
+      .every((value, index, values) =>
+        value === "--manifest-path" ? Boolean(values[index + 1]) : index > 0 && values[index - 1] === "--manifest-path",
+      )
+    return allowed ? "review" : "ask"
+  }
+  if (["npm", "pnpm", "yarn"].includes(command)) {
+    const script = tokens[1] === "run" ? tokens[2] : tokens[1]
+    if (!script || !["test", "lint", "typecheck"].includes(script)) return
+    if (tokens.some((value) => value === "--output-file" || value.startsWith("--output-file="))) return "deny"
+    const rest = tokens.slice(tokens[1] === "run" ? 3 : 2)
+    if (rest.some((value) => value.startsWith("-"))) return "ask"
+    return script === "test" ? (rest.length ? "review" : "ask") : rest.length ? "ask" : "review"
+  }
 }
 
 function validation(pattern: string) {
@@ -352,21 +464,32 @@ function targetValues(pattern: string, shell: "bash" | "powershell" | "cmd"): Ta
     if (tokens.length < 2) return { type: "uncertain" }
     return tokens.length === 2 ? { type: "none" } : { type: "targets", values: tokens.slice(2) }
   }
+  if (command === "bun" && tokens[1] === "test")
+    return tokens.length > 2 ? { type: "targets", values: tokens.slice(2) } : { type: "uncertain" }
+  if (command === "go" && tokens[1] === "test")
+    return tokens.length > 2 ? { type: "targets", values: tokens.slice(2) } : { type: "uncertain" }
+  if (command === "cargo" && (tokens[1] === "check" || tokens[1] === "test")) {
+    const index = tokens.indexOf("--manifest-path")
+    if (index === -1) return { type: "none" }
+    return tokens[index + 1] ? { type: "targets", values: [tokens[index + 1]] } : { type: "uncertain" }
+  }
+  if (["npm", "pnpm", "yarn"].includes(command)) return { type: "none" }
   if (command === "find") {
+    const start = ["-H", "-L", "-P"].includes(tokens[1]) ? 2 : 1
     const expression = tokens.findIndex(
-      (value, index) => index > 0 && (value.startsWith("-") || value === "!" || value === "("),
+      (value, index) => index >= start && (value.startsWith("-") || value === "!" || value === "("),
     )
-    const values = expression === -1 ? tokens.slice(1) : tokens.slice(1, expression)
+    const values = expression === -1 ? tokens.slice(start) : tokens.slice(start, expression)
     return values.length ? { type: "targets", values } : { type: "none" }
   }
-  if (command === "git" && tokens[1]?.toLowerCase() === "diff") {
+  if (command === "git" && ["status", "log", "show", "diff", "blame", "ls-files"].includes(tokens[1]?.toLowerCase())) {
     const separator = tokens.indexOf("--")
     if (separator !== -1) {
       return tokens.length > separator + 1
         ? { type: "targets", values: tokens.slice(separator + 1) }
         : { type: "uncertain" }
     }
-    if (tokens.includes("--no-index")) {
+    if (tokens[1]?.toLowerCase() === "diff" && tokens.includes("--no-index")) {
       const values = tokens.slice(2).filter((value) => !option(value))
       return values.length === 2 ? { type: "targets", values } : { type: "uncertain" }
     }

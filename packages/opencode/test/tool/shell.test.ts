@@ -1204,6 +1204,48 @@ describe("tool.shell truncation", () => {
   )
 })
 describe("Plan shell permission metadata", () => {
+  it.live("characterizes Bash parsing without an installed Bash", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const executable = path.join(tmp, process.platform === "win32" ? "bash.exe" : "bash")
+      yield* Effect.promise(() => Bun.write(executable, ""))
+      yield* runIn(
+        tmp,
+        withShell(
+          { label: "bash", shell: executable },
+          Effect.gen(function* () {
+            const parsed: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+            const stop = new Error("stop after permission")
+            expect(yield* fail({ command: "echo first && echo second" }, capture(parsed, stop))).toMatchObject({
+              message: stop.message,
+            })
+            expect(parsed[0]).toMatchObject({
+              permission: "bash",
+              patterns: ["echo first", "echo second"],
+              metadata: { shell: "bash", parsed: true, cwd: tmp },
+            })
+
+            const nested = path.join(tmp, "nested")
+            yield* Effect.promise(() => Bun.write(path.join(nested, "inside.txt"), "x"))
+            const compound: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+            expect(
+              yield* fail(
+                { command: "cd .. && cat ../outside/secret", workdir: "nested" },
+                capture(compound, stop, { agent: "renamed", extra: { agentID: "plan" } }),
+              ),
+            ).toMatchObject({ message: stop.message })
+            expect(compound.find((request) => request.permission === "bash")?.metadata).toMatchObject({
+              command: "cd .. && cat ../outside/secret",
+              shell: "bash",
+              parsed: true,
+              cwd: nested,
+            })
+          }),
+        ),
+      )
+    }),
+  )
+
   each("reports normalized shell, parsed commands, and cwd", (item) =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()
