@@ -76,16 +76,18 @@ it.instance("plan agent denies all direct edits", () =>
     expect(evalPerm(plan, "edit")).toBe("deny")
     expect(Permission.evaluate("edit", "README.md", plan!.permission).action).toBe("deny")
     expect(evalPerm(plan, "bash")).toBe("ask")
+    expect(evalPerm(plan, "todowrite")).toBe("allow")
     expect(evalPerm(plan, "skill")).toBe("deny")
+    expect(evalPerm(plan, "task")).toBe("deny")
   }),
 )
 
 it.instance(
-  "user permission cannot bypass Plan shell approval",
+  "explicit Plan shell allow survives native defaults",
   () =>
     Effect.gen(function* () {
       const plan = yield* load((svc) => svc.get("plan"))
-      expect(evalPerm(plan, "bash")).toBe("ask")
+      expect(evalPerm(plan, "bash")).toBe("allow")
     }),
   {
     config: {
@@ -93,6 +95,26 @@ it.instance(
         plan: {
           permission: {
             bash: "allow",
+          },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "explicit Plan shell deny survives native defaults",
+  () =>
+    Effect.gen(function* () {
+      const plan = yield* load((svc) => svc.get("plan"))
+      expect(evalPerm(plan, "bash")).toBe("deny")
+    }),
+  {
+    config: {
+      agent: {
+        plan: {
+          permission: {
+            bash: "deny",
           },
         },
       },

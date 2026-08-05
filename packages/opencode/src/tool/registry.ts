@@ -65,6 +65,7 @@ const PLAN_TOOLS = new Set([
   "question",
   "read",
   "read_mcp_resource",
+  "todowrite",
   "webfetch",
   "websearch",
 ])
@@ -306,7 +307,9 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
-      const filtered = (yield* all()).filter((tool) => {
+      const plan = input.agentID === "plan" || (!input.agentID && input.agent.name === "plan")
+      const source = plan ? (yield* InstanceState.get(state)).builtin : yield* all()
+      const filtered = source.filter((tool) => {
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
@@ -319,10 +322,9 @@ const layer = Layer.effect(
         return true
       })
 
-      const available =
-        input.agentID === "plan" || (!input.agentID && input.agent.name === "plan")
-          ? filtered.filter((tool) => PLAN_TOOLS.has(tool.id))
-          : filtered.filter((tool) => tool.id !== "plan_exit")
+      const available = plan
+        ? filtered.filter((tool) => PLAN_TOOLS.has(tool.id))
+        : filtered.filter((tool) => tool.id !== "plan_exit")
       const codeModeDescription = available.some((tool) => tool.id === "execute")
         ? yield* describeCodeMode(input)
         : undefined

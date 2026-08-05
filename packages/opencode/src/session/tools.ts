@@ -6,6 +6,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
 import { McpCatalog } from "@/mcp/catalog"
 import { Permission } from "@/permission"
+import { PlanReview } from "@/permission/plan-review"
 import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -40,6 +41,7 @@ const PLAN_TOOLS = new Set([
   "question",
   "read",
   MCP_RESOURCE_TOOLS.read,
+  "todowrite",
   "webfetch",
   "websearch",
 ])
@@ -66,6 +68,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const run = yield* EffectBridge.make()
   const plugin = yield* Plugin.Service
   const permission = yield* Permission.Service
+  const sessions = yield* Session.Service
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
@@ -76,40 +79,94 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     permission: input.session.permission,
   })
 
-  const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
-    sessionID: input.session.id,
-    abort: options.abortSignal!,
-    messageID: input.processor.message.id,
-    callID: options.toolCallId,
-    extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
-    agent: input.agent.name,
-    messages: input.messages,
-    metadata: (val) =>
-      input.processor.updateToolCall(options.toolCallId, (match) => {
-        if (!["running", "pending"].includes(match.state.status)) return match
-        return {
-          ...match,
-          state: {
-            title: val.title,
-            metadata: val.metadata,
-            status: "running",
-            input: args,
-            time: { start: Date.now() },
-          },
+  const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => {
+    const seed = {
+      agent: input.agent,
+      agentID: input.agentID,
+      model: input.model,
+      userMessageID: input.processor.message.parentID,
+      assistantMessageID: input.processor.message.id,
+      callID: options.toolCallId,
+      directory: input.session.directory,
+      abort: options.abortSignal!,
+    }
+    const plan: PlanReview.ContextInput = {
+      seed,
+      load: () =>
+        Effect.gen(function* () {
+          const current = yield* sessions.get(input.session.id)
+          const currentRuleset = resolvePermissionRules({
+            agent: input.agent,
+            agentID: input.agentID,
+            permission: current.permission,
+          })
+          return {
+            type: "loaded" as const,
+            value: {
+              ruleset: currentRuleset,
+              context: {
+                ...seed,
+                approvalMode: current.approvalMode,
+                messages: yield* sessions.messages({ sessionID: input.session.id, limit: 64 }),
+                rulesetDigest: PlanReview.rulesetDigest(currentRuleset),
+              },
+            },
+          }
+        }).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed({ type: "missing" as const }))),
+    }
+    return {
+      sessionID: input.session.id,
+      abort: options.abortSignal!,
+      messageID: input.processor.message.id,
+      callID: options.toolCallId,
+      extra: {
+        model: input.model,
+        agentID: input.agentID,
+        bypassAgentCheck: input.bypassAgentCheck,
+        promptOps: input.promptOps,
+      },
+      agent: input.agent.name,
+      messages: input.messages,
+      metadata: (val) =>
+        input.processor.updateToolCall(options.toolCallId, (match) => {
+          if (!["running", "pending"].includes(match.state.status)) return match
+          return {
+            ...match,
+            state: {
+              title: val.title,
+              metadata: val.metadata,
+              status: "running",
+              input: args,
+              time: { start: Date.now() },
+            },
+          }
+        }),
+      ask: (req) => {
+        if (input.agentID === "plan") {
+          return permission
+            .ask({
+              ...req,
+              always: req.permission === "bash" ? [] : req.always,
+              alwaysAsk: req.permission === "bash",
+              sessionID: input.session.id,
+              tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+              plan,
+            })
+            .pipe(Effect.orDie)
         }
-      }),
-    ask: (req) =>
-      permission
-        .ask({
-          ...req,
-          always: input.agentID === "plan" && req.permission === "bash" ? [] : req.always,
-          alwaysAsk: input.agentID === "plan" && req.permission === "bash",
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset,
-        })
-        .pipe(Effect.orDie),
-  })
+        return permission
+          .ask({
+            ...req,
+            always: req.always,
+            alwaysAsk: false,
+            sessionID: input.session.id,
+            tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+            ruleset,
+          })
+          .pipe(Effect.orDie)
+      },
+    }
+  }
 
   for (const item of yield* registry.tools({
     modelID: ModelV2.ID.make(input.model.api.id),
@@ -411,6 +468,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   if (flags.experimentalCodeMode) return restrictPlanTools(input.agentID, tools)
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
+    if (input.agentID === "plan" && Object.hasOwn(tools, key)) continue
     const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
     const execute = item.execute
     if (!execute) continue
@@ -525,11 +583,7 @@ export function resolvePermissionRules(input: {
   agentID: string
   permission?: PermissionV1.Ruleset
 }) {
-  return Permission.merge(
-    input.agent.permission,
-    input.permission ?? [],
-    input.agentID === "plan" ? Permission.fromConfig({ bash: "ask" }) : [],
-  )
+  return Permission.merge(input.agent.permission, input.permission ?? [])
 }
 
 function toRecord(value: unknown) {

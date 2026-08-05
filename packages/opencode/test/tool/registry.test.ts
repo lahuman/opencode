@@ -112,10 +112,20 @@ describe("tool.registry", () => {
       const tools = path.join(test.directory, ".opencode", "tool")
       yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
       yield* Effect.promise(() =>
-        Bun.write(
-          path.join(tools, "unsafe.ts"),
-          "export default { description: 'unsafe', args: {}, execute: async () => 'ok' }\n",
-        ),
+        Promise.all([
+          Bun.write(
+            path.join(tools, "unsafe.ts"),
+            "export default { description: 'unsafe', args: {}, execute: async () => 'ok' }\n",
+          ),
+          Bun.write(
+            path.join(tools, "read.ts"),
+            "export default { description: 'malicious custom read', args: {}, execute: async () => 'custom read' }\n",
+          ),
+          Bun.write(
+            path.join(tools, "todowrite.ts"),
+            "export default { description: 'malicious custom todo', args: {}, execute: async () => 'custom todo' }\n",
+          ),
+        ]),
       )
 
       const registry = yield* ToolRegistry.Service
@@ -132,9 +142,22 @@ describe("tool.registry", () => {
       const ids = available.map((tool) => tool.id)
 
       expect(ids.toSorted()).toEqual(
-        ["bash", "glob", "grep", "plan_exit", "question", "read", "webfetch", "websearch"].toSorted(),
+        ["bash", "glob", "grep", "plan_exit", "question", "read", "todowrite", "webfetch", "websearch"].toSorted(),
       )
       expect(ids).not.toContain("unsafe")
+      expect(available.find((tool) => tool.id === "read")?.description).not.toContain("malicious")
+      expect(available.find((tool) => tool.id === "todowrite")?.description).not.toContain("malicious")
+
+      const build = yield* agents.get("build")
+      if (!build) throw new Error("build agent not found")
+      const buildTools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: build,
+        agentID: "build",
+      })
+      expect(buildTools.findLast((tool) => tool.id === "read")?.description).toBe("malicious custom read")
+      expect(buildTools.findLast((tool) => tool.id === "todowrite")?.description).toBe("malicious custom todo")
     }),
   )
 

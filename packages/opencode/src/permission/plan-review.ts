@@ -8,7 +8,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { MessageV2 } from "@/session/message-v2"
 import { Session } from "@/session/session"
 import { LLMAISDK } from "@/session/llm/ai-sdk"
-import { LLMRequestPrep } from "@/session/llm/request"
+import type { Prepared } from "@/session/llm/request"
 import { isRecord } from "@/util/record"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -111,8 +111,50 @@ export type ReviewInput = PolicyInput & {
   isActive: () => Effect.Effect<boolean>
 }
 
+export type ExecutionEnvelope = {
+  requestID: PermissionV1.ID
+  sessionID: SessionV1.SessionInfo["id"]
+  userMessageID: SessionV1.MessageID
+  assistantMessageID: SessionV1.MessageID
+  callID: string
+  agentID: string
+  directory: string
+  requestDigest: string
+  rulesetDigest: string
+  policyDigest: string
+  turnDigest: string
+  evidenceDigest?: string
+  reviewer: boolean
+}
+
+export type ExecutionCapture =
+  | { type: "ready"; value: ExecutionEnvelope }
+  | { type: "outcome"; value: Outcome }
+
+export type ExecutionInput = {
+  request: ReviewRequest
+  context: ReviewContext
+  ruleset: PermissionV1.Ruleset
+  reviewer: boolean
+}
+
+export type RevalidateInput = {
+  request: ReviewRequest
+  plan: ContextInput
+  envelope: ExecutionEnvelope
+  isActive: () => Effect.Effect<boolean>
+}
+
+export type RejectedTurnInput = {
+  sessionID: SessionV1.SessionInfo["id"]
+  assistantMessageIDs: readonly SessionV1.MessageID[]
+}
+
 export interface Interface {
   readonly review: (input: ReviewInput) => Effect.Effect<Outcome>
+  readonly captureExecution: (input: ExecutionInput) => Effect.Effect<ExecutionCapture>
+  readonly revalidateExecution: (input: RevalidateInput) => Effect.Effect<Outcome>
+  readonly findEvictableTurn: (input: RejectedTurnInput) => Effect.Effect<SessionV1.MessageID | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/PlanReview") {}
@@ -704,6 +746,39 @@ function currentTurnActive(input: { messages: ReadonlyArray<SessionV1.WithParts>
     currentTools++
   }
   return currentTools === 1
+}
+
+function currentTurnDigest(input: { messages: ReadonlyArray<SessionV1.WithParts>; context: ReviewContext }) {
+  if (!currentTurnActive(input)) return
+  const messages = arrayValues(input.messages)
+  if (!messages) return
+  for (const raw of messages) {
+    const message = recordDescriptors(raw)
+    const info = recordDescriptors(message?.info?.value)
+    if (!message || !info || info.id?.value !== input.context.assistantMessageID) continue
+    if (info.agent?.value !== input.context.agentID) return
+    const parts = arrayValues(message.parts?.value)
+    if (!parts) return
+    for (const rawPart of parts) {
+      const part = recordDescriptors(rawPart)
+      const state = recordDescriptors(part?.state?.value)
+      if (!part || !state || part.type?.value !== "tool" || part.callID?.value !== input.context.callID) continue
+      return Hash.sha256(
+        canonical({
+          sessionID: info.sessionID?.value,
+          userMessageID: input.context.userMessageID,
+          assistantMessageID: info.id?.value,
+          parentID: info.parentID?.value,
+          agentID: info.agent?.value,
+          partID: part.id?.value,
+          messageID: part.messageID?.value,
+          callID: part.callID?.value,
+          tool: part.tool?.value,
+          active: state.status?.value === "pending" || state.status?.value === "running",
+        }),
+      )
+    }
+  }
 }
 
 function snapshotTurnEvidence(input: {
@@ -1367,7 +1442,7 @@ function hasGoogleAgent(language: unknown) {
 function reviewerOptions(input: {
   model: Provider.Model
   auth: Auth.Info | undefined
-  privacy: LLMRequestPrep.Prepared["privacy"]
+  privacy: Prepared["privacy"]
 }) {
   const npm = input.model.api.npm
   const api = input.model.api.id.toLowerCase()
@@ -1460,6 +1535,137 @@ const layer = Layer.effect(
       states.set(key, created)
       return created
     }
+
+    const findEvictableTurn = Effect.fn("PlanReview.findEvictableTurn")(function* (input: RejectedTurnInput) {
+      const messages = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.option)
+      if (Option.isNone(messages)) return
+      const active = new Set(
+        messages.value.flatMap((message) => {
+          if (message.info.role !== "assistant") return []
+          const running = message.parts.some(
+            (part) =>
+              part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
+          )
+          return running ? [message.info.id] : []
+        }),
+      )
+      return input.assistantMessageIDs.find((assistantMessageID) => !active.has(assistantMessageID))
+    })
+
+    const captureExecution = Effect.fn("PlanReview.captureExecution")(function* (
+      input: ExecutionInput,
+    ): Effect.fn.Return<ExecutionCapture> {
+      const sanitized = sanitizeRequest(input.request)
+      if (
+        !sanitized ||
+        sanitized.invalid ||
+        sanitized.request.sessionID !== input.context.messages[0]?.info.sessionID ||
+        sanitized.request.tool?.messageID !== input.context.assistantMessageID ||
+        sanitized.request.tool.callID !== input.context.callID ||
+        input.context.rulesetDigest !== rulesetDigest(input.ruleset)
+      ) {
+        return { type: "outcome", value: { type: "cancel" } }
+      }
+      const turnDigest = currentTurnDigest({ messages: input.context.messages, context: input.context })
+      if (!turnDigest) return { type: "outcome", value: { type: "cancel" } }
+      const policy = { request: sanitized.request, context: input.context }
+      const checked = yield* preflight(policy)
+      if (checked.type === "deny") {
+        return {
+          type: "outcome",
+          value: { type: "read_only", reason: checked.reason, alternative: checked.alternative },
+        }
+      }
+      const normalized = yield* normalize(policy)
+      const evidence = input.reviewer
+        ? yield* captureEvidence({ messages: input.context.messages, context: input.context })
+        : undefined
+      if (evidence?.type === "manual") return { type: "outcome", value: { type: "manual" } }
+      return {
+        type: "ready",
+        value: {
+          requestID: sanitized.request.id,
+          sessionID: sanitized.request.sessionID,
+          userMessageID: input.context.userMessageID,
+          assistantMessageID: input.context.assistantMessageID,
+          callID: input.context.callID,
+          agentID: input.context.agentID,
+          directory: input.context.directory,
+          requestDigest: Hash.sha256(canonical(sanitized.request)),
+          rulesetDigest: input.context.rulesetDigest,
+          policyDigest: Hash.sha256(
+            canonical({ normalized, preflight: checked.type, findings: checked.type === "review" ? checked.findings : [] }),
+          ),
+          turnDigest,
+          ...(evidence?.type === "captured" ? { evidenceDigest: evidence.digest } : {}),
+          reviewer: input.reviewer,
+        },
+      }
+    })
+
+    const revalidateExecution = Effect.fn("PlanReview.revalidateExecution")(function* (
+      input: RevalidateInput,
+    ): Effect.fn.Return<Outcome> {
+      if (input.plan.seed.abort.aborted || !(yield* input.isActive())) return { type: "cancel" }
+      const loaded = yield* input.plan.load()
+      if (loaded.type === "missing") return { type: "cancel" }
+      const session = yield* sessions.get(input.request.sessionID).pipe(Effect.option)
+      if (Option.isNone(session)) return { type: "cancel" }
+      const sanitized = sanitizeRequest(input.request)
+      if (!sanitized || sanitized.invalid) return { type: "cancel" }
+      const ruleset = [...input.plan.seed.agent.permission, ...(session.value.permission ?? [])]
+      const context = {
+        ...loaded.value.context,
+        approvalMode: session.value.approvalMode,
+        rulesetDigest: rulesetDigest(ruleset),
+      }
+      if (
+        sanitized.request.id !== input.envelope.requestID ||
+        sanitized.request.sessionID !== input.envelope.sessionID ||
+        sanitized.request.tool?.messageID !== input.envelope.assistantMessageID ||
+        sanitized.request.tool.callID !== input.envelope.callID ||
+        context.userMessageID !== input.envelope.userMessageID ||
+        context.assistantMessageID !== input.envelope.assistantMessageID ||
+        context.callID !== input.envelope.callID ||
+        context.agentID !== input.envelope.agentID ||
+        context.directory !== input.envelope.directory ||
+        context.model.providerID !== input.plan.seed.model.providerID ||
+        context.model.id !== input.plan.seed.model.id ||
+        session.value.directory !== input.envelope.directory ||
+        (session.value.agent !== undefined && session.value.agent !== input.envelope.agentID) ||
+        (session.value.model !== undefined &&
+          (session.value.model.providerID !== context.model.providerID || session.value.model.id !== context.model.id)) ||
+        Hash.sha256(canonical(sanitized.request)) !== input.envelope.requestDigest
+      ) return { type: "cancel" }
+      const turnDigest = currentTurnDigest({ messages: context.messages, context })
+      if (!turnDigest || turnDigest !== input.envelope.turnDigest) return { type: "cancel" }
+      if (evaluateRules(sanitized.request, ruleset).some((rule) => rule.action === "deny")) {
+        return { type: "configured_deny" }
+      }
+      const policy = { request: sanitized.request, context }
+      const checked = yield* preflight(policy)
+      if (checked.type === "deny") {
+        return { type: "read_only", reason: checked.reason, alternative: checked.alternative }
+      }
+      const normalized = yield* normalize(policy)
+      if (
+        rulesetDigest(ruleset) !== input.envelope.rulesetDigest ||
+        loaded.value.context.rulesetDigest !== input.envelope.rulesetDigest ||
+        context.rulesetDigest !== input.envelope.rulesetDigest ||
+        Hash.sha256(
+          canonical({ normalized, preflight: checked.type, findings: checked.type === "review" ? checked.findings : [] }),
+        ) !== input.envelope.policyDigest
+      ) return { type: "cancel" }
+      if (input.envelope.reviewer) {
+        if (context.approvalMode !== "auto_review") return { type: "cancel" }
+        const evidence = yield* captureEvidence({ messages: context.messages, context })
+        if (evidence.type !== "captured" || evidence.digest !== input.envelope.evidenceDigest) {
+          return { type: "cancel" }
+        }
+      }
+      if (input.plan.seed.abort.aborted || !(yield* input.isActive())) return { type: "cancel" }
+      return { type: "allow" }
+    })
 
     const authority = Effect.fn("PlanReview.authority")(function* (input: {
       review: ReviewInput
@@ -1720,7 +1926,8 @@ const layer = Layer.effect(
         role: "user",
         content: `<UNTRUSTED_REVIEW_DATA>\n{"evidence":${input.evidence.serialized},"findings":${canonical(input.authority.findings)},"request":${canonical(input.request)}}\n</UNTRUSTED_REVIEW_DATA>`,
       }
-      const prepared = yield* LLMRequestPrep.prepare({
+      const { prepare } = yield* Effect.promise(() => import("@/session/llm/request"))
+      const prepared = yield* prepare({
         user: { ...user.info, system: undefined, tools: undefined },
         sessionID: input.review.request.sessionID,
         model: input.review.context.model,
@@ -1954,7 +2161,7 @@ const layer = Layer.effect(
       return result
     })
 
-    return Service.of({ review })
+    return Service.of({ review, captureExecution, revalidateExecution, findEvictableTurn })
   }),
 )
 

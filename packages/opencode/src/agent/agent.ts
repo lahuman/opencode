@@ -158,6 +158,7 @@ const layer = Layer.effect(
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
+                bash: "ask",
                 question: "allow",
                 plan_exit: "allow",
               }),
@@ -284,13 +285,11 @@ const layer = Layer.effect(
           agents.plan.permission = Permission.merge(
             agents.plan.permission,
             Permission.fromConfig({
-              bash: "ask",
               edit: "deny",
               execute: "deny",
               lsp: "deny",
               skill: "deny",
               task: "deny",
-              todowrite: "deny",
             }),
           )
         }

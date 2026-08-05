@@ -264,6 +264,17 @@ describe("opencode run (non-interactive subprocess)", () => {
         expect(allowed.stdout).toContain("continued after approval")
 
         yield* llm.reset
+        yield* llm.tool("bash", { command: "rm -f auto-file", description: "Remove a test file" })
+        yield* llm.text("continued after auto approval")
+        const auto = yield* opencode.run("request permission", {
+          permission: { bash: "ask" },
+          extraArgs: ["--auto"],
+        })
+        opencode.expectExit(auto, 0)
+        expect(auto.stderr).not.toContain("permission requested: bash")
+        expect(auto.stdout).toContain("continued after auto approval")
+
+        yield* llm.reset
         yield* llm.tool("bash", { command: "touch explicitly-denied", description: "Create a denied marker" })
         yield* llm.text("continued after explicit denial")
         const explicitlyDenied = yield* opencode.run("request denied permission", {

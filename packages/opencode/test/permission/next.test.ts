@@ -1,7 +1,9 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { test, expect } from "bun:test"
 import os from "os"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Logger } from "effect"
+import path from "path"
+import { mkdirSync, rmdirSync, symlinkSync, unlinkSync } from "node:fs"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Logger, Schema } from "effect"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Permission } from "../../src/permission"
@@ -12,6 +14,22 @@ import { testEffect } from "../lib/effect"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { MockLanguageModelV3 } from "ai/test"
+import { PlanReview } from "../../src/permission/plan-review"
+import { Provider } from "../../src/provider/provider"
+import { Session } from "../../src/session/session"
+import { PartID } from "../../src/session/schema"
+import { ProviderTest } from "../fake/provider"
+import type { Agent } from "../../src/agent/agent"
+import { SessionTools } from "../../src/session/tools"
+import { Tool } from "../../src/tool/tool"
+import { ToolRegistry } from "../../src/tool/registry"
+import { MCP } from "../../src/mcp"
+import { Plugin } from "../../src/plugin"
+import { Truncate } from "../../src/tool/truncate"
+import { RuntimeFlags } from "../../src/effect/runtime-flags"
+import type { SessionV1 } from "@opencode-ai/core/v1/session"
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const env = AppNodeBuilder.build(
@@ -19,6 +37,264 @@ const env = AppNodeBuilder.build(
   [[InstanceStore.bootstrapNode, noopBootstrap]],
 )
 const it = testEffect(env)
+
+let planLanguageRequests = 0
+let planLanguageOutput = { decision: "allow", risk: "low", reason: "Read-only inspection" }
+let planLanguageWait: Promise<void> | undefined
+
+const resetPlanLanguage = () => {
+  planLanguageRequests = 0
+  planLanguageOutput = { decision: "allow", risk: "low", reason: "Read-only inspection" }
+  planLanguageWait = undefined
+}
+
+const planProvider = ProviderTest.fake({
+  getLanguage: () =>
+    Effect.sync(() => {
+      planLanguageRequests++
+      return new MockLanguageModelV3({
+        doGenerate: async () => {
+          await planLanguageWait
+          return {
+            content: [{ type: "text", text: JSON.stringify(planLanguageOutput) }],
+            finishReason: { unified: "stop", raw: undefined },
+            usage: {
+              inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 1, text: 1, reasoning: undefined },
+            },
+            warnings: [],
+          }
+        },
+      })
+    }),
+})
+const planEnv = AppNodeBuilder.build(
+  LayerNode.group([
+    Permission.node,
+    PlanReview.node,
+    Session.node,
+    SessionProjector.node,
+    EventV2Bridge.node,
+    CrossSpawnSpawner.node,
+    InstanceStore.node,
+  ]),
+  [
+    [Provider.node, planProvider.layer],
+    [InstanceStore.bootstrapNode, noopBootstrap],
+  ],
+)
+const planIt = testEffect(planEnv)
+
+const planFixture = (input?: {
+  approvalMode?: "ask" | "auto_review"
+  agentPermission?: PermissionV1.Ruleset
+  sessionPermission?: PermissionV1.Ruleset
+  permission?: string
+  patterns?: string[]
+}) =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const test = yield* TestInstance
+    const agent: Agent.Info = {
+      name: "plan",
+      mode: "primary",
+      native: true,
+      permission: [...(input?.agentPermission ?? [])],
+      options: {},
+    }
+    const session = yield* sessions.create({ approvalMode: input?.approvalMode ?? "auto_review" })
+    if (input?.sessionPermission) {
+      yield* sessions.setPermission({ sessionID: session.id, permission: input.sessionPermission })
+    }
+    const user = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      sessionID: session.id,
+      role: "user",
+      time: { created: Date.now() },
+      agent: "plan",
+      model: { providerID: planProvider.model.providerID, modelID: planProvider.model.id },
+    })
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      sessionID: session.id,
+      messageID: user.id,
+      type: "text",
+      text: "Inspect the repository",
+    })
+    const assistant = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      sessionID: session.id,
+      role: "assistant",
+      time: { created: Date.now() },
+      parentID: user.id,
+      modelID: planProvider.model.id,
+      providerID: planProvider.model.providerID,
+      mode: "plan",
+      agent: "plan",
+      path: { cwd: test.directory, root: test.directory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    const callID = "call-plan-permission"
+    const permission = input?.permission ?? "bash"
+    const patterns = input?.patterns ?? ["git status"]
+    const toolPart = yield* sessions.updatePart({
+      id: PartID.ascending(),
+      sessionID: session.id,
+      messageID: assistant.id,
+      type: "tool",
+      callID,
+      tool: permission,
+      state: { status: "running", input: {}, time: { start: Date.now() } },
+    })
+    const abort = new AbortController()
+    const seed: PlanReview.ContextSeed = {
+      agent,
+      agentID: "plan",
+      model: planProvider.model,
+      userMessageID: user.id,
+      assistantMessageID: assistant.id,
+      callID,
+      directory: test.directory,
+      abort: abort.signal,
+    }
+    const plan: PlanReview.ContextInput = {
+      seed,
+      load: () =>
+        Effect.gen(function* () {
+          const current = yield* sessions.get(session.id)
+          const ruleset = Permission.merge(agent.permission, current.permission ?? [])
+          return {
+            type: "loaded" as const,
+            value: {
+              ruleset,
+              context: {
+                ...seed,
+                approvalMode: current.approvalMode,
+                messages: yield* sessions.messages({ sessionID: session.id, limit: 64 }),
+                rulesetDigest: PlanReview.rulesetDigest(ruleset),
+              },
+            },
+          }
+        }).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed({ type: "missing" as const }))),
+    }
+    return {
+      abort,
+      session,
+      user,
+      assistant,
+      toolPart,
+      request: {
+        id: PermissionV1.ID.ascending(),
+        sessionID: session.id,
+        permission,
+        patterns,
+        metadata:
+          permission === "bash"
+            ? { command: patterns.join(" && "), shell: "powershell", parsed: true, cwd: test.directory }
+            : {},
+        always: [...patterns],
+        tool: { messageID: assistant.id, callID },
+        plan,
+      },
+    }
+  })
+
+const resolvePlanProbe = Effect.fn("PermissionTest.resolvePlanProbe")(function* (input: {
+  fixture: {
+    session: Session.Info
+    assistant: SessionV1.Assistant
+    request: { plan: PlanReview.ContextInput }
+  }
+  execute: () => void
+  beforeAsk?: Effect.Effect<void>
+  session?: Session.Interface
+}) {
+  const sessions = yield* Session.Service
+  const tool: Tool.Def = {
+    id: "bash",
+    description: "Plan integration probe",
+    parameters: Schema.Struct({}),
+    execute: (_args, ctx) =>
+      Effect.gen(function* () {
+        if (input.beforeAsk) yield* input.beforeAsk
+        yield* ctx.ask({
+          permission: "bash",
+          patterns: ["git status"],
+          always: ["git status"],
+          metadata: {
+            command: "git status",
+            shell: "powershell",
+            parsed: true,
+            cwd: input.fixture.session.directory,
+          },
+        })
+        input.execute()
+        return { title: "bash", metadata: {}, output: "ok" }
+      }),
+  }
+  const deps = Layer.mergeAll(
+    Layer.mock(ToolRegistry.Service, { tools: () => Effect.succeed([tool]) }),
+    Layer.mock(MCP.Service, {
+      clients: () => Effect.succeed({}),
+      tools: () => Effect.succeed({}),
+    }),
+    Layer.mock(Plugin.Service, {
+      trigger: ((_name: unknown, _event: unknown, output: unknown) =>
+        Effect.succeed(output)) as Plugin.Interface["trigger"],
+    }),
+    Layer.mock(Truncate.Service, {}),
+    RuntimeFlags.layer(),
+  )
+  const layers = input.session
+    ? Layer.merge(deps, Layer.succeed(Session.Service, Session.Service.of(input.session)))
+    : deps
+  const tools = yield* SessionTools.resolve({
+    agent: input.fixture.request.plan.seed.agent,
+    agentID: "plan",
+    model: input.fixture.request.plan.seed.model,
+    session: input.fixture.session,
+    processor: {
+      message: input.fixture.assistant,
+      updateToolCall: () => Effect.succeed(undefined),
+      completeToolCall: () => Effect.void,
+    },
+    bypassAgentCheck: false,
+    messages: yield* sessions.messages({ sessionID: input.fixture.session.id, limit: 64 }),
+    promptOps: {} as never,
+  }).pipe(Effect.provide(layers))
+  if (!tools.bash?.execute) return yield* Effect.die(new Error("Plan probe tool is not executable"))
+  return tools.bash
+})
+
+const executePlanProbe = (tool: import("ai").Tool, callID: string, abort: AbortSignal) =>
+  Effect.promise(() => Promise.resolve(tool.execute!({}, { toolCallId: callID, messages: [], abortSignal: abort })))
+
+const pauseSessionGet = Effect.gen(function* () {
+  const sessions = yield* Session.Service
+  const reached = yield* Deferred.make<void>()
+  const release = yield* Deferred.make<void>()
+  let paused = false
+  let loads = 0
+  return {
+    reached,
+    release,
+    loads: () => loads,
+    session: Session.Service.of({
+      ...sessions,
+      get: (id) =>
+        Effect.gen(function* () {
+          loads++
+          if (!paused) {
+            paused = true
+            yield* Deferred.succeed(reached, undefined)
+            yield* Deferred.await(release)
+          }
+          return yield* sessions.get(id)
+        }),
+    }),
+  }
+})
 
 const rejectAll = (message?: string) =>
   Effect.gen(function* () {
@@ -47,6 +323,44 @@ const waitForPending = (count: number) =>
         orElse: () => Effect.fail(new Error(`timed out waiting for ${count} pending permission request(s)`)),
       }),
     )
+  })
+
+const waitForPlanLanguage = (count: number) =>
+  Effect.gen(function* () {
+    while (planLanguageRequests < count) yield* Effect.sleep("10 millis")
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "1 second",
+      orElse: () => Effect.fail(new Error(`timed out waiting for ${count} Plan review request(s)`)),
+    }),
+  )
+
+const pausePlanLoad = <T extends { plan: PlanReview.ContextInput }>(request: T, at: number) =>
+  Effect.gen(function* () {
+    const reached = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const load = request.plan.load
+    let count = 0
+    return {
+      reached,
+      release,
+      loads: () => count,
+      request: {
+        ...request,
+        plan: {
+          ...request.plan,
+          load: (): Effect.Effect<PlanReview.ContextLoad> =>
+            Effect.gen(function* () {
+              count++
+              if (count === at) {
+                yield* Deferred.succeed(reached, undefined)
+                yield* Deferred.await(release)
+              }
+              return yield* load()
+            }),
+        },
+      },
+    }
   })
 
 const fail = <A, E, R>(self: Effect.Effect<A, E, R>) =>
@@ -1288,4 +1602,1706 @@ it.instance(
       if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(PermissionV1.RejectedError)
     }),
   { git: true },
+)
+
+planIt.instance(
+  "plan - configured deny is authoritative and redacted before review",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        patterns: ["git status", "git log"],
+        sessionPermission: [
+          { permission: "bash", pattern: "git status", action: "allow" },
+          { permission: "bash", pattern: "git log", action: "deny" },
+          { permission: "bash", pattern: "SECRET_RULE_SENTINEL", action: "allow" },
+        ],
+      })
+      const error = yield* fail(ask(fixture.request as never))
+
+      expect(error).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((error as PermissionV1.DeniedError).ruleset).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+      ])
+      expect(String(error)).not.toContain("SECRET_RULE_SENTINEL")
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - configured deny logs and persisted error material stay metadata-safe",
+  () => {
+    const logs: unknown[] = []
+    const logger = Logger.make((options) => logs.push(options.message))
+    const token = "Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+    const credential = "C:\\Users\\alice\\.ssh\\id_enterprise_secret"
+    const ruleSecret = "IRRELEVANT_RULE_SECRET_SENTINEL"
+
+    return Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        patterns: [`Get-Content \"${credential}\" ${token}`],
+        sessionPermission: [
+          { permission: "bash", pattern: "*", action: "deny" },
+          { permission: "bash", pattern: ruleSecret, action: "allow" },
+        ],
+      })
+      const error = yield* fail(ask(fixture.request as never))
+      const sessions = yield* Session.Service
+      yield* sessions.updatePart({
+        ...fixture.toolPart,
+        state: {
+          status: "error",
+          input: {},
+          error: String(error),
+          time: { start: 1, end: 2 },
+        },
+      })
+      const callID = "call-plan-persisted-error-projection"
+      yield* sessions.updatePart({
+        ...fixture.toolPart,
+        id: PartID.ascending(),
+        callID,
+        state: { status: "running", input: {}, time: { start: 3 } },
+      })
+      const current = yield* sessions.get(fixture.session.id)
+      const messages = yield* sessions.messages({ sessionID: fixture.session.id, limit: 64 })
+      const ruleset = Permission.merge(fixture.request.plan.seed.agent.permission, current.permission ?? [])
+      const evidence = yield* PlanReview.captureEvidence({
+        messages,
+        context: {
+          ...fixture.request.plan.seed,
+          callID,
+          approvalMode: current.approvalMode,
+          messages,
+          rulesetDigest: PlanReview.rulesetDigest(ruleset),
+        },
+      })
+      const serialized = JSON.stringify({ logs, error, message: String(error), messages, evidence })
+
+      expect(error).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(evidence.type).toBe("captured")
+      expect(serialized).not.toContain(token)
+      expect(serialized).not.toContain(credential)
+      expect(serialized).not.toContain(ruleSecret)
+      expect(serialized).toContain('"patternCount":1')
+      expect(serialized).toContain('"action":"deny"')
+      expect(planLanguageRequests).toBe(0)
+    }).pipe(Effect.provide(Logger.layer([logger])))
+  },
+  { git: true },
+)
+
+planIt.instance(
+  "plan - read-only guard wins over a configured allow",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        permission: "edit",
+        patterns: ["README.md"],
+        sessionPermission: [{ permission: "edit", pattern: "*", action: "allow" }],
+      })
+      const error = yield* fail(ask(fixture.request as never))
+
+      expect(error).toBeInstanceOf(PermissionV1.PlanReadOnlyError)
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - configured allow passes only after deterministic reviewable preflight",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        sessionPermission: [{ permission: "bash", pattern: "*", action: "allow" }],
+      })
+
+      expect(yield* ask(fixture.request as never)).toBeUndefined()
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+for (const [name, pattern, parsed] of [
+  ["parser failure", "git status", false],
+  ["shell alias", "alias gs='git status'", true],
+  ["encoded command", "powershell -EncodedCommand Z2l0IHN0YXR1cw==", true],
+  ["unresolved redirection", "Get-Content < missing.txt", true],
+  ["ambiguous wildcard", "Get-Content *.txt", true],
+] as const) {
+  planIt.instance(
+    `plan - configured bash allow hands ${name} to manual approval`,
+    () =>
+      Effect.gen(function* () {
+        resetPlanLanguage()
+        const fixture = yield* planFixture({
+          patterns: [pattern],
+          sessionPermission: [{ permission: "bash", pattern: "*", action: "allow" }],
+        })
+        const request = {
+          ...fixture.request,
+          metadata: {
+            command: pattern,
+            shell: "powershell",
+            parsed,
+            cwd: fixture.request.plan.seed.directory,
+          },
+        }
+        const fiber = yield* ask(request as never).pipe(Effect.forkScoped)
+        const pending = yield* waitForPending(1)
+
+        expect(pending[0].review).toBeUndefined()
+        expect(planLanguageRequests).toBe(0)
+        yield* reply({ requestID: pending[0].id, reply: "reject" })
+        expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      }),
+    { git: true },
+  )
+}
+
+planIt.instance(
+  "plan - configured bash allow hands an initially broken symlink to manual approval",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const test = yield* TestInstance
+      const target = path.join(test.directory, "plan-broken-target")
+      const link = path.join(test.directory, "plan-broken-link")
+      mkdirSync(target)
+      symlinkSync(target, link, "junction")
+      rmdirSync(target)
+      const pattern = `Get-Content "${path.join(link, "missing.txt")}"`
+      const fixture = yield* planFixture({
+        patterns: [pattern],
+        sessionPermission: [{ permission: "bash", pattern: "*", action: "allow" }],
+      })
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(pending[0].review).toBeUndefined()
+      expect(planLanguageRequests).toBe(0)
+      yield* reply({ requestID: pending[0].id, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - static deny defeats Build approval while Build keeps legacy combined precedence",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        permission: "read",
+        patterns: ["README.md"],
+        sessionPermission: [{ permission: "read", pattern: "README.md", action: "deny" }],
+      })
+      const seedID = PermissionV1.ID.ascending()
+      const seedFiber = yield* ask({
+        id: seedID,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: ["README.md"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: seedID, reply: "always" })
+      yield* Fiber.join(seedFiber)
+
+      const planError = yield* fail(ask(fixture.request as never))
+      expect(planError).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((planError as PermissionV1.DeniedError).ruleset).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+      ])
+      expect(planLanguageRequests).toBe(0)
+
+      expect(
+        yield* ask({
+          sessionID: fixture.session.id,
+          permission: "read",
+          patterns: ["README.md"],
+          metadata: {},
+          always: [],
+          ruleset: [{ permission: "read", pattern: "README.md", action: "deny" }],
+        }),
+      ).toBeUndefined()
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - manual mode publishes the existing request without review",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(pending[0].review).toBeUndefined()
+      expect(planLanguageRequests).toBe(0)
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      yield* Fiber.join(fiber)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - auto review allow completes one request without publishing or approval mutation",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+
+      expect(yield* ask(fixture.request as never)).toBeUndefined()
+      expect(planLanguageRequests).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - SessionTools observes ask to auto_review when the tool reaches ctx.ask",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      let executions = 0
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type) asked++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++ })
+
+      yield* sessions.setApprovalMode({ sessionID: fixture.session.id, approvalMode: "auto_review" })
+      yield* executePlanProbe(tool, fixture.request.plan.seed.callID, fixture.abort.signal)
+
+      expect(planLanguageRequests).toBe(1)
+      expect(executions).toBe(1)
+      expect(asked).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - SessionTools observes a fresh deny before ctx.ask and never executes",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        sessionPermission: [{ permission: "bash", pattern: "git status", action: "allow" }],
+      })
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      let executions = 0
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type) asked++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++ })
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+      })
+      const exit = yield* executePlanProbe(tool, fixture.request.plan.seed.callID, fixture.abort.signal).pipe(
+        Effect.exit,
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(planLanguageRequests).toBe(0)
+      expect(executions).toBe(0)
+      expect(asked).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - SessionTools initial loader is invalidated by a sibling reject",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const barrier = yield* pauseSessionGet
+      const events = yield* EventV2Bridge.Service
+      let executions = 0
+      let targetAsked = 0
+      const unsub = yield* events.listen((event) => {
+        if (
+          event.type === Permission.Event.Asked.type &&
+          (event.data as PermissionV1.Request).tool?.callID === fixture.request.plan.seed.callID
+        ) targetAsked++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++, session: barrier.session })
+      const toolFiber = yield* executePlanProbe(
+        tool,
+        fixture.request.plan.seed.callID,
+        fixture.abort.signal,
+      ).pipe(Effect.forkScoped)
+      yield* Deferred.await(barrier.reached)
+
+      const siblingID = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: siblingID,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: siblingID, reply: "reject" })
+      yield* Deferred.succeed(barrier.release, undefined)
+
+      expect(Exit.isFailure(yield* Fiber.await(toolFiber))).toBe(true)
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(barrier.loads()).toBe(1)
+      expect(planLanguageRequests).toBe(0)
+      expect(executions).toBe(0)
+      expect(targetAsked).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - SessionTools initial loader is invalidated by caller abort",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const barrier = yield* pauseSessionGet
+      let executions = 0
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++, session: barrier.session })
+      const toolFiber = yield* executePlanProbe(
+        tool,
+        fixture.request.plan.seed.callID,
+        fixture.abort.signal,
+      ).pipe(Effect.forkScoped)
+      yield* Deferred.await(barrier.reached)
+
+      fixture.abort.abort()
+      yield* Deferred.succeed(barrier.release, undefined)
+
+      expect(Exit.isFailure(yield* Fiber.await(toolFiber))).toBe(true)
+      expect(barrier.loads()).toBe(1)
+      expect(planLanguageRequests).toBe(0)
+      expect(executions).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - SessionTools initial loader maps a deleted session to rejection",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const sessions = yield* Session.Service
+      const barrier = yield* pauseSessionGet
+      let executions = 0
+      const tool = yield* resolvePlanProbe({ fixture, execute: () => executions++, session: barrier.session })
+      const toolFiber = yield* executePlanProbe(
+        tool,
+        fixture.request.plan.seed.callID,
+        fixture.abort.signal,
+      ).pipe(Effect.forkScoped)
+      yield* Deferred.await(barrier.reached)
+
+      yield* sessions.remove(fixture.session.id)
+      yield* Deferred.succeed(barrier.release, undefined)
+
+      expect(Exit.isFailure(yield* Fiber.await(toolFiber))).toBe(true)
+      expect(barrier.loads()).toBe(1)
+      expect(planLanguageRequests).toBe(0)
+      expect(executions).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - SessionTools delayed pre-ask call is stopped by the rejected turn tombstone",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      const reached = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined).pipe(Effect.ignore))
+      yield* Effect.addFinalizer(() => Effect.sync(() => fixture.abort.abort()))
+      let loads = 0
+      let executions = 0
+      let asked = 0
+      let beforeCalls = 0
+      const counting = Session.Service.of({
+        ...sessions,
+        get: (id) =>
+          Effect.sync(() => loads++).pipe(Effect.flatMap(() => sessions.get(id))),
+      })
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type) asked++
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const tool = yield* resolvePlanProbe({
+        fixture,
+        execute: () => executions++,
+        beforeAsk: Effect.gen(function* () {
+          beforeCalls++
+          yield* Deferred.succeed(reached, undefined)
+          yield* Deferred.await(release)
+        }),
+        session: counting,
+      })
+      const toolFiber = yield* executePlanProbe(
+        tool,
+        fixture.request.plan.seed.callID,
+        fixture.abort.signal,
+      ).pipe(Effect.forkScoped)
+      yield* Deferred.await(reached).pipe(
+        Effect.timeoutOrElse({
+          duration: "2 seconds",
+          orElse: () => Effect.die(new Error(`pre-ask barrier ran ${beforeCalls} time(s)`)),
+        }),
+      )
+
+      const rejecting = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+      yield* reply({ requestID: pending[0].id, reply: "reject" })
+      expect(yield* fail(Fiber.join(rejecting))).toBeInstanceOf(PermissionV1.RejectedError)
+      yield* Deferred.succeed(release, undefined)
+
+      expect(Exit.isFailure(yield* Fiber.await(toolFiber).pipe(Effect.timeout("2 seconds")))).toBe(true)
+      expect(loads).toBe(0)
+      expect(planLanguageRequests).toBe(0)
+      expect(executions).toBe(0)
+      expect(asked).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - reviewer ask publishes one typed review request",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      planLanguageOutput = { decision: "ask", risk: "medium", reason: "Confirm repository inspection" }
+      const fixture = yield* planFixture()
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(pending[0].review).toEqual({ risk: "medium", reason: "Confirm repository inspection" })
+      expect(planLanguageRequests).toBe(1)
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      yield* Fiber.join(fiber)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - reviewer deny returns ReviewedDeniedError without publishing",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      planLanguageOutput = { decision: "deny", risk: "high", reason: "Unsafe inspection request" }
+      const fixture = yield* planFixture()
+      const error = yield* fail(ask(fixture.request as never))
+
+      expect(error).toBeInstanceOf(PermissionV1.ReviewedDeniedError)
+      expect(planLanguageRequests).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - reviewer unavailable publishes a concise fallback review",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      planLanguageOutput = { decision: "invalid", risk: "low", reason: "ignored" }
+      const fixture = yield* planFixture()
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      expect(pending[0].review).toEqual({ risk: "medium", reason: "This request needs manual review." })
+      yield* reply({ requestID: pending[0].id, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - manual evidence fallback publishes a normal request without invoking the provider",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const sessions = yield* Session.Service
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        sessionID: fixture.session.id,
+        messageID: fixture.request.plan.seed.userMessageID,
+        type: "text",
+        text: "Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+      })
+
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+      expect(pending[0].review).toBeUndefined()
+      expect(planLanguageRequests).toBe(0)
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      yield* Fiber.join(fiber)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - fresh configured deny defeats a pending human approval",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const sessions = yield* Session.Service
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+      })
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      const error = yield* fail(Fiber.join(fiber))
+      expect(error).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((error as PermissionV1.DeniedError).ruleset).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+      ])
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - fresh deny blocks a manual handoff before Event.Asked",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const paused = yield* pausePlanLoad(fixture.request, 2)
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+          asked++
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+      })
+      yield* Deferred.succeed(paused.release, undefined)
+      const error = yield* fail(Fiber.join(fiber))
+      expect(error).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((error as PermissionV1.DeniedError).ruleset).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+      ])
+      expect(asked).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - changed target blocks a manual handoff before Event.Asked",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const test = yield* TestInstance
+      const left = path.join(test.directory, "plan-handoff-left")
+      const right = path.join(test.directory, "plan-handoff-right")
+      const link = path.join(test.directory, "plan-handoff-link")
+      mkdirSync(left)
+      mkdirSync(right)
+      symlinkSync(left, link, "junction")
+      const pattern = `Get-Content "${path.join(link, "missing.txt")}"`
+      const fixture = yield* planFixture({
+        approvalMode: "ask",
+        patterns: [pattern],
+      })
+      const paused = yield* pausePlanLoad(
+        {
+          ...fixture.request,
+          metadata: { ...fixture.request.metadata, parsed: false },
+        },
+        2,
+      )
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+          asked++
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached).pipe(
+        Effect.timeoutOrElse({
+          duration: "2 seconds",
+          orElse: () => Effect.die(new Error(`manual handoff reached only ${paused.loads()} load(s)`)),
+        }),
+      )
+
+      unlinkSync(link)
+      symlinkSync(right, link, "junction")
+      yield* Deferred.succeed(paused.release, undefined)
+
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(asked).toBe(0)
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - configured allow revalidates a fresh deny before returning authority",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        sessionPermission: [{ permission: "bash", pattern: "git status", action: "allow" }],
+      })
+      const paused = yield* pausePlanLoad(fixture.request, 2)
+      const sessions = yield* Session.Service
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+      })
+      yield* Deferred.succeed(paused.release, undefined)
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(yield* list()).toHaveLength(0)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - transient allow rejects a changed canonical target before returning authority",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const test = yield* TestInstance
+      const left = path.join(test.directory, "plan-transient-left")
+      const right = path.join(test.directory, "plan-transient-right")
+      const link = path.join(test.directory, "plan-transient-link")
+      mkdirSync(left)
+      mkdirSync(right)
+      symlinkSync(left, link, "junction")
+      const pattern = `Get-Content "${path.join(link, "missing.txt")}"`
+      const fixture = yield* planFixture({ patterns: [pattern] })
+      const seedID = PermissionV1.ID.ascending()
+      const seedFiber = yield* ask({
+        id: seedID,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: [pattern],
+        metadata: {},
+        always: [pattern],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: seedID, reply: "always" })
+      yield* Fiber.join(seedFiber)
+      const paused = yield* pausePlanLoad(fixture.request, 2)
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+
+      unlinkSync(link)
+      symlinkSync(right, link, "junction")
+      yield* Deferred.succeed(paused.release, undefined)
+
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - execution gate honors the newer session snapshot after a stale loader result",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        sessionPermission: [{ permission: "bash", pattern: "git status", action: "allow" }],
+      })
+      const sessions = yield* Session.Service
+      const load = fixture.request.plan.load
+      let loads = 0
+      const request = {
+        ...fixture.request,
+        plan: {
+          ...fixture.request.plan,
+          load: () =>
+            Effect.gen(function* () {
+              loads++
+              const loaded = yield* load()
+              if (loads === 2) {
+                yield* sessions.setPermission({
+                  sessionID: fixture.session.id,
+                  permission: [{ permission: "bash", pattern: "git status", action: "deny" }],
+                })
+              }
+              return loaded
+            }),
+        },
+      }
+
+      expect(yield* fail(ask(request as never))).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(loads).toBe(2)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - sibling reject after human once invalidates execution revalidation",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const paused = yield* pausePlanLoad(fixture.request, 3)
+      const planFiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      const planPending = (yield* waitForPending(1))[0]
+      const siblingID = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: siblingID,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(2)
+
+      yield* reply({ requestID: planPending.id, reply: "once" })
+      yield* Deferred.await(paused.reached)
+      yield* reply({ requestID: siblingID, reply: "reject" })
+      yield* Deferred.succeed(paused.release, undefined)
+      expect(yield* fail(Fiber.join(planFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - sibling reject during Asked publish produces an ordered synthetic reply",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const siblingID = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: siblingID,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      const events = yield* EventV2Bridge.Service
+      const permission = yield* Permission.Service
+      const order: string[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+          order.push("asked")
+          return permission.reply({ requestID: siblingID, reply: "reject" }).pipe(Effect.orDie)
+        }
+        if (event.type === Permission.Event.Replied.type) {
+          const data = event.data as { requestID: PermissionV1.ID }
+          if (data.requestID === fixture.request.id) order.push("replied")
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      expect(yield* fail(ask(fixture.request as never))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(order).toEqual(["asked", "replied"])
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - symlink target swap rejects a pending human approval without a second ask",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const test = yield* TestInstance
+      const left = path.join(test.directory, "plan-target-left")
+      const right = path.join(test.directory, "plan-target-right")
+      const link = path.join(test.directory, "plan-target-link")
+      mkdirSync(left)
+      mkdirSync(right)
+      symlinkSync(left, link, "junction")
+      const pattern = `Get-Content "${path.join(link, "missing.txt")}"`
+      const fixture = yield* planFixture({ approvalMode: "ask", patterns: [pattern] })
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+          asked++
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      unlinkSync(link)
+      symlinkSync(right, link, "junction")
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(asked).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - configured allow rejects a nearest-parent swap before returning authority",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const test = yield* TestInstance
+      const left = path.join(test.directory, "plan-fast-left")
+      const right = path.join(test.directory, "plan-fast-right")
+      const link = path.join(test.directory, "plan-fast-link")
+      mkdirSync(left)
+      mkdirSync(right)
+      symlinkSync(left, link, "junction")
+      const pattern = `Get-Content "${path.join(link, "missing", "file.txt")}"`
+      const fixture = yield* planFixture({
+        patterns: [pattern],
+        sessionPermission: [{ permission: "bash", pattern: "*", action: "allow" }],
+      })
+      const paused = yield* pausePlanLoad(fixture.request, 2)
+      const fiber = yield* ask(paused.request as never).pipe(Effect.forkScoped)
+      yield* Deferred.await(paused.reached)
+
+      unlinkSync(link)
+      symlinkSync(right, link, "junction")
+      yield* Deferred.succeed(paused.release, undefined)
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* list()).toHaveLength(0)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - caller abort clears a published request and rejects a late reply",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const events = yield* EventV2Bridge.Service
+      const replies: PermissionV1.Reply[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) {
+          const data = event.data as { requestID: PermissionV1.ID; reply: PermissionV1.Reply }
+          if (data.requestID === fixture.request.id) replies.push(data.reply)
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+
+      fixture.abort.abort()
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* list()).toHaveLength(0)
+      expect(replies).toEqual(["reject"])
+      expect(yield* fail(reply({ requestID: pending[0].id, reply: "once" }))).toBeInstanceOf(
+        PermissionV1.NotFoundError,
+      )
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - caller abort synchronously hides pending authority from a racing reply",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const events = yield* EventV2Bridge.Service
+      const permission = yield* Permission.Service
+      const context = yield* Effect.context<never>()
+      const replies: PermissionV1.Reply[] = []
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) {
+          const data = event.data as { requestID: PermissionV1.ID; reply: PermissionV1.Reply }
+          if (data.requestID === fixture.request.id) replies.push(data.reply)
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = (yield* waitForPending(1))[0]
+      let immediate: ReadonlyArray<PermissionV1.Request> = []
+      let replyError: unknown
+      const probe = () => {
+        immediate = Effect.runSyncWith(context)(permission.list())
+        const exit = Effect.runSyncExitWith(context)(
+          permission.reply({ requestID: pending.id, reply: "always" }),
+        )
+        replyError = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      }
+      fixture.abort.signal.addEventListener("abort", probe, { once: true })
+      yield* Effect.addFinalizer(() => Effect.sync(() => fixture.abort.signal.removeEventListener("abort", probe)))
+
+      fixture.abort.abort()
+      expect(immediate).toHaveLength(0)
+      expect(replyError).toBeInstanceOf(PermissionV1.NotFoundError)
+      expect(yield* list()).toHaveLength(0)
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(replies).toEqual(["reject"])
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - already aborted request rejects before loading context",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      let loads = 0
+      const request = {
+        ...fixture.request,
+        plan: {
+          ...fixture.request.plan,
+          load: () => {
+            loads++
+            return fixture.request.plan.load()
+          },
+        },
+      }
+      fixture.abort.abort()
+
+      expect(yield* fail(ask(request as never))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(loads).toBe(0)
+      expect(planLanguageRequests).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - instance reload rejects a published request with one synthetic reply",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const events = yield* EventV2Bridge.Service
+      const replied = yield* Deferred.make<PermissionV1.Reply>()
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) {
+          const data = event.data as { requestID: PermissionV1.ID; reply: PermissionV1.Reply }
+          if (data.requestID === fixture.request.id) Deferred.doneUnsafe(replied, Effect.succeed(data.reply))
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+
+      const store = yield* InstanceStore.Service
+      const test = yield* TestInstance
+      yield* store.reload({ directory: test.directory })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* Deferred.await(replied).pipe(Effect.timeout("1 second"))).toBe("reject")
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - sibling reject promptly invalidates a provider that never settles",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      planLanguageWait = new Promise<void>(() => undefined)
+      const fixture = yield* planFixture()
+      const sibling = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: sibling,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      yield* waitForPlanLanguage(1)
+
+      yield* reply({ requestID: sibling, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber)).pipe(Effect.timeout("1 second"))).toBeInstanceOf(
+        PermissionV1.RejectedError,
+      )
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+for (const decision of ["allow", "ask"] as const) {
+  planIt.instance(
+    `plan - sibling reject discards a delayed reviewer ${decision} without a late ask`,
+    () =>
+      Effect.gen(function* () {
+        resetPlanLanguage()
+        planLanguageOutput = {
+          decision,
+          risk: decision === "allow" ? "low" : "medium",
+          reason: decision === "allow" ? "Read-only inspection" : "Needs human review",
+        }
+        let release: () => void = () => {}
+        planLanguageWait = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        const fixture = yield* planFixture()
+        const events = yield* EventV2Bridge.Service
+        let targetAsked = 0
+        const unsub = yield* events.listen((event) => {
+          if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+            targetAsked++
+          }
+          return Effect.void
+        })
+        yield* Effect.addFinalizer(() => unsub)
+        const sibling = PermissionV1.ID.ascending()
+        const siblingFiber = yield* ask({
+          id: sibling,
+          sessionID: fixture.session.id,
+          permission: "read",
+          patterns: ["README.md"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        yield* waitForPending(1)
+        const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+        yield* waitForPlanLanguage(1)
+
+        yield* reply({ requestID: sibling, reply: "reject" })
+        release()
+
+        expect(yield* fail(Fiber.join(fiber)).pipe(Effect.timeout("1 second"))).toBeInstanceOf(
+          PermissionV1.RejectedError,
+        )
+        expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+        expect(targetAsked).toBe(0)
+        expect(yield* list()).toHaveLength(0)
+      }),
+    { git: true },
+    10_000,
+  )
+}
+
+planIt.instance(
+  "plan - caller abort promptly invalidates a provider that never settles",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      planLanguageWait = new Promise<void>(() => undefined)
+      const fixture = yield* planFixture()
+      const events = yield* EventV2Bridge.Service
+      let asked = 0
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Asked.type && (event.data as PermissionV1.Request).id === fixture.request.id) {
+          asked++
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      yield* waitForPlanLanguage(1)
+
+      fixture.abort.abort()
+      expect(yield* fail(Fiber.join(fiber)).pipe(Effect.timeout("1 second"))).toBeInstanceOf(
+        PermissionV1.RejectedError,
+      )
+      expect(asked).toBe(0)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - reviewer fresh configured deny maps to redacted DeniedError",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      let release: () => void = () => undefined
+      planLanguageWait = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const fixture = yield* planFixture()
+      const sessions = yield* Session.Service
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      yield* waitForPlanLanguage(1)
+
+      yield* sessions.setPermission({
+        sessionID: fixture.session.id,
+        permission: [
+          { permission: "bash", pattern: "git status", action: "deny" },
+          { permission: "bash", pattern: "REVIEW_SECRET_SENTINEL", action: "allow" },
+        ],
+      })
+      release()
+      const error = yield* fail(Fiber.join(fiber))
+      expect(error).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((error as PermissionV1.DeniedError).ruleset).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+      ])
+      expect(String(error)).not.toContain("REVIEW_SECRET_SENTINEL")
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - reviewer mode change hands off to normal manual approval",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      let release: () => void = () => undefined
+      planLanguageWait = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const fixture = yield* planFixture()
+      const sessions = yield* Session.Service
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      yield* waitForPlanLanguage(1)
+
+      yield* sessions.setApprovalMode({ sessionID: fixture.session.id, approvalMode: "ask" })
+      release()
+      const pending = yield* waitForPending(1)
+      expect(pending[0].review).toBeUndefined()
+      yield* reply({ requestID: pending[0].id, reply: "once" })
+      yield* Fiber.join(fiber)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - an always reply is exact once and cannot approve a sibling Plan request",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const first = { ...fixture.request, id: PermissionV1.ID.ascending() }
+      const second = { ...fixture.request, id: PermissionV1.ID.ascending() }
+      const firstFiber = yield* ask(first as never).pipe(Effect.forkScoped)
+      const secondFiber = yield* ask(second as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(2)
+
+      yield* reply({ requestID: first.id, reply: "always" })
+      yield* Fiber.join(firstFiber)
+      expect((yield* list()).map((item) => item.id)).toEqual([second.id])
+
+      yield* reply({ requestID: second.id, reply: "reject" })
+      expect(yield* fail(Fiber.join(secondFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+
+      const build = PermissionV1.ID.ascending()
+      const buildFiber = yield* ask({
+        id: build,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      expect((yield* waitForPending(1))[0].id).toBe(build)
+      yield* reply({ requestID: build, reply: "reject" })
+      expect(yield* fail(Fiber.join(buildFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - alwaysAsk ignores Build approval while Build siblings keep legacy cascade",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const seedID = PermissionV1.ID.ascending()
+      const seedFiber = yield* ask({
+        id: seedID,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: ["git status"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: seedID, reply: "always" })
+      yield* Fiber.join(seedFiber)
+
+      const first = { ...fixture.request, id: PermissionV1.ID.ascending(), alwaysAsk: true }
+      const second = { ...fixture.request, id: PermissionV1.ID.ascending(), alwaysAsk: true }
+      const firstFiber = yield* ask(first as never).pipe(Effect.forkScoped)
+      const secondFiber = yield* ask(second as never).pipe(Effect.forkScoped)
+      yield* waitForPending(2)
+
+      const buildSource = PermissionV1.ID.ascending()
+      const buildSibling = PermissionV1.ID.ascending()
+      const sourceFiber = yield* ask({
+        id: buildSource,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git log"],
+        metadata: {},
+        always: ["git log"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      const siblingFiber = yield* ask({
+        id: buildSibling,
+        sessionID: fixture.session.id,
+        permission: "bash",
+        patterns: ["git log"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(4)
+
+      yield* reply({ requestID: buildSource, reply: "always" })
+      yield* Fiber.join(sourceFiber)
+      yield* Fiber.join(siblingFiber)
+      expect(new Set((yield* list()).map((item) => item.id))).toEqual(new Set([first.id, second.id]))
+
+      yield* reply({ requestID: first.id, reply: "always" })
+      yield* Fiber.join(firstFiber)
+      expect((yield* list()).map((item) => item.id)).toEqual([second.id])
+      yield* reply({ requestID: second.id, reply: "reject" })
+      expect(yield* fail(Fiber.join(secondFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - external_directory approval and following bash use independent review decisions",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({
+        approvalMode: "auto_review",
+        permission: "external_directory",
+        patterns: ["C:\\outside"],
+      })
+      const sessions = yield* Session.Service
+      const externalFiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const external = yield* waitForPending(1)
+      expect(external[0].review).toBeUndefined()
+      expect(planLanguageRequests).toBe(0)
+      yield* reply({ requestID: external[0].id, reply: "once" })
+      yield* Fiber.join(externalFiber)
+
+      yield* sessions.updatePart({
+        ...fixture.toolPart,
+        state: {
+          status: "completed",
+          input: {},
+          output: "approved",
+          title: "External directory",
+          metadata: {},
+          time: { start: Date.now(), end: Date.now() },
+        },
+      })
+      const callID = "call-following-bash"
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        sessionID: fixture.session.id,
+        messageID: fixture.request.plan.seed.assistantMessageID,
+        type: "tool",
+        callID,
+        tool: "bash",
+        state: { status: "running", input: {}, time: { start: Date.now() } },
+      })
+      const seed = { ...fixture.request.plan.seed, callID }
+      const load = fixture.request.plan.load
+      const plan: PlanReview.ContextInput = {
+        seed,
+        load: () =>
+          load().pipe(
+            Effect.map((loaded) =>
+              loaded.type === "missing"
+                ? loaded
+                : { ...loaded, value: { ...loaded.value, context: { ...loaded.value.context, ...seed } } },
+            ),
+          ),
+      }
+      expect(
+        yield* ask({
+          id: PermissionV1.ID.ascending(),
+          sessionID: fixture.session.id,
+          permission: "bash",
+          patterns: ["git status"],
+          metadata: {
+            command: "git status",
+            shell: "powershell",
+            parsed: true,
+            cwd: fixture.request.plan.seed.directory,
+          },
+          always: [],
+          tool: { messageID: seed.assistantMessageID, callID },
+          plan,
+        }),
+      ).toBeUndefined()
+      expect(planLanguageRequests).toBe(1)
+      expect(yield* list()).toHaveLength(0)
+    }),
+  { git: true },
+  10_000,
+)
+
+planIt.instance(
+  "plan - rejected turn tombstone stops a delayed sibling before loading context",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture({ approvalMode: "ask" })
+      const fiber = yield* ask(fixture.request as never).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+      yield* reply({ requestID: pending[0].id, reply: "reject" })
+      expect(yield* fail(Fiber.join(fiber))).toBeInstanceOf(PermissionV1.RejectedError)
+
+      let loads = 0
+      const delayed = {
+        ...fixture.request,
+        id: PermissionV1.ID.ascending(),
+        plan: {
+          ...fixture.request.plan,
+          load: () => {
+            loads++
+            return fixture.request.plan.load()
+          },
+        },
+      }
+      expect(yield* fail(ask(delayed as never))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(loads).toBe(0)
+      expect(planLanguageRequests).toBe(0)
+    }),
+  { git: true },
+)
+
+planIt.instance(
+  "plan - full tombstone capacity evicts the oldest freshly proven inactive turn",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const blocker = yield* Deferred.make<void>()
+      let loads = 0
+      const fibers: Fiber.Fiber<void, PermissionV1.Error>[] = []
+      for (let index = 0; index < 64; index++) {
+        const assistantMessageID = MessageID.make(`msg_evictable_tombstone_${index}`)
+        const callID = `call-evictable-tombstone-${index}`
+        const plan: PlanReview.ContextInput = {
+          seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+          load: () =>
+            Effect.gen(function* () {
+              loads++
+              yield* Deferred.await(blocker)
+              return { type: "missing" as const }
+            }),
+        }
+        fibers.push(
+          yield* ask({
+            ...fixture.request,
+            id: PermissionV1.ID.ascending(),
+            tool: { messageID: assistantMessageID, callID },
+            plan,
+          } as never).pipe(Effect.forkScoped),
+        )
+      }
+      yield* Effect.gen(function* () {
+        while (loads < 64) yield* Effect.sleep("10 millis")
+      }).pipe(Effect.timeout("2 seconds"))
+
+      const sibling = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: sibling,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: sibling, reply: "reject" })
+      expect((yield* Effect.all(fibers.map(Fiber.await), { concurrency: "unbounded" })).every(Exit.isFailure)).toBe(
+        true,
+      )
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+
+      let lateLoads = 0
+      const assistantMessageID = MessageID.make("msg_evictable_tombstone_late")
+      const callID = "call-evictable-tombstone-late"
+      expect(
+        yield* fail(
+          ask({
+            ...fixture.request,
+            id: PermissionV1.ID.ascending(),
+            tool: { messageID: assistantMessageID, callID },
+            plan: {
+              seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+              load: () => {
+                lateLoads++
+                return Effect.succeed({ type: "missing" as const })
+              },
+            },
+          } as never),
+        ),
+      ).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(lateLoads).toBe(1)
+    }),
+  { git: true },
+  15_000,
+)
+
+planIt.instance(
+  "plan - full tombstone capacity fails closed while every persisted turn is active",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const sessions = yield* Session.Service
+      const blocker = yield* Deferred.make<void>()
+      let loads = 0
+      const fibers: Fiber.Fiber<void, PermissionV1.Error>[] = []
+      for (let index = 0; index < 64; index++) {
+        const assistantMessageID = MessageID.make(`msg_active_tombstone_${index}`)
+        const callID = `call-active-tombstone-${index}`
+        yield* sessions.updateMessage({ ...fixture.assistant, id: assistantMessageID })
+        yield* sessions.updatePart({
+          ...fixture.toolPart,
+          id: PartID.ascending(),
+          messageID: assistantMessageID,
+          callID,
+        })
+        const plan: PlanReview.ContextInput = {
+          seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+          load: () =>
+            Effect.gen(function* () {
+              loads++
+              yield* Deferred.await(blocker)
+              return { type: "missing" as const }
+            }),
+        }
+        fibers.push(
+          yield* ask({
+            ...fixture.request,
+            id: PermissionV1.ID.ascending(),
+            tool: { messageID: assistantMessageID, callID },
+            plan,
+          } as never).pipe(Effect.forkScoped),
+        )
+      }
+      yield* Effect.gen(function* () {
+        while (loads < 64) yield* Effect.sleep("10 millis")
+      }).pipe(Effect.timeout("2 seconds"))
+
+      const sibling = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: sibling,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: sibling, reply: "reject" })
+      expect((yield* Effect.all(fibers.map(Fiber.await), { concurrency: "unbounded" })).every(Exit.isFailure)).toBe(
+        true,
+      )
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+
+      let lateLoads = 0
+      const assistantMessageID = MessageID.make("msg_active_tombstone_late")
+      const callID = "call-active-tombstone-late"
+      expect(
+        yield* fail(
+          ask({
+            ...fixture.request,
+            id: PermissionV1.ID.ascending(),
+            tool: { messageID: assistantMessageID, callID },
+            plan: {
+              seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+              load: () => {
+                lateLoads++
+                return Effect.succeed({ type: "missing" as const })
+              },
+            },
+          } as never),
+        ),
+      ).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(lateLoads).toBe(0)
+    }),
+  { git: true },
+  15_000,
+)
+
+planIt.instance(
+  "plan - tombstone saturation fails closed and instance reload clears it",
+  () =>
+    Effect.gen(function* () {
+      resetPlanLanguage()
+      const fixture = yield* planFixture()
+      const blocker = yield* Deferred.make<void>()
+      let loads = 0
+      const fibers: Fiber.Fiber<void, PermissionV1.Error>[] = []
+      for (let index = 0; index < 65; index++) {
+        const assistantMessageID = MessageID.make(`msg_tombstone_${index}`)
+        const callID = `call-tombstone-${index}`
+        const plan: PlanReview.ContextInput = {
+          seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+          load: () =>
+            Effect.gen(function* () {
+              loads++
+              yield* Deferred.await(blocker)
+              return { type: "missing" as const }
+            }),
+        }
+        fibers.push(
+          yield* ask({
+            ...fixture.request,
+            id: PermissionV1.ID.ascending(),
+            tool: { messageID: assistantMessageID, callID },
+            plan,
+          } as never).pipe(Effect.forkScoped),
+        )
+      }
+      yield* Effect.gen(function* () {
+        while (loads < 65) yield* Effect.sleep("10 millis")
+      }).pipe(Effect.timeout("2 seconds"))
+
+      const sibling = PermissionV1.ID.ascending()
+      const siblingFiber = yield* ask({
+        id: sibling,
+        sessionID: fixture.session.id,
+        permission: "read",
+        patterns: ["README.md"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      yield* waitForPending(1)
+      yield* reply({ requestID: sibling, reply: "reject" })
+      const exits = yield* Effect.all(fibers.map(Fiber.await), { concurrency: "unbounded" })
+      expect(exits.every(Exit.isFailure)).toBe(true)
+      expect(yield* fail(Fiber.join(siblingFiber))).toBeInstanceOf(PermissionV1.RejectedError)
+
+      let lateLoads = 0
+      const assistantMessageID = MessageID.make("msg_tombstone_late")
+      const callID = "call-tombstone-late"
+      const late = {
+        ...fixture.request,
+        id: PermissionV1.ID.ascending(),
+        tool: { messageID: assistantMessageID, callID },
+        plan: {
+          seed: { ...fixture.request.plan.seed, assistantMessageID, callID },
+          load: () => {
+            lateLoads++
+            return Effect.succeed({ type: "missing" as const })
+          },
+        },
+      }
+      expect(yield* fail(ask(late as never))).toBeInstanceOf(PermissionV1.RejectedError)
+      expect(lateLoads).toBe(0)
+
+      const store = yield* InstanceStore.Service
+      const test = yield* TestInstance
+      yield* store.reload({ directory: test.directory })
+      expect(yield* fail(ask({ ...late, id: PermissionV1.ID.ascending() } as never))).toBeInstanceOf(
+        PermissionV1.RejectedError,
+      )
+      expect(lateLoads).toBe(1)
+    }),
+  { git: true },
+  15_000,
 )
