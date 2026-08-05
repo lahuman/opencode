@@ -1253,6 +1253,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       imageAttachments,
       commentCount,
       autoAccept: () => accepting(),
+      approvalMode: props.controls.approval.current,
+      approvalMutation: props.controls.approval.run,
       mode: () => store.mode,
       working,
       editor: () => editorRef,

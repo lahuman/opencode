@@ -210,6 +210,8 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     imageAttachments: attachments,
     commentCount,
     autoAccept: accepting,
+    approvalMode: props.controls.approval.current,
+    approvalMutation: props.controls.approval.run,
     mode,
     working,
     editor: () => editor,

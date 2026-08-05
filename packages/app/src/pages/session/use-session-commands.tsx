@@ -20,8 +20,11 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionOwnership } from "./session-ownership"
 import { useLocal } from "@/context/local"
 import { useServerSync } from "@/context/server-sync"
+import type { PromptInputControls } from "@/components/prompt-input/contracts"
+import { toggleBlindAuto } from "@/context/permission-mutation"
 
 export type SessionCommandContext = {
+  approval: PromptInputControls["approval"]
   navigateMessageByOffset: (offset: number) => void
   setActiveMessage: (message: UserMessage | undefined) => void
   focusInput: () => void
@@ -286,19 +289,43 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     )
   }
 
-  const toggleAutoAccept = () => {
+  const toggleAutoAccept = async () => {
+    if (actions.approval.pending()) return
     const sessionID = params.id
-    if (sessionID) permission.toggleAutoAccept(sessionID, sdk().directory)
-    else permission.toggleAutoAcceptDirectory(sdk().directory)
+    const current = sdk()
+    const state = permission.currentServerState()
+    let checked = false
+    const result = await actions.approval
+      .run(() => {
+        const active = sessionID
+          ? state.isAutoAccepting(sessionID, current.directory)
+          : state.isAutoAcceptingDirectory(current.directory)
+        checked = !active
+        return toggleBlindAuto({
+          checked,
+          active,
+          sessionID,
+          updateToAsk: async (id) => {
+            const result = await current.client.session.update({ sessionID: id, approvalMode: "ask" })
+            if (!result.data) throw new Error("Failed to update session approval mode")
+          },
+          resetDrafts: () => state.approvalMutation.resetDrafts(current.directory),
+          enableSession: (id) => state.enableAutoAccept(id, current.directory),
+          disableSession: (id) => state.disableAutoAccept(id, current.directory),
+          enableDirectory: () => state.enableAutoAcceptDirectory(current.directory),
+          disableDirectory: () => state.disableAutoAcceptDirectory(current.directory),
+        })
+      })
+      .catch(() => {
+        showToast({ title: language.t("common.requestFailed"), variant: "error" })
+      })
+    if (!result || result.status === "busy") return
 
-    const active = sessionID
-      ? permission.isAutoAccepting(sessionID, sdk().directory)
-      : permission.isAutoAcceptingDirectory(sdk().directory)
     showToast({
-      title: active
+      title: checked
         ? language.t("toast.permissions.autoaccept.on.title")
         : language.t("toast.permissions.autoaccept.off.title"),
-      description: active
+      description: checked
         ? language.t("toast.permissions.autoaccept.on.description")
         : language.t("toast.permissions.autoaccept.off.description"),
     })
@@ -591,7 +618,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
         ? language.t("command.permissions.autoaccept.disable")
         : language.t("command.permissions.autoaccept.enable"),
       keybind: "mod+shift+a",
-      disabled: false,
+      disabled: actions.approval.pending(),
       onSelect: toggleAutoAccept,
     }),
   ]

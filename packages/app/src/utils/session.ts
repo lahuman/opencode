@@ -2,7 +2,9 @@ import type { SessionApi, SessionInfo, SessionListInput } from "@opencode-ai/cli
 import type { Session } from "@opencode-ai/sdk/v2/client"
 
 export function normalizeSessionInfo(input: SessionInfo | Session): Session {
-  if (!("location" in input)) return input
+  const approvalMode =
+    "approvalMode" in input && input.approvalMode === "auto_review" ? "auto_review" : "ask"
+  if (!("location" in input)) return { ...input, approvalMode }
   return {
     id: input.id,
     slug: input.id,
@@ -14,6 +16,7 @@ export function normalizeSessionInfo(input: SessionInfo | Session): Session {
     cost: input.cost,
     tokens: input.tokens,
     title: input.title,
+    approvalMode,
     agent: input.agent,
     model: input.model,
     version: "",

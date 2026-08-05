@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { createApiForServer, createSdkForServer } from "./server"
 import { createCompatibleApi } from "./server-compat"
+import { normalizeSessionInfo } from "./session"
 
 function setup(
   protocol: "v1" | "v2" | Promise<"v1" | "v2">,
-  responses?: { vcs?: { branch: string; default_branch: string } },
+  responses?: {
+    vcs?: { branch: string; default_branch: string }
+    sessions?: ReturnType<typeof legacySession>[]
+  },
 ) {
   const requests: Request[] = []
   const fetcher = Object.assign(
@@ -37,6 +41,11 @@ function setup(
       }
       if (request.method === "GET" && new URL(request.url).pathname === "/vcs")
         return Response.json(responses?.vcs ?? {})
+      if (
+        request.method === "GET" &&
+        ["/session", "/experimental/session"].includes(new URL(request.url).pathname)
+      )
+        return Response.json(responses?.sessions ?? [])
       if (request.method === "GET") return Response.json([])
       return new Response(undefined, { status: 204 })
     },
@@ -164,6 +173,22 @@ describe("createCompatibleApi", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/experimental/session")
   })
 
+  test("defaults and preserves approval mode from both V1 session list responses", async () => {
+    const { api } = setup("v1", {
+      sessions: [legacySession("ses_ask"), { ...legacySession("ses_auto"), approvalMode: "auto_review" }],
+    })
+
+    const directory = await api.session.list({ directory: "/repo" })
+    const global = await api.session.list({ parentID: null, search: "session" })
+
+    for (const result of [directory, global]) {
+      expect(result.data.map(normalizeSessionInfo).map((session) => session.approvalMode)).toEqual([
+        "ask",
+        "auto_review",
+      ])
+    }
+  })
+
   /*
   test("projects the V1 default branch", async () => {
     const { api } = setup("v1", { vcs: { branch: "feature", default_branch: "dev" } })
@@ -234,3 +259,24 @@ describe("createCompatibleApi", () => {
     expect(requests[2]!.headers.get("x-opencode-directory")).toBeNull()
   })
 })
+
+function legacySession(id: string): {
+  id: string
+  slug: string
+  projectID: string
+  directory: string
+  title: string
+  version: string
+  time: { created: number; updated: number }
+  approvalMode?: "ask" | "auto_review"
+} {
+  return {
+    id,
+    slug: id,
+    projectID: "project",
+    directory: "/repo",
+    title: id,
+    version: "1",
+    time: { created: 1, updated: 1 },
+  }
+}

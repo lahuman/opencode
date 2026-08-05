@@ -23,6 +23,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
+import type { createPermissionMutation } from "@/context/permission-mutation"
 
 type PendingPrompt = {
   abort: AbortController
@@ -205,6 +206,8 @@ type PromptSubmitInput = {
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
+  approvalMode: Accessor<NonNullable<Session["approvalMode"]>>
+  approvalMutation: ReturnType<typeof createPermissionMutation>["run"]
   mode: Accessor<"normal" | "shell">
   working: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
@@ -351,9 +354,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    input.addToHistory(currentPrompt, mode)
-    input.resetHistoryNavigation()
-
     const clearInput = () => {
       submission.clear()
       input.setMode("normal")
@@ -377,94 +377,120 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return true
     }
 
-    clearInput()
-
     const projectDirectory = sdk().directory
     const permissionState = permission.currentServerState()
     const isNewSession = !params.id
-    const shouldAutoAccept = isNewSession && input.autoAccept()
-    const worktreeSelection = input.newSessionWorktree?.() || "main"
-
     let sessionDirectory = projectDirectory
-    let client = sdk().client
-
-    if (isNewSession) {
-      if (worktreeSelection === "create") {
-        const createdWorktree = await client.worktree
-          .create({ directory: projectDirectory })
-          .then((x) => x.data)
-          .catch((err) => {
-            showToast({
-              title: language.t("prompt.toast.worktreeCreateFailed.title"),
-              description: errorMessage(err),
-            })
-            return undefined
-          })
-
-        if (!createdWorktree?.directory) {
-          showToast({
-            title: language.t("prompt.toast.worktreeCreateFailed.title"),
-            description: language.t("common.requestFailed"),
-          })
-          restoreInput()
-          return
-        }
-        WorktreeState.pending(sdk().scope, createdWorktree.directory)
-        sessionDirectory = createdWorktree.directory
-      }
-
-      if (worktreeSelection !== "main" && worktreeSelection !== "create") {
-        sessionDirectory = worktreeSelection
-      }
-
-      if (sessionDirectory !== projectDirectory) {
-        client = sdk().createClient({
-          directory: sessionDirectory,
-          throwOnError: true,
-        })
-        serverSync().child(sessionDirectory)
-      }
-
-      input.onNewSessionWorktreeReset?.()
-    }
-
     let session = input.info()
+
     if (!session && isNewSession) {
-      const created = await sdk()
-        .api.session.create({
-          agent: currentAgent.name,
-          model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
-          location: { directory: sessionDirectory },
+      const result = await input
+        .approvalMutation(async () => {
+          const selectedApprovalMode = input.approvalMode()
+          const shouldAutoAccept = input.autoAccept()
+          const worktreeSelection = input.newSessionWorktree?.() || "main"
+          let directory = projectDirectory
+          let client = sdk().client
+
+          input.addToHistory(currentPrompt, mode)
+          input.resetHistoryNavigation()
+          clearInput()
+
+          if (worktreeSelection === "create") {
+            const createdWorktree = await client.worktree
+              .create({ directory: projectDirectory })
+              .then((value) => value.data)
+              .catch((err) => {
+                showToast({
+                  title: language.t("prompt.toast.worktreeCreateFailed.title"),
+                  description: errorMessage(err),
+                })
+                return undefined
+              })
+
+            if (!createdWorktree?.directory) {
+              showToast({
+                title: language.t("prompt.toast.worktreeCreateFailed.title"),
+                description: language.t("common.requestFailed"),
+              })
+              restoreInput()
+              return
+            }
+            WorktreeState.pending(sdk().scope, createdWorktree.directory)
+            directory = createdWorktree.directory
+          }
+
+          if (worktreeSelection !== "main" && worktreeSelection !== "create") directory = worktreeSelection
+
+          if (directory !== projectDirectory) {
+            client = sdk().createClient({
+              directory,
+              throwOnError: true,
+            })
+            serverSync().child(directory)
+          }
+
+          input.onNewSessionWorktreeReset?.()
+
+          const created = await sdk().api.session.create({
+            agent: currentAgent.name,
+            model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
+            location: { directory },
+          })
+          const authoritative =
+            selectedApprovalMode === "auto_review"
+              ? await client.session
+                  .update({ sessionID: created.id, approvalMode: "auto_review" })
+                  .then((value) => {
+                    if (!value.data) throw new Error("Failed to update session approval mode")
+                    return normalizeSessionInfo(value.data)
+                  })
+              : normalizeSessionInfo(created)
+
+          if (selectedApprovalMode === "auto_review") permissionState.disableAutoAccept(authoritative.id, directory)
+          if (selectedApprovalMode === "ask" && shouldAutoAccept) {
+            permissionState.enableAutoAccept(authoritative.id, directory)
+          }
+          return { session: authoritative, directory }
         })
-        .then(normalizeSessionInfo)
         .catch((err) => {
           showToast({
             title: language.t("prompt.toast.sessionCreateFailed.title"),
             description: errorMessage(err),
           })
+          restoreInput()
           return undefined
         })
-      if (created) {
-        seed(sessionDirectory, created)
-        session = created
-        await startTransition(() => {
-          if (!session) return
-          if (shouldAutoAccept) permissionState.enableAutoAccept(session.id, sessionDirectory)
-          local.session.promote(sessionDirectory, session.id, {
-            agent: currentAgent.name,
-            model: { providerID: currentModel.provider.id, modelID: currentModel.id },
-            variant: variant ?? null,
-          })
-          layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
-          const draftID = search.draftId
-          if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
-          else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
-          const destination = prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id })
-          submission.retarget(destination)
-          retarget(destination)
+
+      if (!result || result.status === "busy" || !result.value) return
+      sessionDirectory = result.value.directory
+      const createdSession = result.value.session
+      session = createdSession
+      seed(sessionDirectory, createdSession)
+      await startTransition(() => {
+        if (!session) return
+        local.session.promote(sessionDirectory, session.id, {
+          agent: currentAgent.name,
+          model: { providerID: currentModel.provider.id, modelID: currentModel.id },
+          variant: variant ?? null,
         })
-      }
+        layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
+        const draftID = search.draftId
+        if (draftID) tabs.promoteDraft(draftID, { server: tabs.draft(draftID).server, sessionId: session.id })
+        else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+        const destination = prompt.capture({ dir: base64Encode(sessionDirectory), id: session.id })
+        submission.retarget(destination)
+        retarget(destination)
+      })
+    } else {
+      const result = await input.approvalMutation(() => {
+        input.addToHistory(currentPrompt, mode)
+        input.resetHistoryNavigation()
+        clearInput()
+      })
+      if (result.status === "busy") return
     }
+
     if (!session) {
       showToast({
         title: language.t("prompt.toast.promptSendFailed.title"),

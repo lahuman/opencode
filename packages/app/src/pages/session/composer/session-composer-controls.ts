@@ -1,7 +1,8 @@
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { createQuery } from "@tanstack/solid-query"
 import { useNavigate, useSearchParams } from "@solidjs/router"
-import { type Accessor, createMemo } from "solid-js"
+import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js"
+import type { Session } from "@opencode-ai/sdk/v2/client"
 import type { PromptInputControls } from "@/components/prompt-input/contracts"
 import type { PromptProjectControls } from "@/components/prompt-project-selector"
 import { useDirectoryPicker } from "@/components/directory-picker"
@@ -16,6 +17,71 @@ import { useSync } from "@/context/sync"
 import { useTabs } from "@/context/tabs"
 import { useProviders } from "@/hooks/use-providers"
 import { pathKey } from "@/utils/path-key"
+import { usePermission } from "@/context/permission"
+import { useLanguage } from "@/context/language"
+import { showToast } from "@/utils/toast"
+import { formatServerError } from "@/utils/server-errors"
+import type { createPermissionMutation } from "@/context/permission-mutation"
+
+type ApprovalMode = NonNullable<Session["approvalMode"]>
+
+export function createApprovalModeControl(input: {
+  agent: Accessor<string | undefined>
+  session: Accessor<Pick<Session, "id" | "approvalMode"> | undefined>
+  sessionKey: Accessor<string>
+  directory: Accessor<string>
+  approvalMutation: ReturnType<typeof createPermissionMutation>
+  update: (input: { sessionID: string; approvalMode: ApprovalMode }) => Promise<void>
+  disableAutoAccept: (sessionID: string, directory: string) => void
+  onError: (error: unknown) => void
+}) {
+  const [draft, setDraft] = createSignal<ApprovalMode>("ask")
+  let draftKey = input.sessionKey()
+  const resetForSessionKey = () => {
+    const key = input.sessionKey()
+    if (key === draftKey) return
+    draftKey = key
+    setDraft("ask")
+  }
+  createEffect(on(input.sessionKey, resetForSessionKey, { defer: true }))
+
+  const current = () => {
+    resetForSessionKey()
+    const session = input.session()
+    if (session) return session.approvalMode ?? "ask"
+    return draft()
+  }
+  const resetDraft = () => {
+    draftKey = input.sessionKey()
+    setDraft("ask")
+  }
+  const select = async (approvalMode: ApprovalMode) => {
+    if (approvalMode === current()) return
+    await input.approvalMutation
+      .run(async () => {
+        const session = input.session()
+        if (!session) {
+          resetForSessionKey()
+          setDraft(approvalMode)
+          return
+        }
+        const directory = input.directory()
+        await input.update({ sessionID: session.id, approvalMode })
+        if (approvalMode === "auto_review") input.disableAutoAccept(session.id, directory)
+      })
+      .catch(input.onError)
+  }
+
+  return {
+    visible: () => input.agent() === "plan",
+    current,
+    options: ["ask", "auto_review"] as const,
+    pending: input.approvalMutation.pending,
+    select,
+    run: input.approvalMutation.run,
+    resetDraft,
+  }
+}
 
 export function createPromptInputController(input: {
   sessionKey: Accessor<string>
@@ -27,11 +93,41 @@ export function createPromptInputController(input: {
   const local = useLocal()
   const sdk = useSDK()
   const sync = useSync()
+  const permission = usePermission()
+  const language = useLanguage()
   const providers = useProviders(() => sdk().directory)
   const view = layout.view(input.sessionKey)
   const agentsQuery = createQuery(() => input.queryOptions.agents(pathKey(sdk().directory)))
   const globalProvidersQuery = createQuery(() => input.queryOptions.providers(null))
   const providersQuery = createQuery(() => input.queryOptions.providers(pathKey(sdk().directory)))
+  const permissionState = permission.currentServerState()
+  const approval = createApprovalModeControl({
+    agent: () => local.agent.current()?.name,
+    session: () => {
+      const sessionID = input.sessionID()
+      if (!sessionID) return
+      return sync().session.get(sessionID)
+    },
+    sessionKey: input.sessionKey,
+    directory: () => sdk().directory,
+    approvalMutation: permissionState.approvalMutation,
+    update: async (value) => {
+      const result = await sdk().client.session.update(value)
+      if (!result.data) throw new Error("Failed to update session approval mode")
+    },
+    disableAutoAccept: permissionState.disableAutoAccept,
+    onError: (error) =>
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: formatServerError(error, language.t, language.t("common.requestFailed")),
+      }),
+  })
+
+  createEffect(() => {
+    const cleanup = permissionState.approvalMutation.registerDraftReset(sdk().directory, approval.resetDraft)
+    onCleanup(cleanup)
+  })
 
   return createMemo<PromptInputControls>(() => {
     return {
@@ -51,6 +147,7 @@ export function createPromptInputController(input: {
           providersQuery.isLoading ||
           globalProvidersQuery.isLoading,
       },
+      approval,
       session: {
         id: input.sessionID(),
         tabs: layout.tabs(input.sessionKey),

@@ -1138,6 +1138,7 @@ export default function Page() {
 
   useComposerCommands()
   useSessionCommands({
+    approval: inputController().approval,
     navigateMessageByOffset,
     setActiveMessage,
     focusInput,
