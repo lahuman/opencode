@@ -206,6 +206,33 @@ describe("step-finish token propagation via event", () => {
 })
 
 describe("Session", () => {
+  it.instance("defaults approval mode to ask", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const created = yield* Effect.acquireRelease(session.create({}), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+
+      expect(created.approvalMode).toBe("ask")
+    }),
+  )
+
+  it.instance("persists explicit approval mode and resets it on fork", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const created = yield* Effect.acquireRelease(session.create({ approvalMode: "auto_review" }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+      const forked = yield* Effect.acquireRelease(session.fork({ sessionID: created.id }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+
+      expect(created.approvalMode).toBe("auto_review")
+      expect((yield* session.get(created.id)).approvalMode).toBe("auto_review")
+      expect(forked.approvalMode).toBe("ask")
+    }),
+  )
+
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

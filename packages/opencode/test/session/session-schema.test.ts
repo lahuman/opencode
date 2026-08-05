@@ -16,6 +16,7 @@ const info = {
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   share: undefined,
   title: "Test session",
+  approvalMode: "ask",
   version: "1.0.0",
   time: {
     created: 1,
@@ -28,6 +29,12 @@ const info = {
 } satisfies Session.Info
 
 describe("Session schema", () => {
+  test("retains approval mode in create input", () => {
+    expect(Schema.decodeUnknownSync(Session.CreateInput)({ approvalMode: "auto_review" })).toEqual({
+      approvalMode: "auto_review",
+    })
+  })
+
   test("encodes undefined optional session fields as omitted keys", () => {
     const encoded = Schema.encodeUnknownSync(Session.Info)(info) as Record<string, unknown>
 

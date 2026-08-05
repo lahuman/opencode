@@ -728,26 +728,37 @@ describe("session HttpApi", () => {
           headers,
         })
         expect(createdEmpty.id).toBeTruthy()
+        expect(createdEmpty.approvalMode).toBe("ask")
 
         const created = yield* requestJson<Session.Info>(SessionPaths.create, {
           method: "POST",
           headers,
-          body: JSON.stringify({ title: "created" }),
+          body: JSON.stringify({ title: "created", approvalMode: "auto_review" }),
         })
         expect(created.title).toBe("created")
+        expect(created.approvalMode).toBe("auto_review")
+        expect(
+          (
+            yield* requestJson<Session.Info>(pathFor(SessionPaths.get, { sessionID: created.id }), {
+              headers,
+            })
+          ).approvalMode,
+        ).toBe("auto_review")
 
         const updated = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
           method: "PATCH",
           headers,
-          body: JSON.stringify({ title: "updated", time: { archived: 1 } }),
+          body: JSON.stringify({ title: "updated", approvalMode: "ask", time: { archived: 1 } }),
         })
         expect(updated).toMatchObject({ id: created.id, title: "updated", time: { archived: 1 } })
+        expect(updated.approvalMode).toBe("ask")
 
         const forked = yield* requestJson<Session.Info>(pathFor(SessionPaths.fork, { sessionID: created.id }), {
           method: "POST",
           headers,
         })
         expect(forked.id).not.toBe(created.id)
+        expect(forked.approvalMode).toBe("ask")
 
         const forkedWithoutContentType = yield* requestJson<Session.Info>(
           pathFor(SessionPaths.fork, { sessionID: created.id }),

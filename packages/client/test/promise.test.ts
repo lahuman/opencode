@@ -114,7 +114,10 @@ test("session methods use the public HTTP contract", async () => {
 
   const page = await client.sessions.list({ limit: 10, order: "desc" })
   const active = await client.sessions.active()
-  const created = await client.sessions.create({ location: { directory: "/tmp/project" } })
+  const created = await client.sessions.create({
+    location: { directory: "/tmp/project" },
+    approvalMode: "auto_review",
+  })
   await client.sessions.switchAgent({ sessionID: "ses_test", agent: "build" })
   await client.sessions.switchModel({
     sessionID: "ses_test",
@@ -168,6 +171,14 @@ test("session methods use the public HTTP contract", async () => {
   expect(JSON.parse(body)).toEqual({
     prompt: { text: "Hello" },
     resume: false,
+  })
+  const createBody = requests.find(
+    (request) => request.init?.method === "POST" && request.url.endsWith("/api/session"),
+  )?.init?.body
+  if (typeof createBody !== "string") throw new Error("Expected JSON create request body")
+  expect(JSON.parse(createBody)).toEqual({
+    approvalMode: "auto_review",
+    location: { directory: "/tmp/project" },
   })
 })
 
