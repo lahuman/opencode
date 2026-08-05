@@ -20,10 +20,12 @@ import {
 } from "./machine"
 
 export type PromptInputV2SelectControl = {
+  title?: Accessor<string>
   options: Accessor<PromptInputV2Option[]>
   current: Accessor<string>
   onSelect: (id: string) => void
   keybind?: Accessor<string[]>
+  disabled?: Accessor<boolean>
 }
 
 export type PromptInputV2ViewConfig = {
@@ -32,6 +34,7 @@ export type PromptInputV2ViewConfig = {
     onAttach: () => void
   }
   agent?: PromptInputV2SelectControl
+  approval?: PromptInputV2SelectControl
   model?: PromptInputV2SelectControl
   variant?: PromptInputV2SelectControl
   submit: {

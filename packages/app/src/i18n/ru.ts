@@ -584,6 +584,9 @@ export const dict = {
   "error.chain.configInvalid": "Конфигурационный файл по адресу {{path}} невалиден",
   "error.chain.configInvalidWithMessage": "Конфигурационный файл по адресу {{path}} невалиден: {{message}}",
 
+  "permission.approvalMode.title": "Режим одобрения",
+  "permission.approvalMode.ask": "Запрашивать одобрение",
+  "permission.approvalMode.autoReview": "Одобрять за меня",
   "notification.permission.title": "Требуется разрешение",
   "notification.permission.description": "{{sessionTitle}} в {{projectName}} требуется разрешение",
   "notification.question.title": "Вопрос",

@@ -579,6 +579,9 @@ export const dict = {
   "error.chain.configInvalid": "ไฟล์กำหนดค่าที่ {{path}} ไม่ถูกต้อง",
   "error.chain.configInvalidWithMessage": "ไฟล์กำหนดค่าที่ {{path}} ไม่ถูกต้อง: {{message}}",
 
+  "permission.approvalMode.title": "โหมดการอนุมัติ",
+  "permission.approvalMode.ask": "ขออนุมัติ",
+  "permission.approvalMode.autoReview": "อนุมัติแทนฉัน",
   "notification.permission.title": "ต้องการสิทธิ์",
   "notification.permission.description": "{{sessionTitle}} ใน {{projectName}} ต้องการสิทธิ์",
   "notification.question.title": "คำถาม",

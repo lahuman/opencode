@@ -500,6 +500,9 @@ export const dict = {
   "error.chain.configInvalid": "Konfigurasjonsfilen på {{path}} er ugyldig",
   "error.chain.configInvalidWithMessage": "Konfigurasjonsfilen på {{path}} er ugyldig: {{message}}",
 
+  "permission.approvalMode.title": "Godkjenningsmodus",
+  "permission.approvalMode.ask": "Be om godkjenning",
+  "permission.approvalMode.autoReview": "Godkjenn for meg",
   "notification.permission.title": "Tillatelse påkrevd",
   "notification.permission.description": "{{sessionTitle}} i {{projectName}} trenger tillatelse",
   "notification.question.title": "Spørsmål",

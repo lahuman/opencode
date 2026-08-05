@@ -403,6 +403,25 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
             }
           : undefined
       },
+      get approval() {
+        if (!props.controls.approval.visible()) return
+        return {
+          title: () => language.t("permission.approvalMode.title"),
+          options: () =>
+            props.controls.approval.options.map((value) => ({
+              id: value,
+              label: language.t(
+                value === "ask" ? "permission.approvalMode.ask" : "permission.approvalMode.autoReview",
+              ),
+            })),
+          current: props.controls.approval.current,
+          onSelect: (value: string) => {
+            if (value !== "ask" && value !== "auto_review") return
+            void props.controls.approval.select(value)
+          },
+          disabled: props.controls.approval.pending,
+        }
+      },
       variant: {
         options: () => variants().map((value) => ({ id: value, label: value })),
         current: () => props.controls.model.selection.variant.current() ?? "default",

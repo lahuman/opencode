@@ -84,6 +84,39 @@ describe.skipIf(!!process.env.CI)("i18n parity", () => {
     }
   })
 
+  test("approval mode copy is complete and exact in every app locale", async () => {
+    const copy = {
+      en: ["Approval mode", "Ask for approval", "Approve for me"],
+      ar: ["وضع الموافقة", "طلب الموافقة", "وافق نيابةً عني"],
+      br: ["Modo de aprovação", "Solicitar aprovação", "Aprovar por mim"],
+      bs: ["Način odobravanja", "Zatraži odobrenje", "Odobri umjesto mene"],
+      da: ["Godkendelsestilstand", "Bed om godkendelse", "Godkend for mig"],
+      de: ["Genehmigungsmodus", "Genehmigung anfragen", "Für mich genehmigen"],
+      es: ["Modo de aprobación", "Solicitar aprobación", "Aprobar por mí"],
+      fr: ["Mode d’autorisation", "Demander l’autorisation", "Approuver pour moi"],
+      ja: ["承認モード", "承認を求める", "代わりに承認"],
+      ko: ["승인 방식", "승인 요청", "나 대신 승인"],
+      no: ["Godkjenningsmodus", "Be om godkjenning", "Godkjenn for meg"],
+      pl: ["Tryb zatwierdzania", "Poproś o zatwierdzenie", "Zatwierdź za mnie"],
+      ru: ["Режим одобрения", "Запрашивать одобрение", "Одобрять за меня"],
+      th: ["โหมดการอนุมัติ", "ขออนุมัติ", "อนุมัติแทนฉัน"],
+      tr: ["Onay modu", "Onay iste", "Benim için onayla"],
+      uk: ["Режим схвалення", "Запитувати схвалення", "Схвалювати замість мене"],
+      zh: ["批准模式", "请求批准", "代我批准"],
+      zht: ["核准模式", "要求核准", "代我核准"],
+    } as const
+
+    for (const [locale, expected] of Object.entries(copy)) {
+      const target = await dictionary(`./${locale}.ts`)
+      expect({
+        locale,
+        title: target["permission.approvalMode.title"],
+        ask: target["permission.approvalMode.ask"],
+        autoReview: target["permission.approvalMode.autoReview"],
+      }).toEqual({ locale, title: expected[0], ask: expected[1], autoReview: expected[2] })
+    }
+  })
+
   test("changed-file summary keys preserve rendered English copy and localize complete phrases", async () => {
     const source = await dictionary("../../../ui/src/i18n/en.ts")
     expect(source["ui.sessionTurn.diffs.changed.one"].replace("{{count}}", "1")).toBe("1 Changed file")

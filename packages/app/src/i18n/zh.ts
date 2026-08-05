@@ -581,6 +581,9 @@ export const dict = {
   "error.chain.configInvalid": "配置文件 {{path}} 无效",
   "error.chain.configInvalidWithMessage": "配置文件 {{path}} 无效：{{message}}",
 
+  "permission.approvalMode.title": "批准模式",
+  "permission.approvalMode.ask": "请求批准",
+  "permission.approvalMode.autoReview": "代我批准",
   "notification.permission.title": "需要权限",
   "notification.permission.description": "{{sessionTitle}}（{{projectName}}）需要权限",
   "notification.question.title": "问题",

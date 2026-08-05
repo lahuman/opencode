@@ -215,6 +215,9 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 <PromptInputV2ConfiguredSelect title="Choose agent" keybind={["Mod", "."]} control={control} />
               )}
             </Show>
+            <Show when={view.approval} keyed>
+              {(control) => <PromptInputV2ConfiguredSelect title="Approval mode" control={control} />}
+            </Show>
             <Show
               when={props.modelControl}
               fallback={
@@ -517,10 +520,11 @@ function PromptInputV2ConfiguredSelect(props: {
   const providerID = () => props.control.options().find((option) => option.id === current())?.providerID
   return (
     <PromptInputV2Select
-      title={props.title}
+      title={props.control.title?.() ?? props.title}
       keybind={props.control.keybind?.() ?? props.keybind}
       options={props.control.options()}
       current={current()}
+      disabled={props.control.disabled?.()}
       currentIcon={
         <Show when={props.model && providerID()}>
           <ProviderIcon id={providerID()!} class="size-4 shrink-0 opacity-60" />
@@ -538,6 +542,7 @@ export function PromptInputV2Select(props: {
   current: string
   currentIcon?: JSX.Element
   class?: string
+  disabled?: boolean
   onOpenChange?: (open: boolean) => void
   onSelect: (id: string) => void
 }) {
@@ -558,6 +563,7 @@ export function PromptInputV2Select(props: {
           size="normal"
           class={`max-w-[220px] justify-start ![font-weight:440] ${props.class ?? ""}`}
           aria-label={props.title}
+          disabled={props.disabled}
         >
           {props.currentIcon}
           <span class="truncate capitalize leading-5">

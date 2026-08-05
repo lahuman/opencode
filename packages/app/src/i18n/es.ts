@@ -584,6 +584,9 @@ export const dict = {
   "error.chain.configInvalid": "El archivo de configuración en {{path}} es inválido",
   "error.chain.configInvalidWithMessage": "El archivo de configuración en {{path}} es inválido: {{message}}",
 
+  "permission.approvalMode.title": "Modo de aprobación",
+  "permission.approvalMode.ask": "Solicitar aprobación",
+  "permission.approvalMode.autoReview": "Aprobar por mí",
   "notification.permission.title": "Permiso requerido",
   "notification.permission.description": "{{sessionTitle}} en {{projectName}} necesita permiso",
   "notification.question.title": "Pregunta",

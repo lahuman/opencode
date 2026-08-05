@@ -1734,6 +1734,34 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </TooltipKeybind>
                   </div>
                 </Show>
+                <Show when={props.controls.approval.visible()}>
+                  <div data-component="prompt-approval-control">
+                    <Select
+                      size="normal"
+                      options={[...props.controls.approval.options]}
+                      current={props.controls.approval.current()}
+                      label={(value) =>
+                        language.t(
+                          value === "ask" ? "permission.approvalMode.ask" : "permission.approvalMode.autoReview",
+                        )
+                      }
+                      onSelect={(value) => {
+                        if (!value) return
+                        void props.controls.approval.select(value)
+                        restoreFocus()
+                      }}
+                      disabled={props.controls.approval.pending()}
+                      class="capitalize max-w-[160px] text-text-base"
+                      valueClass="truncate text-13-regular text-text-base"
+                      triggerStyle={control()}
+                      triggerProps={{
+                        "aria-label": language.t("permission.approvalMode.title"),
+                        "data-action": "prompt-approval-mode",
+                      }}
+                      variant="ghost"
+                    />
+                  </div>
+                </Show>
                 <Show when={!providersLoading()}>
                   <Show when={store.mode !== "shell"}>
                     <div
