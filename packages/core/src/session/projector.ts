@@ -23,7 +23,7 @@ const encodeMessage = Schema.encodeSync(SessionMessage.Message)
 
 export class SessionAlreadyProjected extends Error {}
 
-type Usage = {
+export type Usage = {
   cost: number
   tokens: {
     input: number
@@ -41,7 +41,12 @@ function usage(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"] |
   return { cost: value.cost as Usage["cost"], tokens: value.tokens as Usage["tokens"] }
 }
 
-function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInsert {
+function sessionRowWithoutUsage(
+  info: SessionV1.SessionInfo,
+): Omit<
+  typeof SessionTable.$inferInsert,
+  "cost" | "tokens_input" | "tokens_output" | "tokens_reasoning" | "tokens_cache_read" | "tokens_cache_write"
+> {
   return {
     id: info.id,
     project_id: info.projectID,
@@ -51,6 +56,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     directory: info.directory,
     path: info.path,
     title: info.title,
+    approval_mode: info.approvalMode,
     agent: info.agent,
     model: info.model,
     version: info.version,
@@ -60,18 +66,24 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     summary_files: info.summary?.files,
     summary_diffs: info.summary?.diffs ? [...info.summary.diffs] : undefined,
     metadata: info.metadata,
-    cost: info.cost ?? 0,
-    tokens_input: (info.tokens ?? { input: 0 }).input,
-    tokens_output: (info.tokens ?? { output: 0 }).output,
-    tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
-    tokens_cache_read: (info.tokens ?? { cache: { read: 0 } }).cache.read,
-    tokens_cache_write: (info.tokens ?? { cache: { write: 0 } }).cache.write,
     revert: info.revert ? { ...info.revert, messageID: SessionMessage.ID.make(info.revert.messageID) } : null,
     permission: info.permission ? [...info.permission] : undefined,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
+  }
+}
+
+function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInsert {
+  return {
+    ...sessionRowWithoutUsage(info),
+    cost: info.cost ?? 0,
+    tokens_input: (info.tokens ?? { input: 0 }).input,
+    tokens_output: (info.tokens ?? { output: 0 }).output,
+    tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
+    tokens_cache_read: (info.tokens ?? { cache: { read: 0 } }).cache.read,
+    tokens_cache_write: (info.tokens ?? { cache: { write: 0 } }).cache.write,
   }
 }
 
@@ -87,12 +99,7 @@ function partData(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"
   return rest as DeepMutable<typeof rest>
 }
 
-function applyUsage(
-  db: DatabaseService,
-  sessionID: (typeof SessionV1.Event.MessageUpdated.Type)["data"]["sessionID"],
-  value: Usage,
-  sign = 1,
-) {
+export function addUsage(db: Database.Interface["db"], sessionID: SessionV1.SessionInfo["id"], value: Usage, sign = 1) {
   return db
     .update(SessionTable)
     .set({
@@ -102,6 +109,7 @@ function applyUsage(
       tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning * sign}`,
       tokens_cache_read: sql`${SessionTable.tokens_cache_read} + ${value.tokens.cache.read * sign}`,
       tokens_cache_write: sql`${SessionTable.tokens_cache_write} + ${value.tokens.cache.write * sign}`,
+      // Suppress the Drizzle $onUpdate hook; usage accounting must not change Session update time.
       time_updated: sql`${SessionTable.time_updated}`,
     })
     .where(eq(SessionTable.id, sessionID))
@@ -235,7 +243,7 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionV1.Event.Updated, (event) =>
       db
         .update(SessionTable)
-        .set(sessionRow(event.data.info))
+        .set(sessionRowWithoutUsage(event.data.info))
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie),
@@ -283,7 +291,7 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         for (const row of rows) {
           const previous = usage(row.data)
-          if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
+          if (previous) yield* addUsage(db, event.data.sessionID, previous, -1)
         }
         yield* db
           .delete(MessageTable)
@@ -301,7 +309,7 @@ const layer = Layer.effectDiscard(
           .get()
           .pipe(Effect.orDie)
         const previous = row && usage(row.data)
-        if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
+        if (previous) yield* addUsage(db, event.data.sessionID, previous, -1)
         yield* db
           .delete(PartTable)
           .where(and(eq(PartTable.id, event.data.partID), eq(PartTable.session_id, event.data.sessionID)))
@@ -324,8 +332,8 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         const previous = row && usage(row.data)
         const next = usage(event.data.part)
-        if (previous) yield* applyUsage(db, row.session_id, previous, -1)
-        if (next) yield* applyUsage(db, sessionID, next)
+        if (previous) yield* addUsage(db, row.session_id, previous, -1)
+        if (next) yield* addUsage(db, sessionID, next)
       }),
     )
     yield* events.project(SessionEvent.AgentSwitched, (event) =>

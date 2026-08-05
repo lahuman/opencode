@@ -19,7 +19,14 @@ import { SessionMessageUpdater } from "@opencode-ai/core/session/message-updater
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import {
+  MessageTable,
+  PartTable,
+  SessionInputTable,
+  SessionMessageTable,
+  SessionTable,
+} from "@opencode-ai/core/session/sql"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 
@@ -44,6 +51,108 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("adds usage twice without changing transcript rows or update time", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const before = yield* db
+        .select({ time_updated: SessionTable.time_updated })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      const value = {
+        cost: 1.25,
+        tokens: { input: 2, output: 3, reasoning: 4, cache: { read: 5, write: 6 } },
+      }
+
+      yield* SessionProjector.addUsage(db, sessionID, value)
+      yield* SessionProjector.addUsage(db, sessionID, value)
+
+      expect(
+        yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+      ).toMatchObject({
+        cost: 2.5,
+        tokens_input: 4,
+        tokens_output: 6,
+        tokens_reasoning: 8,
+        tokens_cache_read: 10,
+        tokens_cache_write: 12,
+        time_updated: before?.time_updated,
+      })
+      expect(yield* db.select().from(EventTable).all().pipe(Effect.orDie)).toEqual([])
+      expect(yield* db.select().from(MessageTable).all().pipe(Effect.orDie)).toEqual([])
+      expect(yield* db.select().from(PartTable).all().pipe(Effect.orDie)).toEqual([])
+      expect(yield* db.select().from(SessionMessageTable).all().pipe(Effect.orDie)).toEqual([])
+    }),
+  )
+
+  it.effect("does not let stale Session updates overwrite added usage", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      const info = SessionV1.SessionInfo.make({
+        id: sessionID,
+        projectID: Project.ID.global,
+        slug: "test",
+        directory: "/project",
+        title: "Before",
+        approvalMode: "ask",
+        version: "test",
+        cost: 10,
+        tokens: { input: 20, output: 30, reasoning: 40, cache: { read: 50, write: 60 } },
+        time: { created: 1, updated: 1 },
+      })
+      yield* events.publish(SessionV1.Event.Created, { sessionID, info })
+      const stale = SessionV1.SessionInfo.make({
+        ...info,
+        title: "After",
+        approvalMode: "auto_review",
+        time: { created: 1, updated: 2 },
+      })
+
+      yield* SessionProjector.addUsage(db, sessionID, {
+        cost: 1,
+        tokens: { input: 2, output: 3, reasoning: 4, cache: { read: 5, write: 6 } },
+      })
+      yield* events.publish(SessionV1.Event.Updated, { sessionID, info: stale })
+
+      expect(
+        yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+      ).toMatchObject({
+        title: "After",
+        approval_mode: "auto_review",
+        cost: 11,
+        tokens_input: 22,
+        tokens_output: 33,
+        tokens_reasoning: 44,
+        tokens_cache_read: 55,
+        tokens_cache_write: 66,
+      })
+    }),
+  )
+
   it.effect("projects staged, cleared, and committed reverts", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

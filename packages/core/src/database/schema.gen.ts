@@ -188,6 +188,7 @@ export default {
           \`directory\` text NOT NULL,
           \`path\` text,
           \`title\` text NOT NULL,
+          \`approval_mode\` text DEFAULT 'ask' NOT NULL,
           \`version\` text NOT NULL,
           \`share_url\` text,
           \`summary_additions\` integer,

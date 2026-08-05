@@ -80,6 +80,7 @@ type CreateInput = {
   id?: SessionSchema.ID
   agent?: AgentV2.ID
   model?: ModelV2.Ref
+  approvalMode?: SessionSchema.Info["approvalMode"]
   location: Location.Ref
 }
 
@@ -226,6 +227,7 @@ const layer = Layer.effect(
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
           title: `New session - ${new Date(now).toISOString()}`,
+          approvalMode: input.approvalMode ?? "ask",
           agent: input.agent,
           model: input.model
             ? {

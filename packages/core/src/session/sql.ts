@@ -33,6 +33,7 @@ export const SessionTable = sqliteTable(
     directory: DatabasePath.directoryColumn().notNull(),
     path: DatabasePath.pathColumn(),
     title: text().notNull(),
+    approval_mode: text().$type<SessionSchema.Info["approvalMode"]>().notNull().default("ask"),
     version: text().notNull(),
     share_url: text(),
     summary_additions: integer(),
