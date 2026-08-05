@@ -47,6 +47,7 @@ import { DialogDebug } from "./component/dialog-debug"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogAgent } from "./component/dialog-agent"
+import { DialogApprovalMode } from "./component/dialog-approval-mode"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
@@ -556,6 +557,75 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     if (workspace?.type !== "worktree" || !workspace.directory) return
     return workspace
   })
+
+  const currentSessionID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
+
+  async function selectApprovalMode(sessionID: string | undefined, approvalMode: "ask" | "auto_review") {
+    try {
+      const result = await local.permission.run(async () => {
+        if (!sessionID) {
+          local.permission.setApprovalMode(approvalMode)
+          return true
+        }
+        const updated = await sdk.client.session.update({ sessionID, approvalMode })
+        if (!updated.data) {
+          toast.show({
+            title: "Updating approval mode failed",
+            message: errorMessage(updated.error ?? "no response"),
+            variant: "error",
+          })
+          return false
+        }
+        if ((updated.data.approvalMode ?? "ask") === "auto_review") local.permission.set("normal")
+        return true
+      })
+      if (result.acquired && result.value) dialog.clear()
+    } catch (error) {
+      toast.error(error)
+    }
+  }
+
+  function showApprovalMode() {
+    const sessionID = currentSessionID()
+    dialog.replace(() => (
+      <DialogApprovalMode
+        current={sessionID ? (sync.session.get(sessionID)?.approvalMode ?? "ask") : local.permission.approvalMode}
+        pending={() => local.permission.approvalPending}
+        onSelect={(approvalMode) => selectApprovalMode(sessionID, approvalMode)}
+      />
+    ))
+  }
+
+  async function togglePermissionMode() {
+    try {
+      const result = await local.permission.run(async () => {
+        if (local.permission.mode === "auto") {
+          local.permission.set("normal")
+          return
+        }
+        const sessionID = currentSessionID()
+        if (!sessionID) {
+          local.permission.setApprovalMode("ask")
+          local.permission.set("auto")
+          return
+        }
+        const updated = await sdk.client.session.update({ sessionID, approvalMode: "ask" })
+        if (!updated.data) {
+          toast.show({
+            title: "Updating approval mode failed",
+            message: errorMessage(updated.error ?? "no response"),
+            variant: "error",
+          })
+          return
+        }
+        local.permission.set((updated.data.approvalMode ?? "ask") === "ask" ? "auto" : "normal")
+      })
+      if (result.acquired) dialog.clear()
+    } catch (error) {
+      toast.error(error)
+    }
+  }
+
   const appCommands = createMemo(() =>
     [
       {
@@ -962,14 +1032,18 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "permission.approval_mode",
+        title: "Change approval mode",
+        category: "System",
+        hidden: local.agent.current()?.name !== "plan",
+        run: showApprovalMode,
+      },
+      {
         name: "permission.mode",
         title:
           local.permission.mode === "auto" ? "Disable auto-approve permissions" : "Enable auto-approve permissions",
         category: "System",
-        run: () => {
-          local.permission.toggle()
-          dialog.clear()
-        },
+        run: () => void togglePermissionMode(),
       },
     ].map((command) => ({
       namespace: "palette",

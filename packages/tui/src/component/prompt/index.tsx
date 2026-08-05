@@ -50,6 +50,7 @@ import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
+import { DialogApprovalMode } from "../dialog-approval-mode"
 import { useArgs } from "../../context/args"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
 import { useTuiConfig } from "../../config"
@@ -989,37 +990,56 @@ export function Prompt(props: PromptProps) {
     let sessionID = props.sessionID
     let finishMoveProgress = false
     if (sessionID == null) {
-      const selectedWorkspace = workspace.selection()
-      const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
+      const created = await local.permission.run(async () => {
+        const modes = { approvalMode: local.permission.approvalMode, mode: local.permission.mode }
+        const selectedWorkspace = workspace.selection()
+        const workspaceID = selectedWorkspace?.type === "existing" ? selectedWorkspace.workspaceID : undefined
+        const directory = await move.getDirectory(store.prompt.input)
+        if (move.pending() && !directory) return { status: "blocked" as const }
+        const finishMoveProgress = Boolean(move.progress())
 
-      const directory = await move.getDirectory(store.prompt.input)
-      if (move.pending() && !directory) return false
-      finishMoveProgress = Boolean(move.progress())
+        try {
+          const res = await sdk.client.session.create({
+            directory,
+            workspace: workspaceID,
+            agent: agent.name,
+            model: {
+              providerID: selectedModel.providerID,
+              id: selectedModel.modelID,
+              variant,
+            },
+            approvalMode: agent.name === "plan" ? modes.approvalMode : undefined,
+          })
 
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          id: selectedModel.modelID,
-          variant,
-        },
+          if (!res.data) {
+            if (finishMoveProgress) move.finishSubmit()
+            console.log("Creating a session failed:", res.error)
+            toast.show({
+              message: "Creating a session failed. Open console for more details.",
+              variant: "error",
+            })
+            return { status: "failed" as const }
+          }
+
+          if (agent.name === "plan") {
+            if (modes.approvalMode === "auto_review" && modes.mode === "auto") local.permission.set("normal")
+            local.permission.setApprovalMode("ask")
+          }
+          return { status: "created" as const, sessionID: res.data.id, finishMoveProgress }
+        } catch (error) {
+          if (finishMoveProgress) move.finishSubmit()
+          console.log("Creating a session failed:", error)
+          toast.show({
+            message: "Creating a session failed. Open console for more details.",
+            variant: "error",
+          })
+          return { status: "failed" as const }
+        }
       })
-
-      if (res.error) {
-        if (finishMoveProgress) move.finishSubmit()
-        console.log("Creating a session failed:", res.error)
-
-        toast.show({
-          message: "Creating a session failed. Open console for more details.",
-          variant: "error",
-        })
-
-        return true
-      }
-
-      sessionID = res.data.id
+      if (!created.acquired || created.value.status === "blocked") return false
+      if (created.value.status === "failed") return true
+      sessionID = created.value.sessionID
+      finishMoveProgress = created.value.finishMoveProgress
     }
 
     const inputText = expandTrackedPastedText(
@@ -1299,6 +1319,46 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
+  const approvalMode = () => {
+    if (!props.sessionID) return local.permission.approvalMode
+    return sync.session.get(props.sessionID)?.approvalMode ?? "ask"
+  }
+
+  async function selectApprovalMode(value: "ask" | "auto_review") {
+    try {
+      const result = await local.permission.run(async () => {
+        if (!props.sessionID) {
+          local.permission.setApprovalMode(value)
+          return true
+        }
+        const updated = await sdk.client.session.update({ sessionID: props.sessionID, approvalMode: value })
+        if (!updated.data) {
+          toast.show({
+            title: "Updating approval mode failed",
+            message: errorMessage(updated.error ?? "no response"),
+            variant: "error",
+          })
+          return false
+        }
+        if ((updated.data.approvalMode ?? "ask") === "auto_review") local.permission.set("normal")
+        return true
+      })
+      if (result.acquired && result.value) dialog.clear()
+    } catch (error) {
+      toast.error(error)
+    }
+  }
+
+  function showApprovalMode() {
+    dialog.replace(() => (
+      <DialogApprovalMode
+        current={approvalMode()}
+        pending={() => local.permission.approvalPending}
+        onSelect={selectApprovalMode}
+      />
+    ))
+  }
+
   const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
   const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
   const variantMetaAlpha = createFadeIn(
@@ -1446,6 +1506,13 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
+                      <Show when={store.mode === "normal" && agent().name === "plan"}>
+                        <box onMouseUp={showApprovalMode}>
+                          <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>
+                            {approvalMode() === "auto_review" ? "Approve for me" : "Ask for approval"}
+                          </text>
+                        </box>
+                      </Show>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
