@@ -1,6 +1,6 @@
 import { createStore } from "solid-js/store"
 import { dirname } from "node:path"
-import { createMemo, For, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, For, Match, on, Show, Switch } from "solid-js"
 import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
@@ -116,6 +116,14 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     stage: "permission" as PermissionStage,
   })
   const pathFormatter = usePathFormatter()
+
+  createEffect(
+    on(
+      () => props.request.id,
+      () => setStore("stage", "permission"),
+      { defer: true },
+    ),
+  )
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
@@ -397,12 +405,28 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             </box>
           )
 
-          const body = (
+          const body = () => (
             <Prompt
               title="Permission required"
               header={header()}
-              body={current.body}
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              body={
+                <>
+                  {current.body}
+                  <Show when={props.request.review}>
+                    {(review) => (
+                      <box paddingLeft={1}>
+                        <text fg={theme.text}>{review().risk}</text>
+                        <text fg={theme.textMuted}>{review().reason}</text>
+                      </box>
+                    )}
+                  </Show>
+                </>
+              }
+              options={{
+                once: "Allow once",
+                ...(props.request.always.length > 0 ? { always: "Allow always" } : {}),
+                reject: "Reject",
+              }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
@@ -433,7 +457,11 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             />
           )
 
-          return body
+          return (
+            <Show when={props.request.id} keyed>
+              {(_) => body()}
+            </Show>
+          )
         })()}
       </Match>
     </Switch>
