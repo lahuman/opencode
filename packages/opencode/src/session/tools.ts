@@ -6,7 +6,6 @@ import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
 import { McpCatalog } from "@/mcp/catalog"
 import { Permission } from "@/permission"
-import { PlanReview } from "@/permission/plan-review"
 import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
@@ -68,7 +67,6 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const run = yield* EffectBridge.make()
   const plugin = yield* Plugin.Service
   const permission = yield* Permission.Service
-  const sessions = yield* Session.Service
   const registry = yield* ToolRegistry.Service
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
@@ -80,40 +78,6 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   })
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => {
-    const seed = {
-      agent: input.agent,
-      agentID: input.agentID,
-      model: input.model,
-      userMessageID: input.processor.message.parentID,
-      assistantMessageID: input.processor.message.id,
-      callID: options.toolCallId,
-      directory: input.session.directory,
-      abort: options.abortSignal!,
-    }
-    const plan: PlanReview.ContextInput = {
-      seed,
-      load: () =>
-        Effect.gen(function* () {
-          const current = yield* sessions.get(input.session.id)
-          const currentRuleset = resolvePermissionRules({
-            agent: input.agent,
-            agentID: input.agentID,
-            permission: current.permission,
-          })
-          return {
-            type: "loaded" as const,
-            value: {
-              ruleset: currentRuleset,
-              context: {
-                ...seed,
-                approvalMode: current.approvalMode,
-                messages: yield* sessions.messages({ sessionID: input.session.id, limit: 64 }),
-                rulesetDigest: PlanReview.rulesetDigest(currentRuleset),
-              },
-            },
-          }
-        }).pipe(Effect.catchTag("NotFoundError", () => Effect.succeed({ type: "missing" as const }))),
-    }
     return {
       sessionID: input.session.id,
       abort: options.abortSignal!,
@@ -141,30 +105,15 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             },
           }
         }),
-      ask: (req) => {
-        if (input.agentID === "plan") {
-          return permission
-            .ask({
-              ...req,
-              always: req.permission === "bash" ? [] : req.always,
-              alwaysAsk: req.permission === "bash",
-              sessionID: input.session.id,
-              tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-              plan,
-            })
-            .pipe(Effect.orDie)
-        }
-        return permission
+      ask: (req) =>
+        permission
           .ask({
             ...req,
-            always: req.always,
-            alwaysAsk: false,
             sessionID: input.session.id,
             tool: { messageID: input.processor.message.id, callID: options.toolCallId },
             ruleset,
           })
-          .pipe(Effect.orDie)
-      },
+          .pipe(Effect.orDie),
     }
   }
 

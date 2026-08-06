@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Schema } from "effect"
 import { resolve, resolvePermissionRules, restrictPlanTools } from "@/session/tools"
 import { Permission } from "@/permission"
-import { PlanReview } from "@/permission/plan-review"
 import type { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
 import { MCP } from "@/mcp"
@@ -72,28 +71,22 @@ describe("session tools", () => {
     expect(Permission.evaluate("bash", "git status", ruleset).action).toBe(action)
   })
 
-  test("loads fresh Plan authority only when the tool reaches ctx.ask", async () => {
+  test("routes Plan through the common ruleset and reusable patterns", async () => {
     const sessionID = SessionID.make("ses_session_tools_plan")
     const userMessageID = MessageID.make("msg_session_tools_user")
     const assistantMessageID = MessageID.make("msg_session_tools_assistant")
     const callID = "call-session-tools"
-    const agent = makeAgent("renamed planner", Permission.fromConfig({ bash: "allow" }))
-    const model = makeModel()
-    const initial = makeSession(sessionID, "ask", Permission.fromConfig({ bash: "allow" }))
-    const staleMessages: SessionV1.WithParts[] = []
-    const freshMessages: SessionV1.WithParts[] = []
-    let current = initial
+    const agent = makeAgent("renamed planner", Permission.fromConfig({ bash: "ask" }))
+    const session = makeSession(sessionID, "ask", Permission.fromConfig({ bash: "allow" }))
+    let sessionLoads = 0
     let observed:
       | {
-          plan: true
-          loaded: PlanReview.ContextLoad
-          seed: PlanReview.ContextSeed
-          ruleset: PermissionV1.Ruleset | undefined
+          action: PermissionV1.Action
           agentID: unknown
           always: ReadonlyArray<string>
-          alwaysAsk: boolean | undefined
+          hasPlan: boolean
+          hasAlwaysAsk: boolean
         }
-      | { plan: false }
       | undefined
     let observedAgentID: unknown
 
@@ -106,24 +99,26 @@ describe("session tools", () => {
     )
     const layers = makeLayers({
       permission: (input) =>
-        Effect.gen(function* () {
-          if (!input.plan) {
-            observed = { plan: false }
-            return
-          }
+        Effect.sync(() => {
           observed = {
-            plan: true,
-            loaded: yield* input.plan.load(),
-            seed: input.plan.seed,
-            ruleset: input.ruleset,
+            action: input.ruleset ? Permission.evaluate("bash", "git status", input.ruleset).action : "ask",
             agentID: observedAgentID,
             always: input.always,
-            alwaysAsk: input.alwaysAsk,
+            hasPlan: Object.hasOwn(input, "plan"),
+            hasAlwaysAsk: Object.hasOwn(input, "alwaysAsk"),
           }
         }),
       session: {
-        get: () => Effect.succeed(current),
-        messages: () => Effect.succeed(freshMessages),
+        get: () =>
+          Effect.sync(() => {
+            sessionLoads++
+            return session
+          }),
+        messages: () =>
+          Effect.sync(() => {
+            sessionLoads++
+            return []
+          }),
       },
       tools: [bash],
     })
@@ -131,39 +126,25 @@ describe("session tools", () => {
       resolve({
         agent,
         agentID: "plan",
-        model,
-        session: initial,
+        model: makeModel(),
+        session,
         processor: makeProcessor(assistantMessageID, userMessageID),
         bypassAgentCheck: false,
-        messages: staleMessages,
+        messages: [],
         promptOps: {} as never,
       }).pipe(Effect.provide(layers)),
     )
 
-    current = makeSession(sessionID, "auto_review", Permission.fromConfig({ bash: "deny" }))
     await executeTool(tools.bash, callID)
 
-    expect(observed?.plan).toBe(true)
-    if (!observed || !observed.plan || observed.loaded.type !== "loaded") throw new Error("Plan context was not loaded")
-    expect(observed.ruleset).toBeUndefined()
-    expect(observed.agentID).toBe("plan")
-    expect(observed.always).toEqual([])
-    expect(observed.alwaysAsk).toBe(true)
-    expect(observed.seed).toMatchObject({
-      agent,
+    expect(observed).toEqual({
+      action: "allow",
       agentID: "plan",
-      model,
-      userMessageID,
-      assistantMessageID,
-      callID,
-      directory: initial.directory,
+      always: ["*"],
+      hasPlan: false,
+      hasAlwaysAsk: false,
     })
-    expect(observed.loaded.value.context.approvalMode).toBe("auto_review")
-    expect(observed.loaded.value.context.messages).toBe(freshMessages)
-    expect(Permission.evaluate("bash", "git status", observed.loaded.value.ruleset).action).toBe("deny")
-    expect(observed.loaded.value.context.rulesetDigest).toBe(
-      PlanReview.rulesetDigest(observed.loaded.value.ruleset),
-    )
+    expect(sessionLoads).toBe(0)
   })
 
   test("keeps Build on the legacy ruleset arm while exposing canonical agentID", async () => {
@@ -178,7 +159,7 @@ describe("session tools", () => {
       permission: (input) =>
         Effect.sync(() => {
           observed = {
-            plan: !!input.plan,
+            plan: Object.hasOwn(input, "plan"),
             action: input.ruleset ? Permission.evaluate("read", "README.md", input.ruleset).action : "ask",
             agentID,
           }
