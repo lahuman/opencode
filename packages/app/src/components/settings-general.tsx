@@ -124,6 +124,8 @@ export const SettingsGeneral: Component = () => {
               .createClient({ directory: value, throwOnError: true })
               .session.update({ sessionID, approvalMode: "ask" })
             if (!result.data) throw new Error("Failed to update session approval mode")
+            if (result.data.approvalMode !== undefined && result.data.approvalMode !== "ask")
+              throw new Error("Failed to update session approval mode")
           },
           resetDrafts: () => state.approvalMutation.resetDrafts(value),
           enableSession: (sessionID) => state.enableAutoAccept(sessionID, value),

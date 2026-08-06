@@ -20,6 +20,7 @@ let directory = "/repo"
 let sessionActive = false
 let directoryActive = false
 let updateFailure: Error | undefined
+let updateApprovalMode: "ask" | "auto_review" = "ask"
 let updateWait: Promise<void> | undefined
 let options: (() => Command[]) | undefined
 let permissionMutation = createPermissionMutation()
@@ -108,7 +109,7 @@ beforeAll(async () => {
             updates.push({ directory, ...input })
             await updateWait
             if (updateFailure) throw updateFailure
-            return { data: { id: input.sessionID, approvalMode: "ask" } }
+            return { data: { id: input.sessionID, approvalMode: updateApprovalMode } }
           },
         },
       },
@@ -167,6 +168,7 @@ beforeEach(() => {
   sessionActive = false
   directoryActive = false
   updateFailure = undefined
+  updateApprovalMode = "ask"
   updateWait = undefined
   options = undefined
   permissionMutation = createPermissionMutation()
@@ -229,6 +231,18 @@ describe("useSessionCommands auto-accept command", () => {
 
     expect(updates).toEqual([{ directory: "/repo", sessionID: "session-1", approvalMode: "ask" }])
     expect(sessionActive).toBeFalse()
+    expect(order).toEqual(["update:session-1:/repo"])
+    expect(toasts).toEqual([{ title: "common.requestFailed", variant: "error" }])
+  })
+
+  test("rejects an explicit auto-review response without enabling blind auto", async () => {
+    updateApprovalMode = "auto_review"
+
+    await autoAcceptCommand().onSelect?.()
+
+    expect(updates).toEqual([{ directory: "/repo", sessionID: "session-1", approvalMode: "ask" }])
+    expect(sessionActive).toBeFalse()
+    expect(directoryActive).toBeFalse()
     expect(order).toEqual(["update:session-1:/repo"])
     expect(toasts).toEqual([{ title: "common.requestFailed", variant: "error" }])
   })

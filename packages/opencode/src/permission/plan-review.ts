@@ -543,8 +543,9 @@ export const preflight = (input: PolicyInput): Effect.Effect<Preflight> =>
 
     const metadata = shellMetadata(input.request.metadata)
     if (!metadata || !metadata.parsed) return MANUAL
-    const classifications = input.request.patterns.map(classify)
+    const classifications = input.request.patterns.map((pattern) => classify(pattern, metadata.shell))
     if (classifications.includes("deny")) return HAZARD
+    if (!trustedShell(metadata)) return MANUAL
     if (sensitiveText(metadata.command)) return MANUAL
     if (hasCwdTransition(metadata.command)) return MANUAL
     if (scopeLocation(metadata.cwd, input.context.directory) !== "inside") return MANUAL
@@ -2185,18 +2186,46 @@ export * as PlanReview from "./plan-review"
 
 function shellMetadata(
   metadata: Readonly<Record<string, unknown>>,
-): { command: string; shell: "bash" | "powershell" | "cmd"; parsed: boolean; cwd: string } | undefined {
+):
+  | {
+      command: string
+      shell: "bash" | "powershell" | "cmd"
+      shellName: "bash" | "pwsh" | "powershell" | "cmd" | "other" | undefined
+      environment: "plain" | "ambient" | undefined
+      parsed: boolean
+      cwd: string
+    }
+  | undefined {
   if (typeof metadata.command !== "string") return
   const shell = metadata.shell
   if (shell !== "bash" && shell !== "powershell" && shell !== "cmd") return
   if (typeof metadata.parsed !== "boolean") return
   if (typeof metadata.cwd !== "string" || !path.isAbsolute(metadata.cwd)) return
+  const shellName = metadata.shellName
+  const environment = metadata.environment
   return {
     command: metadata.command,
     shell,
+    shellName:
+      shellName === "bash" ||
+      shellName === "pwsh" ||
+      shellName === "powershell" ||
+      shellName === "cmd" ||
+      shellName === "other"
+        ? shellName
+        : undefined,
+    environment: environment === "plain" || environment === "ambient" ? environment : undefined,
     parsed: metadata.parsed,
     cwd: path.normalize(metadata.cwd),
   }
+}
+
+function trustedShell(metadata: NonNullable<ReturnType<typeof shellMetadata>>) {
+  if (metadata.environment !== "plain") return false
+  if (metadata.shell === "bash") return metadata.shellName === "bash"
+  if (process.platform !== "win32") return false
+  if (metadata.shell === "cmd") return metadata.shellName === "cmd"
+  return metadata.shellName === "pwsh" || metadata.shellName === "powershell"
 }
 
 function hasCwdTransition(command: string) {
@@ -2204,7 +2233,7 @@ function hasCwdTransition(command: string) {
   return /(?:^|[;&|()]|\s)(?:cd|chdir|pushd|popd|Set-Location|sl)(?:\s|$)/i.test(command)
 }
 
-function classify(pattern: string): "review" | "ask" | "deny" {
+function classify(pattern: string, shell: "bash" | "powershell" | "cmd"): "review" | "ask" | "deny" {
   const text = pattern.trim()
   if (!text) return "ask"
   if (/(?:^|[\s"'])~/.test(text)) return "ask"
@@ -2255,9 +2284,86 @@ function classify(pattern: string): "review" | "ask" | "deny" {
   if (/^(?:curl|Invoke-WebRequest|Invoke-RestMethod|scp|sftp|rsync)(?:\s|$)/i.test(text)) return "ask"
   if (/(?:encodedcommand|frombase64string|base64\s+-d)/i.test(text)) return "ask"
   if (/^(?:alias|function|Set-Alias|New-Alias)(?:\s|$)/i.test(text)) return "ask"
-  if (/[$`%]|[?*[]/.test(text)) return "ask"
   if (/[{},]|@\(/.test(text)) return "ask"
   if (/[<|]/.test(text)) return "ask"
+  if (shell === "bash" && /\\\r?\n/.test(text)) return "ask"
+  if (shell === "cmd" && text.includes("^")) return "ask"
+
+  const rawTokens = tokenize(text) ?? []
+  const command = rawTokens[0]?.toLowerCase()
+  const delimiter = shell === "bash" ? rawTokens.indexOf("--", 1) : -1
+  const tokens =
+    shell === "bash"
+      ? rawTokens.map((value) => {
+          const option = value.replace(/\\(.)/g, "$1")
+          return option.startsWith("-") ? option : value
+        })
+      : rawTokens
+  const options = tokens.slice(1, delimiter === -1 ? tokens.length : delimiter)
+  if (shell === "cmd" && command === "dir") return "ask"
+  if (shell === "bash" && command === "find" && options.includes("-L")) return "ask"
+  if (shell === "bash" && command === "ls") {
+    const short = options.filter((value) => /^-[^-]/.test(value))
+    if (
+      (options.some((value) => {
+        const name = value.startsWith("--") ? value.slice(2) : ""
+        return name.length >= 3 && "recursive".startsWith(name)
+      }) ||
+        short.some((value) => value.includes("R"))) &&
+      (options.includes("--dereference") || short.some((value) => value.includes("L")))
+    )
+      return "ask"
+  }
+  const powershell = shell === "powershell" && ["get-childitem", "gci", "dir", "ls"].includes(command ?? "")
+  const parameters = powershell
+    ? options.map((value, index) => {
+        const separator = value.indexOf(":")
+        return {
+          name: value.startsWith("-")
+            ? value.slice(1, separator === -1 ? value.length : separator).toLowerCase()
+            : "",
+          value: separator === -1 ? undefined : value.slice(separator + 1).toLowerCase(),
+          next: options[index + 1]?.toLowerCase(),
+        }
+      })
+    : []
+  const named = (value: (typeof parameters)[number], name: string, minimum: number) =>
+    value.name.length >= minimum && name.startsWith(value.name)
+  const recursive = (value: (typeof parameters)[number]) =>
+    named(value, "recurse", 2) || value.name === "r" || value.name === "s"
+  const following = (value: (typeof parameters)[number]) => named(value, "followsymlink", 3)
+  const disabled = (value: string | undefined) => value === "0" || value === "$false"
+  const enabled = (value: string | undefined) => value === undefined || value === "1" || value === "$true"
+  if (
+    powershell &&
+    parameters.some(
+      (value) =>
+        (recursive(value) || following(value)) &&
+        value.value !== undefined &&
+        !disabled(value.value) &&
+        !enabled(value.value),
+    )
+  )
+    return "ask"
+  if (
+    powershell &&
+    parameters.some((value) => following(value) && enabled(value.value)) &&
+    (parameters.some((value) => recursive(value) && enabled(value.value)) ||
+      parameters.some((value) => named(value, "depth", 3) && (value.value ?? value.next) !== "0"))
+  )
+    return "ask"
+  const safePowershellVariables =
+    powershell &&
+    tokens.every((value, index) => {
+      if (!value.includes("$")) return true
+      const parameter = index > 0 && index <= parameters.length ? parameters[index - 1] : undefined
+      return Boolean(
+        parameter &&
+          (recursive(parameter) || following(parameter)) &&
+          (parameter.value === "$true" || parameter.value === "$false"),
+      )
+    })
+  if ((text.includes("$") && !safePowershellVariables) || /[`%]|[?*[]/.test(text)) return "ask"
 
   if (/^git(?:\s|$)/i.test(text)) return classifyGit(text)
   const validation = classifyValidation(text)

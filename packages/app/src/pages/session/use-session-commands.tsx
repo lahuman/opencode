@@ -308,6 +308,8 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
           updateToAsk: async (id) => {
             const result = await current.client.session.update({ sessionID: id, approvalMode: "ask" })
             if (!result.data) throw new Error("Failed to update session approval mode")
+            if (result.data.approvalMode !== undefined && result.data.approvalMode !== "ask")
+              throw new Error("Failed to update session approval mode")
           },
           resetDrafts: () => state.approvalMutation.resetDrafts(current.directory),
           enableSession: (id) => state.enableAutoAccept(id, current.directory),

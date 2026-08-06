@@ -525,6 +525,15 @@ const findings = [
   { category: "scope", risk: "low", code: "workspace_local" },
 ] as const
 
+const planShellMetadata = (command: string, cwd: string) => ({
+  command,
+  shell: "bash",
+  shellName: "bash",
+  environment: "plain",
+  parsed: true,
+  cwd,
+})
+
 beforeEach(() => {
   language = output({ decision: "allow", risk: "low", reason: "Read-only inspection" })
   languageRequests = 0
@@ -633,7 +642,7 @@ const fixture = (model = provider.model) => Effect.gen(function* () {
     sessionID: session.id,
     permission: "bash",
     patterns: ["git status"],
-    metadata: { command: "git status", shell: "powershell", parsed: true, cwd: test.directory },
+    metadata: planShellMetadata("git status", test.directory),
     always: ["git status"],
     tool: { messageID: assistant.id, callID },
   }
@@ -2980,7 +2989,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["git status"],
-          metadata: { cwd: first.context.directory, parsed: true, shell: "powershell", command: "git status" },
+          metadata: planShellMetadata("git status", first.context.directory),
           findings,
         }),
       ).toEqual(denied)
@@ -2990,10 +2999,7 @@ describe("PlanReview reviewer", () => {
         yield* retry({
           patterns: ["git status"],
           metadata: {
-            cwd: first.context.directory,
-            parsed: true,
-            shell: "powershell",
-            command: "git status",
+            ...planShellMetadata("git status", first.context.directory),
             semanticValue: "changed",
           },
           findings,
@@ -3008,7 +3014,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["bun typecheck"],
-          metadata: { command: "bun typecheck", shell: "powershell", parsed: true, cwd: first.context.directory },
+          metadata: planShellMetadata("bun typecheck", first.context.directory),
           findings: validationFindings,
         }),
       ).toEqual(denied)
@@ -3022,7 +3028,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["git status", "bun typecheck"],
-          metadata: { command: "git status", shell: "powershell", parsed: true, cwd: first.context.directory },
+          metadata: planShellMetadata("git status", first.context.directory),
           findings: mixed,
         }),
       ).toEqual(denied)
@@ -3030,7 +3036,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["bun typecheck", "git status"],
-          metadata: { command: "bun typecheck", shell: "powershell", parsed: true, cwd: first.context.directory },
+          metadata: planShellMetadata("bun typecheck", first.context.directory),
           findings: [...validationFindings, ...findings],
         }),
       ).toEqual(denied)
@@ -3040,7 +3046,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["git status", "git log -1"],
-          metadata: { command: "git status", shell: "powershell", parsed: true, cwd: first.context.directory },
+          metadata: planShellMetadata("git status", first.context.directory),
           findings: duplicateFindings,
         }),
       ).toEqual(denied)
@@ -3048,7 +3054,7 @@ describe("PlanReview reviewer", () => {
       expect(
         yield* retry({
           patterns: ["git log -1", "git status"],
-          metadata: { command: "git status", shell: "powershell", parsed: true, cwd: first.context.directory },
+          metadata: planShellMetadata("git status", first.context.directory),
           findings: duplicateFindings,
         }),
       ).toEqual(denied)

@@ -244,7 +244,14 @@ const planFixture = (input?: {
         patterns,
         metadata:
           permission === "bash"
-            ? { command: patterns.join(" && "), shell: "powershell", parsed: true, cwd: test.directory }
+            ? {
+                command: patterns.join(" && "),
+                shell: "bash",
+                shellName: "bash",
+                environment: "plain",
+                parsed: true,
+                cwd: test.directory,
+              }
             : {},
         always: [...patterns],
         tool: { messageID: assistant.id, callID },
@@ -296,7 +303,15 @@ function reviewMappingRequest(mapping: "manual" | "read_only" | "mutation") {
     sessionID,
     permission: "bash",
     patterns: ["git status"],
-    metadata: { command: "git status", shell: "powershell", parsed: true, cwd: directory, mapping },
+    metadata: {
+      command: "git status",
+      shell: "bash",
+      shellName: "bash",
+      environment: "plain",
+      parsed: true,
+      cwd: directory,
+      mapping,
+    },
     always: ["git status"],
     tool: { messageID: assistantMessageID, callID },
     plan: {
@@ -1998,7 +2013,9 @@ for (const [name, pattern, parsed] of [
           ...fixture.request,
           metadata: {
             command: pattern,
-            shell: "powershell",
+            shell: "bash",
+            shellName: "bash",
+            environment: "plain",
             parsed,
             cwd: fixture.request.plan.seed.directory,
           },
@@ -3533,7 +3550,9 @@ planIt.instance(
           patterns: ["git status"],
           metadata: {
             command: "git status",
-            shell: "powershell",
+            shell: "bash",
+            shellName: "bash",
+            environment: "plain",
             parsed: true,
             cwd: fixture.request.plan.seed.directory,
           },

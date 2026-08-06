@@ -24,7 +24,14 @@ const request = (permission: string, patterns = [permission], metadata: Record<s
   sessionID: "session" as never,
   permission,
   patterns,
-  metadata,
+  metadata:
+    permission === "bash"
+      ? {
+          shellName: metadata.shell === "powershell" ? "powershell" : metadata.shell === "cmd" ? "cmd" : "bash",
+          environment: "plain",
+          ...metadata,
+        }
+      : metadata,
   always: [],
 })
 
@@ -295,6 +302,49 @@ describe("plan shell preflight", () => {
     }
   })
 
+  test("requires exact shell and plain environment metadata", async () => {
+    const base = {
+      command: "git status",
+      shell: "bash",
+      shellName: "bash",
+      environment: "plain",
+      parsed: true,
+      cwd: process.cwd(),
+    }
+    for (const metadata of [
+      { ...base, shellName: undefined },
+      { ...base, environment: undefined },
+      { ...base, environment: "ambient" },
+      { ...base, shellName: "other" },
+      { ...base, shellName: "cmd" },
+    ]) {
+      expect(
+        (await Effect.runPromise(preflight({ request: request("bash", ["git status"], metadata), context }))).type,
+      ).toBe("ask")
+    }
+
+    expect(
+      (await Effect.runPromise(preflight({ request: request("bash", ["git status"], base), context }))).type,
+    ).toBe("review")
+  })
+
+  test("keeps deterministic denials ahead of shell environment trust", async () => {
+    const base = {
+      command: "rm -rf build",
+      shell: "bash",
+      parsed: true,
+      cwd: process.cwd(),
+    }
+    for (const metadata of [
+      { ...base, shellName: undefined, environment: undefined },
+      { ...base, shellName: "bash", environment: "ambient" },
+    ]) {
+      expect(
+        (await Effect.runPromise(preflight({ request: request("bash", ["rm -rf build"], metadata), context }))).type,
+      ).toBe("deny")
+    }
+  })
+
   test("checks the trusted raw command for omitted sensitive text", async () => {
     const result = await Effect.runPromise(
       preflight({
@@ -437,6 +487,97 @@ describe("plan shell preflight", () => {
       }),
     )
     expect(result.type).toBe("ask")
+  })
+
+  test("keeps recursive symlink-following inspection manual", async () => {
+    await using workspace = await tmpdir()
+    await using outside = await tmpdir()
+    const continuation = "\\" + "\n"
+    await Bun.write(path.join(outside.path, "outside.txt"), "outside")
+    await symlink(
+      outside.path,
+      path.join(workspace.path, "outside-link"),
+      process.platform === "win32" ? "junction" : undefined,
+    )
+
+    const quotedDelimiter = "ls '\\--' -R -L ."
+    const quotedResult = await Effect.runPromise(
+      preflight({
+        request: request("bash", [quotedDelimiter], {
+          command: quotedDelimiter,
+          shell: "bash",
+          parsed: true,
+          cwd: workspace.path,
+        }),
+        // Keep the quoted operand inside scope so this assertion isolates classification on Windows.
+        context: { ...context, directory: path.parse(workspace.path).root },
+      }),
+    )
+    expect(quotedResult.type).toBe("ask")
+
+    for (const command of ["dir /s/b .", "dir /^s .", "dir /s^/b .", "dir -- /^s ."]) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], {
+            command,
+            shell: "cmd",
+            parsed: true,
+            cwd: workspace.path,
+          }),
+          context: { ...context, directory: path.parse(workspace.path).root },
+        }),
+      )
+      expect(result.type).toBe("ask")
+    }
+
+    for (const [command, shell, expected] of [
+      ["find -L . -maxdepth 2 -type f", "bash", "ask"],
+      ["find -\\L . -maxdepth 2 -type f", "bash", "ask"],
+      [`find -${continuation}L . -maxdepth 2 -type f`, "bash", "ask"],
+      ["ls -R -L .", "bash", "ask"],
+      ["ls -RL .", "bash", "ask"],
+      [`ls -R -${continuation}L .`, "bash", "ask"],
+      ["ls --recursive --dereference .", "bash", "ask"],
+      ["ls --rec --dereference .", "bash", "ask"],
+      ["ls --rec\\ursive --dere\\ference .", "bash", "ask"],
+      [`ls --rec${continuation}ursive --dereference .`, "bash", "ask"],
+      ["Get-ChildItem . -Recurse -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . '--' -Recurse -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Re -Fol", "powershell", "ask"],
+      ["Get-ChildItem . -Rec:1 -Fol:1", "powershell", "ask"],
+      ["Get-ChildItem . -Dep:1 -Fol", "powershell", "ask"],
+      ["dir . -Recurse -Fol", "powershell", "ask"],
+      ["ls . -Rec -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Depth +1 -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Depth 0x1 -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Depth (1) -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Depth 1.0 -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -Depth 1e1 -FollowSymlink", "powershell", "ask"],
+      ["Get-ChildItem . -r -Fol", "powershell", "ask"],
+      ["Get-ChildItem . -s -Fol", "powershell", "ask"],
+      ["Get-ChildItem . -Recurse:(1 -eq 1) -Fol", "powershell", "ask"],
+      ["dir /s .", "cmd", "ask"],
+      ["dir /S .", "cmd", "ask"],
+      ["dir . /s", "cmd", "ask"],
+      ["dir . -- /s", "cmd", "ask"],
+      // DIRCMD is inherited outside metadata and can add /S to any dir invocation.
+      ["dir /b .", "cmd", "ask"],
+      ["find -P .", "bash", "review"],
+      ["ls -R .", "bash", "review"],
+      ["Get-ChildItem . -Recurse:0 -FollowSymlink:1", "powershell", "review"],
+      ["ls -R . -- -L", "bash", "review"],
+      ["Get-ChildItem . -Recurse:$false -FollowSymlink:$true", "powershell", "review"],
+      ["Get-ChildItem . -Depth:0 -FollowSymlink:1", "powershell", "review"],
+      ["Get-ChildItem . -Depth 0 -FollowSymlink", "powershell", "review"],
+    ] as const) {
+      const result = await Effect.runPromise(
+        preflight({
+          request: request("bash", [command], { command, shell, parsed: true, cwd: workspace.path }),
+          context: { ...context, directory: workspace.path },
+        }),
+      )
+      expect(result.type).toBe(expected)
+    }
   })
 
   if (process.platform === "win32") {

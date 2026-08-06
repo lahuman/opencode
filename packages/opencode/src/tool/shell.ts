@@ -260,14 +260,35 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
+const AMBIENT_ENV = /^(?:BASH_ENV|ENV|BASHOPTS|SHELLOPTS|PS4|PROMPT_COMMAND|BASH_FUNC_.+%%|DIRCMD|GIT_EXTERNAL_DIFF|GIT_CONFIG_.*|GIT_PAGER|PAGER|RIPGREP_CONFIG_PATH|LESSOPEN|NODE_OPTIONS|BUN_OPTIONS|LD_PRELOAD|LD_AUDIT|DYLD_.*)$/i
+
+function shellName(shell: string) {
+  const name = Shell.name(shell)
+  if (name === "bash" || name === "pwsh" || name === "powershell" || name === "cmd") return name
+  return "other" as const
+}
+
+function shellEnvironment(env: NodeJS.ProcessEnv) {
+  return Object.keys(env).some((key) => AMBIENT_ENV.test(key)) ? ("ambient" as const) : ("plain" as const)
+}
+
 const ask = Effect.fn("ShellTool.ask")(function* (
   ctx: Tool.Context,
   scan: Scan,
-  input: { command: string; cwd: string; shell: ShellID.Kind; parsed: boolean },
+  input: {
+    command: string
+    cwd: string
+    shell: ShellID.Kind
+    shellName: "bash" | "pwsh" | "powershell" | "cmd" | "other"
+    environment: "plain" | "ambient"
+    parsed: boolean
+  },
 ) {
   const metadata = {
     command: input.command,
     shell: input.shell === "pwsh" ? "powershell" : input.shell,
+    shellName: input.shellName,
+    environment: input.environment,
     parsed: input.parsed,
     cwd: input.cwd,
   }
@@ -624,7 +645,7 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
-              yield* Effect.scoped(
+              const env = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
                     Effect.sync(() => tree.delete()),
@@ -633,12 +654,16 @@ export const ShellTool = Tool.define(
                   const parsed = !tree.rootNode.hasError && scan.patterns.size > 0
                   if (!parsed && ctx.extra?.agentID === "plan") scan.patterns.add(params.command)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
+                  const env = yield* shellEnv(ctx, cwd)
                   yield* ask(ctx, scan, {
                     command: params.command,
                     cwd,
                     shell: ShellID.toKind(name),
+                    shellName: shellName(shell),
+                    environment: shellEnvironment(env),
                     parsed,
                   })
+                  return env
                 }),
               )
 
@@ -647,7 +672,7 @@ export const ShellTool = Tool.define(
                   shell,
                   command: params.command,
                   cwd,
-                  env: yield* shellEnv(ctx, cwd),
+                  env,
                   timeout,
                 },
                 ctx,

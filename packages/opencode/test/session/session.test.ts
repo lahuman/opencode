@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -35,6 +35,58 @@ const it = testEffect(
     ],
   ),
 )
+
+type PatchRace = {
+  readonly firstAtPublish: Deferred.Deferred<void>
+  readonly releaseFirst: Deferred.Deferred<void>
+}
+
+const patchRace = (() => {
+  let pending: PatchRace | undefined
+  const bridge = LayerNode.make({
+    service: EventV2Bridge.Service,
+    layer: Layer.effect(
+      EventV2Bridge.Service,
+      Effect.gen(function* () {
+        const events = yield* EventV2.Service
+        const publish: EventV2.Interface["publish"] = (definition, data, options) =>
+          Effect.suspend(() => {
+            if (definition.type !== SessionNs.Event.Updated.type || !pending)
+              return events.publish(definition, data, options)
+            const current = pending
+            pending = undefined
+            return Deferred.succeed(current.firstAtPublish, undefined).pipe(
+              Effect.andThen(Deferred.await(current.releaseFirst)),
+              Effect.andThen(events.publish(definition, data, options)),
+            )
+          })
+        return EventV2Bridge.Service.of({ ...events, publish })
+      }),
+    ),
+    deps: [EventV2.node],
+  })
+  return {
+    arm: Effect.gen(function* () {
+      const firstAtPublish = yield* Deferred.make<void>()
+      const releaseFirst = yield* Deferred.make<void>()
+      pending = { firstAtPublish, releaseFirst }
+      return pending
+    }),
+    it: testEffect(
+      AppNodeBuilder.build(
+        LayerNode.group([SessionNs.node, SessionProjector.node, CrossSpawnSpawner.node, InstanceStore.node]),
+        [
+          [EventV2Bridge.node, bridge],
+          [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces: false })],
+          [
+            InstanceBootstrap.node,
+            Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+          ],
+        ],
+      ),
+    ),
+  }
+})()
 
 const awaitDeferred = <T>(deferred: Deferred.Deferred<T>, message: string) =>
   Effect.race(
@@ -230,6 +282,38 @@ describe("Session", () => {
       expect(created.approvalMode).toBe("auto_review")
       expect((yield* session.get(created.id)).approvalMode).toBe("auto_review")
       expect(forked.approvalMode).toBe("ask")
+    }),
+  )
+
+  patchRace.it.instance("preserves concurrent approval mode and permission updates", () =>
+    Effect.gen(function* () {
+      const deny = [{ permission: "bash", pattern: "git status", action: "deny" as const }]
+
+      for (const first of ["approval", "permission"] as const) {
+        const session = yield* SessionNs.Service
+        const created = yield* Effect.acquireRelease(session.create({ approvalMode: "auto_review" }), (info) =>
+          session.remove(info.id).pipe(Effect.ignore),
+        )
+        const race = yield* patchRace.arm
+        const approval = session.setApprovalMode({ sessionID: created.id, approvalMode: "ask" })
+        const permission = session.setPermission({ sessionID: created.id, permission: deny })
+        const firstUpdate = first === "approval" ? approval : permission
+        const secondUpdate = first === "approval" ? permission : approval
+
+        const firstFiber = yield* firstUpdate.pipe(Effect.forkChild)
+        yield* awaitDeferred(race.firstAtPublish, `timed out waiting for the first ${first} update to reach publish`)
+        const secondFiber = yield* secondUpdate.pipe(Effect.forkChild)
+        // Higher scheduler numbers run later, so the competing patch reaches publish or the Session lock first.
+        yield* Effect.yieldNowWith(1)
+        yield* Deferred.succeed(race.releaseFirst, undefined)
+
+        yield* Fiber.join(secondFiber)
+        yield* Fiber.join(firstFiber)
+
+        const stored = yield* session.get(created.id)
+        expect(stored.approvalMode).toBe("ask")
+        expect(stored.permission).toEqual(deny)
+      }
     }),
   )
 

@@ -1246,6 +1246,91 @@ describe("Plan shell permission metadata", () => {
     }),
   )
 
+  it.live("marks ambient shell hooks without exposing environment details", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const executable = path.join(tmp, process.platform === "win32" ? "bash.exe" : "bash")
+      yield* Effect.promise(() => Bun.write(executable, ""))
+      yield* runIn(
+        tmp,
+        withShell(
+          { label: "bash", shell: executable },
+          Effect.forEach(
+            [
+              ["BASH_ENV", "private-startup-file"],
+              ["BASH_FUNC_opencode_test%%", "() { echo private-function; }"],
+              ["GIT_EXTERNAL_DIFF", "private-diff-command"],
+            ] as const,
+            ([key, value]) =>
+              Effect.acquireUseRelease(
+                Effect.sync(() => {
+                  const previous = process.env[key]
+                  process.env[key] = value
+                  return previous
+                }),
+                () =>
+                  Effect.gen(function* () {
+                    const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+                    const stop = new Error("stop after permission")
+                    expect(yield* fail({ command: "echo test" }, capture(requests, stop))).toMatchObject({
+                      message: stop.message,
+                    })
+                    const metadata = requests.find((request) => request.permission === "bash")?.metadata ?? {}
+                    expect(metadata).toMatchObject({ shellName: "bash", environment: "ambient" })
+                    expect(JSON.stringify(metadata)).not.toContain(key)
+                    expect(JSON.stringify(metadata)).not.toContain(value)
+                  }),
+                (previous) =>
+                  Effect.sync(() => {
+                    if (previous === undefined) delete process.env[key]
+                    else process.env[key] = previous
+                  }),
+              ),
+            { discard: true },
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.live("reuses the environment snapshot captured before permission", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const key = "OPENCODE_SHELL_ENV_SNAPSHOT_TEST"
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const previous = process.env[key]
+          process.env[key] = "before"
+          return previous
+        }),
+        () =>
+          runIn(
+            tmp,
+            Effect.gen(function* () {
+              const code = `process.stdout.write(String(process.env.${key}))`
+              const result = yield* run(
+                { command: `${PS.has(sh()) ? "& " : ""}${bin} -e ${evalarg(code)}` },
+                {
+                  ...ctx,
+                  ask: () =>
+                    Effect.sync(() => {
+                      process.env[key] = "after"
+                    }),
+                },
+              )
+              expect(result.output).toContain("before")
+              expect(result.output).not.toContain("after")
+            }),
+          ),
+        (previous) =>
+          Effect.sync(() => {
+            if (previous === undefined) delete process.env[key]
+            else process.env[key] = previous
+          }),
+      )
+    }),
+  )
+
   each("reports normalized shell, parsed commands, and cwd", (item) =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()

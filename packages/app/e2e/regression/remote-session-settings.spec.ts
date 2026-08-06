@@ -71,7 +71,7 @@ for (const newLayoutDesigns of [true, false]) {
     await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
   })
 
-  for (const response of ["rejected", "data-less"] as const) {
+  for (const response of ["rejected", "data-less", "auto_review"] as const) {
     test(`${layout} session settings keep auto-accept off when the mode update is ${response}`, async ({ page }) => {
       const permissionRequests: string[] = []
       const sessionUpdates: SessionUpdate[] = []
@@ -97,6 +97,7 @@ for (const newLayoutDesigns of [true, false]) {
       } finally {
         if (response === "rejected") update.respond({ name: "InternalServerError" }, 500)
         if (response === "data-less") update.respond(null)
+        if (response === "auto_review") update.respond({ ...sessionB, approvalMode: "auto_review" })
       }
 
       await expect(input).toBeEnabled()
