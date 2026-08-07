@@ -373,10 +373,11 @@ describe("Plan workflow reminders", () => {
       "plan remains read-only for repository, project, and external state",
       "`todowrite` may update only task tracking",
       "the permission boundary decides whether requested commands run",
-      "neither manual permission approval nor auto-review authorizes a plan mutation",
     ]) {
       expect(prompt).toContain(invariant)
     }
+    expect(PLAN_MODE).toContain("Permission approval does not change Plan's read-only operating mode.")
+    expect(PLAN_MODE).not.toContain("auto-review")
   })
 
   test("requires direct interaction and one active task", () => {
