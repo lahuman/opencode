@@ -19,19 +19,6 @@ export function isDirectoryAutoAccepting(autoAccept: Record<string, boolean>, di
   return autoAccept[key] ?? false
 }
 
-export function isExactAutoAccepting(
-  autoAccept: Record<string, boolean>,
-  sessionID: string,
-  directory: string,
-) {
-  return autoAccept[acceptKey(sessionID, directory)] === true
-}
-
-export function mergePermissionSessions<T extends { id: string }>(authoritative: T[], child: T[]) {
-  const ids = new Set(authoritative.map((session) => session.id))
-  return [...authoritative, ...child.filter((session) => !ids.has(session.id))]
-}
-
 function sessionLineage(session: { id: string; parentID?: string }[], sessionID: string) {
   const parent = session.reduce((acc, item) => {
     if (item.parentID) acc.set(item.id, item.parentID)
@@ -52,13 +39,12 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
 
 export function autoRespondsPermission(
   autoAccept: Record<string, boolean>,
-  session: { id: string; parentID?: string; approvalMode?: "ask" | "auto_review" }[],
+  session: { id: string; parentID?: string }[],
   permission: { sessionID: string },
   directory?: string,
 ) {
   const value = sessionAutoAccept(autoAccept, session, permission, directory)
   if (value !== undefined) return value
-  if (session.findLast((item) => item.id === permission.sessionID)?.approvalMode === "auto_review") return false
   return directory ? isDirectoryAutoAccepting(autoAccept, directory) : false
 }
 
@@ -71,26 +57,4 @@ export function sessionAutoAccept(
   return sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)
-}
-
-export async function resolvePendingAutoResponse(input: {
-  current: () => boolean
-  isPending: () => boolean
-  disposed: () => boolean
-  ensureLineage: () => Promise<boolean>
-  mutation: { pending: () => boolean; idle: () => Promise<void> }
-  autoResponds: () => boolean
-  respond: () => void
-}) {
-  if (input.disposed() || !input.current() || !input.isPending()) return
-  if (!(await input.ensureLineage())) return
-
-  while (!input.disposed() && input.current() && input.isPending()) {
-    await input.mutation.idle()
-    if (input.disposed() || !input.current() || !input.isPending()) return
-    if (input.mutation.pending()) continue
-    if (!input.autoResponds()) return
-    input.respond()
-    return
-  }
 }

@@ -2,7 +2,6 @@ import type { useLocal } from "@/context/local"
 import type { Prompt, usePrompt } from "@/context/prompt"
 import type { PromptInputHistory } from "./history-store"
 import type { FollowupDraft } from "./submit"
-import type { createPermissionMutation } from "@/context/permission-mutation"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
@@ -25,15 +24,6 @@ export type PromptInputControls = {
     selection: ReturnType<typeof useLocal>["model"]
     paid: boolean
     loading: boolean
-  }
-  approval: {
-    visible: () => boolean
-    current: () => NonNullable<Session["approvalMode"]>
-    options: readonly NonNullable<Session["approvalMode"]>[]
-    pending: () => boolean
-    select: (mode: NonNullable<Session["approvalMode"]>) => Promise<void>
-    run: ReturnType<typeof createPermissionMutation>["run"]
-    resetDraft: () => void
   }
   session: {
     id?: string

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createApiForServer, createSdkForServer } from "./server"
 import { createCompatibleApi } from "./server-compat"
-import { normalizeSessionInfo } from "./session"
 
 function setup(
   protocol: "v1" | "v2" | Promise<"v1" | "v2">,
@@ -173,22 +172,6 @@ describe("createCompatibleApi", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/experimental/session")
   })
 
-  test("defaults and preserves approval mode from both V1 session list responses", async () => {
-    const { api } = setup("v1", {
-      sessions: [legacySession("ses_ask"), { ...legacySession("ses_auto"), approvalMode: "auto_review" }],
-    })
-
-    const directory = await api.session.list({ directory: "/repo" })
-    const global = await api.session.list({ parentID: null, search: "session" })
-
-    for (const result of [directory, global]) {
-      expect(result.data.map(normalizeSessionInfo).map((session) => session.approvalMode)).toEqual([
-        "ask",
-        "auto_review",
-      ])
-    }
-  })
-
   /*
   test("projects the V1 default branch", async () => {
     const { api } = setup("v1", { vcs: { branch: "feature", default_branch: "dev" } })
@@ -268,7 +251,6 @@ function legacySession(id: string): {
   title: string
   version: string
   time: { created: number; updated: number }
-  approvalMode?: "ask" | "auto_review"
 } {
   return {
     id,

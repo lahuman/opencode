@@ -605,10 +605,6 @@ export const dict = {
   "error.chain.configFrontmatterError": "Не вдалося розібрати frontmatter у {{path}}:\n{{message}}",
   "error.chain.configInvalid": "Файл конфігурації {{path}} недійсний",
   "error.chain.configInvalidWithMessage": "Файл конфігурації {{path}} недійсний: {{message}}",
-
-  "permission.approvalMode.title": "Режим схвалення",
-  "permission.approvalMode.ask": "Запитувати схвалення",
-  "permission.approvalMode.autoReview": "Схвалювати замість мене",
   "notification.permission.title": "Потрібен дозвіл",
   "notification.permission.description": "{{sessionTitle}} у {{projectName}} потребує дозволу",
   "notification.question.title": "Запитання",

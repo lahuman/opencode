@@ -574,10 +574,6 @@ export const dict = {
   "error.chain.configFrontmatterError": "無法解析 {{path}} 中的 frontmatter:\n{{message}}",
   "error.chain.configInvalid": "設定檔 {{path}} 無效",
   "error.chain.configInvalidWithMessage": "設定檔 {{path}} 無效: {{message}}",
-
-  "permission.approvalMode.title": "核准模式",
-  "permission.approvalMode.ask": "要求核准",
-  "permission.approvalMode.autoReview": "代我核准",
   "notification.permission.title": "需要權限",
   "notification.permission.description": "{{sessionTitle}}（{{projectName}}）需要權限",
   "notification.question.title": "問題",

@@ -9,6 +9,19 @@ const projectID = "proj_request_docks"
 const sessionID = "ses_request_docks"
 const title = "Request dock regression"
 
+
+test("does not show the approval selector in the composer", async ({ page }) => {
+  await mockServer(page, { permissions: [] })
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expectSessionTitle(page, title)
+
+  const composer = page.locator('[data-component="session-composer"]')
+  await expect(composer).toBeVisible()
+  await expect(composer.getByText("Ask for approval")).toHaveCount(0)
+  await expect(composer.getByText("Approve for me")).toHaveCount(0)
+})
+
 test("shows a pending question dock", async ({ page }) => {
   await mockServer(page, {
     questions: [
@@ -102,6 +115,31 @@ test("shows a pending permission dock", async ({ page }) => {
   const request = await reply
   expect(new URL(request.url()).pathname).toBe(`/api/session/${sessionID}/permission/permission-request/reply`)
   expect(request.postDataJSON()).toEqual({ reply: "once" })
+})
+
+
+test("allows a permission permanently when patterns are provided", async ({ page }) => {
+  await mockServer(page, {
+    permissions: [
+      {
+        id: "permission-always",
+        sessionID,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: ["git status"],
+      },
+    ],
+  })
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expectSessionTitle(page, title)
+
+  const permission = page.locator('[data-component="dock-prompt"][data-kind="permission"]')
+  await expect(permission.getByRole("button", { name: "Allow always" })).toBeVisible()
+  const reply = page.waitForRequest((request) => request.method() === "POST")
+  await permission.getByRole("button", { name: "Allow always" }).click()
+  expect((await reply).postDataJSON()).toEqual({ reply: "always" })
 })
 
 test("restores the draft caret before typing after a request dock closes", async ({ page }) => {

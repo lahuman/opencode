@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionApi, SessionInfo, SessionListInput } from "@opencode-ai/client/promise"
-import type { Session } from "@opencode-ai/sdk/v2/client"
 import { listAllSessions, normalizeSessionInfo } from "./session"
 
 describe("normalizeSessionInfo", () => {
@@ -30,7 +29,6 @@ describe("normalizeSessionInfo", () => {
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       title: "New session",
-      approvalMode: "ask",
       agent: "build",
       model: { id: "gpt-5", providerID: "openai", variant: "high" },
       version: "",
@@ -39,24 +37,6 @@ describe("normalizeSessionInfo", () => {
     })
   })
 
-  test("defaults omitted modes and retains explicit runtime modes", () => {
-    const current = sessionInfo("session-current")
-    const currentWithMode = Object.assign(sessionInfo("session-current-mode"), { approvalMode: "auto_review" })
-    const legacy = {
-      id: "session-legacy",
-      slug: "session-legacy",
-      projectID: "project-1",
-      directory: "/repo",
-      title: "Legacy session",
-      version: "1",
-      time: { created: 1, updated: 1 },
-    } as Session
-
-    expect(normalizeSessionInfo(current).approvalMode).toBe("ask")
-    expect(normalizeSessionInfo(currentWithMode).approvalMode).toBe("auto_review")
-    expect(normalizeSessionInfo(legacy).approvalMode).toBe("ask")
-    expect(normalizeSessionInfo({ ...legacy, approvalMode: "auto_review" }).approvalMode).toBe("auto_review")
-  })
 })
 
 describe("listAllSessions", () => {

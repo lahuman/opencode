@@ -61,21 +61,6 @@ export function SessionPermissionDock(props: {
         </div>
       </Show>
 
-      <Show when={props.request.review}>
-        {(review) => (
-          <div data-slot="permission-row">
-            <span data-slot="permission-spacer" aria-hidden="true" />
-            <div data-slot="permission-review" class="flex flex-col gap-1">
-              <span data-slot="permission-review-risk" class="text-12-medium text-text-base">
-                {review().risk}
-              </span>
-              <span data-slot="permission-review-reason" class="text-12-regular text-text-muted">
-                {review().reason}
-              </span>
-            </div>
-          </div>
-        )}
-      </Show>
 
       <Show when={props.request.patterns.length > 0}>
         <div data-slot="permission-row">

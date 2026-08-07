@@ -3,14 +3,8 @@ import { createStore } from "solid-js/store"
 import type { Prompt, PromptStore } from "@/context/prompt"
 import { createPromptState, DEFAULT_PROMPT } from "@/context/prompt-state"
 import type { ModelSelection } from "@/context/local"
-import { createPermissionMutation, toggleBlindAuto } from "@/context/permission-mutation"
 
 let createPromptSubmitImpl: typeof import("./submit").createPromptSubmit
-
-type ApprovalInput = {
-  approvalMode: () => "ask" | "auto_review"
-  approvalMutation: ReturnType<typeof createPermissionMutation>["run"]
-}
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -21,10 +15,6 @@ const sessionCreateInputs: Array<{
 }> = []
 const enabledAutoAccept: Array<{ server: string; sessionID: string; directory: string }> = []
 const disabledAutoAccept: Array<{ server: string; sessionID: string; directory: string }> = []
-const sessionUpdates: Array<{
-  directory: string
-  input: { sessionID: string; approvalMode: "ask" | "auto_review" }
-}> = []
 const order: string[] = []
 const optimistic: Array<{
   directory?: string
@@ -56,25 +46,14 @@ let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
 let createSessionFailure: Error | undefined
-let updateSessionGate: Promise<void> | undefined
-let updateSessionFailure: Error | undefined
-let updateSessionHasData = true
 let createWorktreeFailure: Error | undefined
 let shellFailure: Error | undefined
 let commandFailure: Error | undefined
 let promptFailure: Error | undefined
 let enterprise = false
-let selectedApprovalMode: "ask" | "auto_review" = "ask"
-let approvalMutation = createPermissionMutation()
 
-function createPromptSubmit(
-  input: Omit<Parameters<typeof createPromptSubmitImpl>[0], keyof ApprovalInput> & Partial<ApprovalInput>,
-) {
-  return createPromptSubmitImpl({
-    ...input,
-    approvalMode: input.approvalMode ?? (() => selectedApprovalMode),
-    approvalMutation: input.approvalMutation ?? approvalMutation.run,
-  })
+function createPromptSubmit(input: Parameters<typeof createPromptSubmitImpl>[0]) {
+  return createPromptSubmitImpl(input)
 }
 
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
@@ -127,7 +106,6 @@ const clientFor = (directory: string) => {
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
             time: { created: 1, updated: 1 },
             title: `New session ${createdSessions.length}`,
-            approvalMode: "ask" as const,
             marker: "created",
             location: { directory: location },
           }
@@ -151,23 +129,6 @@ const clientFor = (directory: string) => {
       },
     },
     session: {
-      update: async (input: { sessionID: string; approvalMode: "ask" | "auto_review" }) => {
-        order.push("update")
-        sessionUpdates.push({ directory, input })
-        await updateSessionGate
-        if (updateSessionFailure) throw updateSessionFailure
-        if (!updateSessionHasData) return { data: undefined }
-        return {
-          data: {
-            id: input.sessionID,
-            projectID: "project",
-            directory,
-            title: "Authoritative update",
-            approvalMode: input.approvalMode,
-            marker: "updated",
-          },
-        }
-      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -362,7 +323,6 @@ beforeEach(() => {
   sessionCreateInputs.length = 0
   enabledAutoAccept.length = 0
   disabledAutoAccept.length = 0
-  sessionUpdates.length = 0
   order.length = 0
   optimistic.length = 0
   optimisticSeeded.length = 0
@@ -382,16 +342,11 @@ beforeEach(() => {
   permissionServer = "server-a"
   createSessionGate = undefined
   createSessionFailure = undefined
-  updateSessionGate = undefined
-  updateSessionFailure = undefined
-  updateSessionHasData = true
   createWorktreeFailure = undefined
   shellFailure = undefined
   commandFailure = undefined
   promptFailure = undefined
   enterprise = false
-  selectedApprovalMode = "ask"
-  approvalMutation = createPermissionMutation()
   toasts.length = 0
   availableCommands.length = 0
   serverSessionSyncs = 0
@@ -482,32 +437,8 @@ describe("prompt submit worktree selection", () => {
 
     const first = submit.handleSubmit(event)
     expect(initial.current()).toEqual(DEFAULT_PROMPT)
-    expect(approvalMutation.pending()).toBe(true)
 
-    active = next
-    await submit.handleSubmit(event)
-    const selector = await approvalMutation.run(() => order.push("selector"))
-    const settings = await approvalMutation.run(() =>
-      toggleBlindAuto({
-        checked: true,
-        active: false,
-        updateToAsk: async () => {
-          order.push("settings-update")
-        },
-        resetDrafts: () => undefined,
-        enableSession: () => order.push("settings-enable"),
-        disableSession: () => undefined,
-        enableDirectory: () => undefined,
-        disableDirectory: () => undefined,
-        sessionID: "session-settings",
-      }),
-    )
-    const palette = await approvalMutation.run(() => order.push("palette"))
-
-    expect(next.current()).toEqual([{ type: "text", content: "pwd", start: 0, end: 3 }])
-    expect(selector).toEqual({ status: "busy" })
-    expect(settings).toEqual({ status: "busy" })
-    expect(palette).toEqual({ status: "busy" })
+    void submit.handleSubmit(event)
     expect(createdSessions).toEqual([])
 
     release()
@@ -521,13 +452,6 @@ describe("prompt submit worktree selection", () => {
       { server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a" },
     ])
 
-    await submit.handleSubmit(event)
-    const retry = await approvalMutation.run(() => order.push("retry"))
-
-    expect(next.current()).toEqual(DEFAULT_PROMPT)
-    expect(createdSessions).toEqual(["/repo/worktree-a", "/repo/worktree-a"])
-    expect(sentShell.map((item) => item.command)).toEqual(["ls", "pwd"])
-    expect(retry).toEqual({ status: "completed", value: expect.any(Number) })
   })
 
   test("restores a failed initial prompt and permits retry", async () => {
@@ -828,89 +752,6 @@ describe("prompt submit worktree selection", () => {
       { directory: "/repo/worktree-b", sessionID: "session-2" },
     ])
     expect(syncedDirectories).toEqual(["/repo/worktree-a", "/repo/worktree-a", "/repo/worktree-b", "/repo/worktree-b"])
-  })
-
-  test("persists auto-review through the scoped legacy client before seeding and prompting", async () => {
-    selectedApprovalMode = "auto_review"
-    const submit = createPromptSubmit({
-      prompt,
-      info: () => undefined,
-      imageAttachments: () => [],
-      commentCount: () => 0,
-      autoAccept: () => true,
-      mode: () => "normal",
-      working: () => false,
-      editor: () => undefined,
-      queueScroll: () => undefined,
-      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
-      addToHistory: () => undefined,
-      resetHistoryNavigation: () => undefined,
-      setMode: () => undefined,
-      setPopover: () => undefined,
-      newSessionWorktree: () => selected,
-      onNewSessionWorktreeReset: () => undefined,
-      onSubmit: () => undefined,
-    })
-
-    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
-    await Bun.sleep(0)
-
-    expect(sessionUpdates).toEqual([
-      {
-        directory: "/repo/worktree-a",
-        input: { sessionID: "session-1", approvalMode: "auto_review" },
-      },
-    ])
-    expect(disabledAutoAccept).toEqual([
-      { server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a" },
-    ])
-    expect(enabledAutoAccept).toEqual([])
-    expect(order).toEqual(["create", "update", "disable", "seed", "prompt"])
-    expect(optimisticSeeded).toEqual([true])
-    expect(storedSessions["/repo/worktree-a"]?.[0]).toMatchObject({
-      id: "session-1",
-      title: "Authoritative update",
-      marker: "updated",
-      approvalMode: "auto_review",
-    })
-  })
-
-  test("restores input without seeding or local writes when the auto-review update fails", async () => {
-    selectedApprovalMode = "auto_review"
-    updateSessionFailure = new Error("approval update failed")
-    const current = createPromptState({ prompt: "ls" })
-    const submit = createPromptSubmit({
-      prompt: current,
-      info: () => undefined,
-      imageAttachments: () => [],
-      commentCount: () => 0,
-      autoAccept: () => true,
-      mode: () => "shell",
-      working: () => false,
-      editor: () => undefined,
-      queueScroll: () => undefined,
-      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
-      addToHistory: () => undefined,
-      resetHistoryNavigation: () => undefined,
-      setMode: () => undefined,
-      setPopover: () => undefined,
-      newSessionWorktree: () => selected,
-      onNewSessionWorktreeReset: () => undefined,
-      onSubmit: () => undefined,
-    })
-
-    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
-
-    expect(current.current()).toEqual([{ type: "text", content: "ls", start: 0, end: 2 }])
-    expect(createdSessions).toEqual(["/repo/worktree-a"])
-    expect(sessionUpdates).toHaveLength(1)
-    expect(disabledAutoAccept).toEqual([])
-    expect(enabledAutoAccept).toEqual([])
-    expect(storedSessions["/repo/worktree-a"]).toEqual([])
-    expect(promoted).toEqual([])
-    expect(sentShell).toEqual([])
-    expect(order).toEqual(["create", "update"])
-    expect(toasts).toHaveLength(1)
   })
 
   test("applies auto-accept to newly created sessions", async () => {

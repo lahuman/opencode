@@ -23,7 +23,6 @@ import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
-import type { createPermissionMutation } from "@/context/permission-mutation"
 
 type PendingPrompt = {
   abort: AbortController
@@ -206,8 +205,6 @@ type PromptSubmitInput = {
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
-  approvalMode: Accessor<NonNullable<Session["approvalMode"]>>
-  approvalMutation: ReturnType<typeof createPermissionMutation>["run"]
   mode: Accessor<"normal" | "shell">
   working: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
@@ -384,9 +381,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     let session = input.info()
 
     if (!session && isNewSession) {
-      const result = await input
-        .approvalMutation(async () => {
-          const selectedApprovalMode = input.approvalMode()
+      const result = await (async () => {
           const shouldAutoAccept = input.autoAccept()
           const worktreeSelection = input.newSessionWorktree?.() || "main"
           let directory = projectDirectory
@@ -437,22 +432,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
             location: { directory },
           })
-          const authoritative =
-            selectedApprovalMode === "auto_review"
-              ? await client.session
-                  .update({ sessionID: created.id, approvalMode: "auto_review" })
-                  .then((value) => {
-                    if (!value.data) throw new Error("Failed to update session approval mode")
-                    return normalizeSessionInfo(value.data)
-                  })
-              : normalizeSessionInfo(created)
-
-          if (selectedApprovalMode === "auto_review") permissionState.disableAutoAccept(authoritative.id, directory)
-          if (selectedApprovalMode === "ask" && shouldAutoAccept) {
+          const authoritative = normalizeSessionInfo(created)
+          if (shouldAutoAccept) {
             permissionState.enableAutoAccept(authoritative.id, directory)
           }
           return { session: authoritative, directory }
-        })
+        })()
         .catch((err) => {
           showToast({
             title: language.t("prompt.toast.sessionCreateFailed.title"),
@@ -462,9 +447,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
 
-      if (!result || result.status === "busy" || !result.value) return
-      sessionDirectory = result.value.directory
-      const createdSession = result.value.session
+      if (!result) return
+      sessionDirectory = result.directory
+      const createdSession = result.session
       session = createdSession
       seed(sessionDirectory, createdSession)
       await startTransition(() => {
@@ -483,12 +468,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         retarget(destination)
       })
     } else {
-      const result = await input.approvalMutation(() => {
-        input.addToHistory(currentPrompt, mode)
-        input.resetHistoryNavigation()
-        clearInput()
-      })
-      if (result.status === "busy") return
+      input.addToHistory(currentPrompt, mode)
+      input.resetHistoryNavigation()
+      clearInput()
     }
 
     if (!session) {

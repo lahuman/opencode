@@ -1253,8 +1253,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       imageAttachments,
       commentCount,
       autoAccept: () => accepting(),
-      approvalMode: props.controls.approval.current,
-      approvalMutation: props.controls.approval.run,
       mode: () => store.mode,
       working,
       editor: () => editorRef,
@@ -1732,34 +1730,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                         variant="ghost"
                       />
                     </TooltipKeybind>
-                  </div>
-                </Show>
-                <Show when={props.controls.approval.visible()}>
-                  <div data-component="prompt-approval-control">
-                    <Select
-                      size="normal"
-                      options={[...props.controls.approval.options]}
-                      current={props.controls.approval.current()}
-                      label={(value) =>
-                        language.t(
-                          value === "ask" ? "permission.approvalMode.ask" : "permission.approvalMode.autoReview",
-                        )
-                      }
-                      onSelect={(value) => {
-                        if (!value) return
-                        void props.controls.approval.select(value)
-                        restoreFocus()
-                      }}
-                      disabled={props.controls.approval.pending()}
-                      class="capitalize max-w-[160px] text-text-base"
-                      valueClass="truncate text-13-regular text-text-base"
-                      triggerStyle={control()}
-                      triggerProps={{
-                        "aria-label": language.t("permission.approvalMode.title"),
-                        "data-action": "prompt-approval-mode",
-                      }}
-                      variant="ghost"
-                    />
                   </div>
                 </Show>
                 <Show when={!providersLoading()}>

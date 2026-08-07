@@ -1,29 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { PermissionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import {
-  autoRespondsPermission,
-  isDirectoryAutoAccepting,
-  isExactAutoAccepting,
-  mergePermissionSessions,
-  resolvePendingAutoResponse,
-  sessionAutoAccept,
-} from "./permission-auto-respond"
-import { createPermissionMutation } from "./permission-mutation"
+import { autoRespondsPermission, isDirectoryAutoAccepting, sessionAutoAccept } from "./permission-auto-respond"
 
-function deferred() {
-  let resolve: () => void = () => {}
-  const promise = new Promise<void>((done) => {
-    resolve = done
-  })
-  return { promise, resolve }
-}
-
-const session = (input: { id: string; parentID?: string; approvalMode?: "ask" | "auto_review" }) =>
+const session = (input: { id: string; parentID?: string }) =>
   ({
     id: input.id,
     parentID: input.parentID,
-    approvalMode: input.approvalMode,
   }) as Session
 
 const permission = (sessionID: string) =>
@@ -121,48 +104,6 @@ describe("autoRespondsPermission", () => {
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("child"), directory)).toBe(true)
   })
-
-  test("prefers an exact true override over target auto-review mode", () => {
-    const directory = "/tmp/project"
-    const sessions = [session({ id: "root", approvalMode: "auto_review" })]
-    const autoAccept = { [`${base64Encode(directory)}/root`]: true }
-
-    expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(true)
-  })
-
-  test("uses target auto-review mode before directory fallback", () => {
-    const directory = "/tmp/project"
-    const sessions = [session({ id: "root", approvalMode: "auto_review" })]
-    const autoAccept = { [`${base64Encode(directory)}/*`]: true }
-
-    expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(false)
-  })
-
-  test("keeps an exact false stronger than parent and directory true", () => {
-    const directory = "/tmp/project"
-    const sessions = [
-      session({ id: "root" }),
-      session({ id: "child", parentID: "root", approvalMode: "auto_review" }),
-    ]
-    const autoAccept = {
-      [`${base64Encode(directory)}/*`]: true,
-      [`${base64Encode(directory)}/root`]: true,
-      [`${base64Encode(directory)}/child`]: false,
-    }
-
-    expect(autoRespondsPermission(autoAccept, sessions, permission("child"), directory)).toBe(false)
-  })
-
-  test("does not inherit a parent auto-review mode into an ask fork", () => {
-    const directory = "/tmp/project"
-    const sessions = [
-      session({ id: "root", approvalMode: "auto_review" }),
-      session({ id: "child", parentID: "root", approvalMode: "ask" }),
-    ]
-    const autoAccept = { [`${base64Encode(directory)}/*`]: true }
-
-    expect(autoRespondsPermission(autoAccept, sessions, permission("child"), directory)).toBe(true)
-  })
 })
 
 describe("isDirectoryAutoAccepting", () => {
@@ -180,150 +121,5 @@ describe("isDirectoryAutoAccepting", () => {
     const directory = "/tmp/project"
     const autoAccept = { [`${base64Encode(directory)}/*`]: false }
     expect(isDirectoryAutoAccepting(autoAccept, directory)).toBe(false)
-  })
-})
-
-describe("isExactAutoAccepting", () => {
-  test("does not mistake directory or legacy fallback for an exact scoped enable", () => {
-    const directory = "/tmp/project"
-    const autoAccept = {
-      [`${base64Encode(directory)}/*`]: true,
-      session: true,
-    }
-
-    expect(isExactAutoAccepting(autoAccept, "session", directory)).toBe(false)
-    expect(
-      isExactAutoAccepting({ ...autoAccept, [`${base64Encode(directory)}/session`]: true }, "session", directory),
-    ).toBe(true)
-  })
-})
-
-describe("resolvePendingAutoResponse", () => {
-  test("keeps a stale child duplicate from overriding hydrated global auto-review", async () => {
-    const directory = "/tmp/project"
-    const mutation = createPermissionMutation()
-    const child = [session({ id: "root", approvalMode: "ask" })]
-    let synchronized = child
-    let replies = 0
-
-    await resolvePendingAutoResponse({
-      current: () => true,
-      isPending: () => true,
-      disposed: () => false,
-      ensureLineage: async () => {
-        synchronized = mergePermissionSessions(
-          [session({ id: "root", approvalMode: "auto_review" })],
-          child,
-        )
-        return true
-      },
-      mutation,
-      autoResponds: () =>
-        autoRespondsPermission(
-          { [`${base64Encode(directory)}/*`]: true },
-          synchronized,
-          permission("root"),
-          directory,
-        ),
-      respond: () => replies++,
-    })
-
-    expect(synchronized).toEqual([session({ id: "root", approvalMode: "auto_review" })])
-    expect(replies).toBe(0)
-  })
-
-  test("rechecks latest synchronized state after lineage hydration", async () => {
-    const hydration = deferred()
-    const mutation = createPermissionMutation()
-    let accepting = true
-    let replies = 0
-    const result = resolvePendingAutoResponse({
-      current: () => true,
-      isPending: () => true,
-      disposed: () => false,
-      ensureLineage: async () => {
-        await hydration.promise
-        return true
-      },
-      mutation,
-      autoResponds: () => accepting,
-      respond: () => replies++,
-    })
-
-    accepting = false
-    hydration.resolve()
-    await result
-
-    expect(replies).toBe(0)
-  })
-
-  test("responds once for an ordinary pending permission", async () => {
-    const mutation = createPermissionMutation()
-    let replies = 0
-
-    await resolvePendingAutoResponse({
-      current: () => true,
-      isPending: () => true,
-      disposed: () => false,
-      ensureLineage: async () => true,
-      mutation,
-      autoResponds: () => true,
-      respond: () => replies++,
-    })
-
-    expect(replies).toBe(1)
-  })
-
-  test("waits for successful approval mutation and keeps auto-review pending", async () => {
-    const hold = deferred()
-    const mutation = createPermissionMutation()
-    let accepting = true
-    let replies = 0
-    const update = mutation.run(async () => {
-      await hold.promise
-      accepting = false
-    })
-    const result = resolvePendingAutoResponse({
-      current: () => true,
-      isPending: () => true,
-      disposed: () => false,
-      ensureLineage: async () => true,
-      mutation,
-      autoResponds: () => accepting,
-      respond: () => replies++,
-    })
-
-    hold.resolve()
-    await update
-    await result
-
-    expect(replies).toBe(0)
-  })
-
-  test("rechecks prior blind auto after a failed approval mutation", async () => {
-    const hold = deferred()
-    const mutation = createPermissionMutation()
-    let replies = 0
-    const update = mutation
-      .run(async () => {
-        await hold.promise
-        throw new Error("update failed")
-      })
-      .catch(() => undefined)
-    const result = resolvePendingAutoResponse({
-      current: () => true,
-      isPending: () => true,
-      disposed: () => false,
-      ensureLineage: async () => true,
-      mutation,
-      autoResponds: () => true,
-      respond: () => replies++,
-    })
-
-    hold.resolve()
-    await update
-    await result
-
-    expect(replies).toBe(1)
   })
 })

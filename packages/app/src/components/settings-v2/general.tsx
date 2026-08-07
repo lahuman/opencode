@@ -8,7 +8,6 @@ import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
-import { toggleBlindAuto } from "@/context/permission-mutation"
 import { usePlatform } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
@@ -26,7 +25,6 @@ import {
   useSettings,
 } from "@/context/settings"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
-import { showToast } from "@/utils/toast"
 import { ExternalLink } from "../external-link"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
@@ -110,32 +108,14 @@ export const SettingsGeneralV2: Component<{
 
   const toggleAccept = (checked: boolean) => {
     const value = dir()
-    const sessionID = props.sessionID
-    if (!value || !sessionID) return
-    const state = permission.currentServerState()
-    const sdk = serverSdk()
-    void state.approvalMutation
-      .run(() =>
-        toggleBlindAuto({
-          checked,
-          active: state.isAutoAccepting(sessionID, value),
-          sessionID,
-          updateToAsk: async (sessionID) => {
-            const result = await sdk
-              .createClient({ directory: value, throwOnError: true })
-              .session.update({ sessionID, approvalMode: "ask" })
-            if (!result.data) throw new Error("Failed to update session approval mode")
-            if (result.data.approvalMode !== undefined && result.data.approvalMode !== "ask")
-              throw new Error("Failed to update session approval mode")
-          },
-          resetDrafts: () => state.approvalMutation.resetDrafts(value),
-          enableSession: (sessionID) => state.enableAutoAccept(sessionID, value),
-          disableSession: (sessionID) => state.disableAutoAccept(sessionID, value),
-          enableDirectory: () => state.enableAutoAcceptDirectory(value),
-          disableDirectory: () => state.disableAutoAcceptDirectory(value),
-        }),
-      )
-      .catch(() => showToast({ title: language.t("common.requestFailed"), variant: "error" }))
+    if (!value || !props.sessionID) return
+
+    if (checked) {
+      permission.enableAutoAccept(props.sessionID, value)
+      return
+    }
+
+    permission.disableAutoAccept(props.sessionID, value)
   }
   const desktop = createMemo(() => platform.platform === "desktop")
 
@@ -300,11 +280,7 @@ export const SettingsGeneralV2: Component<{
           description={language.t("toast.permissions.autoaccept.on.description")}
         >
           <div data-action="settings-auto-accept-permissions">
-            <Switch
-              checked={accepting()}
-              disabled={!dir() || permission.currentServerState().approvalMutation.pending()}
-              onChange={toggleAccept}
-            />
+            <Switch checked={accepting()} disabled={!dir()} onChange={toggleAccept} />
           </div>
         </SettingsRowV2>
 

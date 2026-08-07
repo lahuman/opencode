@@ -582,10 +582,6 @@ export const dict = {
   "error.chain.configFrontmatterError": "Neuspjelo parsiranje frontmatter-a u {{path}}:\n{{message}}",
   "error.chain.configInvalid": "Konfiguracijska datoteka na {{path}} nije ispravna",
   "error.chain.configInvalidWithMessage": "Konfiguracijska datoteka na {{path}} nije ispravna: {{message}}",
-
-  "permission.approvalMode.title": "Način odobravanja",
-  "permission.approvalMode.ask": "Zatraži odobrenje",
-  "permission.approvalMode.autoReview": "Odobri umjesto mene",
   "notification.permission.title": "Potrebna dozvola",
   "notification.permission.description": "{{sessionTitle}} u {{projectName}} traži dozvolu",
   "notification.question.title": "Pitanje",

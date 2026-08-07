@@ -9,108 +9,39 @@ const directoryA = "C:/server-a"
 const directoryB = "/home/server-b"
 const sessionA = session("ses_server_a", directoryA, "Server A session")
 const childSessionA = { ...session("ses_server_a_child", directoryA, "Server A child session"), parentID: sessionA.id }
-const sessionB = { ...session("ses_server_b", directoryB, "Server B session"), approvalMode: "auto_review" as const }
+const sessionB = session("ses_server_b", directoryB, "Server B session")
 
-for (const newLayoutDesigns of [true, false]) {
-  const layout = newLayoutDesigns ? "new" : "legacy"
+test("session settings use the remote server context", async ({ page }) => {
+  const permissionRequests: string[] = []
+  await mockServers(page, permissionRequests)
+  await configureServers(page)
 
-  test(`${layout} session settings update server mode before enabling remote auto-accept`, async ({ page }) => {
-    const permissionRequests: string[] = []
-    const sessionUpdates: SessionUpdate[] = []
-    await mockServers(page, permissionRequests, [], sessionUpdates)
-    await configureServers(page, [], newLayoutDesigns)
+  await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
+  await expect(page.getByText(sessionB.title).first()).toBeVisible()
+  await page.keyboard.press("Control+,")
 
-    await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
-    await expect(page.getByText(sessionB.title).first()).toBeVisible()
-    await page.keyboard.press("Control+,")
+  const dialog = page.locator(".settings-v2-dialog")
+  const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
+  const input = autoAccept.getByRole("switch")
+  await expect(autoAccept).toBeVisible()
+  await expect(input).toBeEnabled()
+  permissionRequests.length = 0
+  await autoAccept.locator('[data-slot="switch-control"]').click()
+  await expect(input).toBeChecked()
+  await expect
+    .poll(() =>
+      permissionRequests.some((request) => {
+        const url = new URL(request)
+        return url.origin === serverB && url.searchParams.get("directory") === directoryB
+      }),
+    )
+    .toBe(true)
+  expect(permissionRequests.every((request) => new URL(request).origin === serverB)).toBe(true)
 
-    const dialog = page.locator(newLayoutDesigns ? ".settings-v2-dialog" : ".settings-dialog")
-    const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
-    const input = autoAccept.getByRole("switch")
-    const control = autoAccept.locator('[data-slot="switch-control"]')
-    await expect(autoAccept).toBeVisible()
-    await expect(input).toBeEnabled()
-    await expect(input).not.toBeChecked()
-    permissionRequests.length = 0
-
-    await control.click()
-    await expect.poll(() => sessionUpdates.length).toBe(1)
-    const update = sessionUpdates[0]!
-    try {
-      expect({ origin: update.origin, directory: update.directory, sessionID: update.sessionID }).toEqual({
-        origin: serverB,
-        directory: directoryB,
-        sessionID: sessionB.id,
-      })
-      expect(update.body).toEqual({ approvalMode: "ask" })
-      await expect(input).toBeDisabled()
-      await expect(input).not.toBeChecked()
-      expect(permissionRequests).toEqual([])
-
-      await control.click({ force: true })
-      await page.waitForTimeout(100)
-      expect(sessionUpdates).toHaveLength(1)
-      expect(permissionRequests).toEqual([])
-    } finally {
-      update.respond({ ...sessionB, approvalMode: "ask" })
-    }
-    await expect(input).toBeEnabled()
-    await expect(input).toBeChecked()
-    await expect
-      .poll(() =>
-        permissionRequests.some((request) => {
-          const url = new URL(request)
-          return url.origin === serverB && url.searchParams.get("directory") === directoryB
-        }),
-      )
-      .toBe(true)
-    expect(permissionRequests.every((request) => new URL(request).origin === serverB)).toBe(true)
-
-    await dialog.getByRole("tab", { name: "Models" }).click()
-    await expect(dialog.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
-    await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
-  })
-
-  for (const response of ["rejected", "data-less", "auto_review"] as const) {
-    test(`${layout} session settings keep auto-accept off when the mode update is ${response}`, async ({ page }) => {
-      const permissionRequests: string[] = []
-      const sessionUpdates: SessionUpdate[] = []
-      await mockServers(page, permissionRequests, [], sessionUpdates)
-      await configureServers(page, [], newLayoutDesigns)
-
-      await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
-      await expect(page.getByText(sessionB.title).first()).toBeVisible()
-      await page.keyboard.press("Control+,")
-
-      const dialog = page.locator(newLayoutDesigns ? ".settings-v2-dialog" : ".settings-dialog")
-      const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
-      const input = autoAccept.getByRole("switch")
-      await expect(input).toBeEnabled()
-      await expect(input).not.toBeChecked()
-      permissionRequests.length = 0
-
-      await autoAccept.locator('[data-slot="switch-control"]').click()
-      await expect.poll(() => sessionUpdates.length).toBe(1)
-      const update = sessionUpdates[0]!
-      try {
-        await expect(input).toBeDisabled()
-      } finally {
-        if (response === "rejected") update.respond({ name: "InternalServerError" }, 500)
-        if (response === "data-less") update.respond(null)
-        if (response === "auto_review") update.respond({ ...sessionB, approvalMode: "auto_review" })
-      }
-
-      await expect(input).toBeEnabled()
-      await expect(input).not.toBeChecked()
-      await expect(
-        page
-          .locator(newLayoutDesigns ? '[data-component="toast-v2"]' : '[data-component="toast"][data-variant="error"]')
-          .filter({ hasText: "Request failed" }),
-      ).toHaveCount(1)
-      expect(permissionRequests).toEqual([])
-    })
-  }
-}
+  await dialog.getByRole("tab", { name: "Models" }).click()
+  await expect(dialog.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
+  await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
+})
 
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
@@ -219,37 +150,18 @@ type PermissionResponse = {
   body: unknown
 }
 
-type SessionUpdate = {
-  origin: string
-  directory?: string
-  sessionID: string
-  body: unknown
-  respond: (body: unknown, status?: number) => void
-}
-
-async function configureServers(
-  page: Page,
-  tabs: { type: "session"; server: string; sessionId: string }[] = [],
-  newLayoutDesigns = true,
-) {
+async function configureServers(page: Page, tabs: { type: "session"; server: string; sessionId: string }[] = []) {
   await page.addInitScript(
-    ({ serverB, tabs, newLayoutDesigns }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns } }))
-      localStorage.setItem("app-version.v1", JSON.stringify({ version: "1.18.11" }))
-      localStorage.setItem("opencode.settings.dat:defaultServerUrl", serverB)
+    ({ serverB, tabs }) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify(tabs))
     },
-    { serverB, tabs, newLayoutDesigns },
+    { serverB, tabs },
   )
 }
 
-async function mockServers(
-  page: Page,
-  permissionRequests: string[],
-  permissionResponses: PermissionResponse[] = [],
-  sessionUpdates?: SessionUpdate[],
-) {
+async function mockServers(page: Page, permissionRequests: string[], permissionResponses: PermissionResponse[] = []) {
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url())
     if (url.origin !== serverA && url.origin !== serverB) return route.fallback()
@@ -267,24 +179,6 @@ async function mockServers(
         body: route.request().postDataJSON(),
       })
       return json(route, true)
-    }
-    const update = sessions.find((session) => url.pathname === `/session/${session.id}`)
-    if (route.request().method() === "PATCH" && update) {
-      const body = route.request().postDataJSON()
-      const headerDirectory = route.request().headers()["x-opencode-directory"]
-      const updateDirectory = requestDirectory ?? (headerDirectory ? decodeURIComponent(headerDirectory) : undefined)
-      if (updateDirectory && updateDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
-      if (!sessionUpdates) return json(route, { ...update, approvalMode: "ask" })
-      const result = await new Promise<{ body: unknown; status: number }>((resolve) => {
-        sessionUpdates.push({
-          origin: url.origin,
-          directory: updateDirectory,
-          sessionID: update.id,
-          body,
-          respond: (next, status = 200) => resolve({ body: next, status }),
-        })
-      })
-      return json(route, result.body, result.status)
     }
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event")
@@ -317,7 +211,6 @@ async function mockServers(
     if (currentSessionInfo) return json(route, { data: currentSession(currentSessionInfo) })
     if (sessions.some((session) => url.pathname === `/api/session/${session.id}/message`))
       return json(route, { data: [], cursor: {} })
-    if (url.pathname === "/session") return json(route, sessions)
     const current = sessions.find((session) => url.pathname === `/session/${session.id}`)
     if (current) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)

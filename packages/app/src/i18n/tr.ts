@@ -587,10 +587,6 @@ export const dict = {
   "error.chain.configFrontmatterError": "{{path}} içindeki ön bilgi ayrıştırılamadı:\n{{message}}",
   "error.chain.configInvalid": "{{path}} adresindeki yapılandırma dosyası geçersiz",
   "error.chain.configInvalidWithMessage": "{{path}} adresindeki yapılandırma dosyası geçersiz: {{message}}",
-
-  "permission.approvalMode.title": "Onay modu",
-  "permission.approvalMode.ask": "Onay iste",
-  "permission.approvalMode.autoReview": "Benim için onayla",
   "notification.permission.title": "İzin gerekli",
   "notification.permission.description": "{{projectName}} içindeki {{sessionTitle}} izin gerektiriyor",
   "notification.question.title": "Soru",
