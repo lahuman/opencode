@@ -70,13 +70,15 @@ const layer = Layer.effect(
       let needsAsk = false
 
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
-        yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
-        if (rule.action === "deny") {
+        const configured = evaluate(request.permission, pattern, ruleset)
+        if (configured.action === "deny") {
+          yield* Effect.logInfo("evaluated", { permission: request.permission, action: configured.action })
           return yield* new PermissionV1.DeniedError({
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
           })
         }
+        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        yield* Effect.logInfo("evaluated", { permission: request.permission, action: rule.action })
         if (rule.action === "allow") continue
         needsAsk = true
       }
@@ -93,7 +95,11 @@ const layer = Layer.effect(
         always: request.always,
         tool: request.tool,
       }
-      yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
+      yield* Effect.logInfo("asking", {
+        id,
+        permission: info.permission,
+        patternCount: info.patterns.length,
+      })
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(id, { info, deferred })

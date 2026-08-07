@@ -770,7 +770,7 @@ it.instance(
 )
 
 it.instance(
-  "enterprise permission reply log contains metadata-safe fields only",
+  "enterprise permission logs contain metadata-safe fields only",
   () => {
     const logs: unknown[] = []
     const logger = Logger.make((options) => logs.push(options.message))
@@ -794,18 +794,31 @@ it.instance(
       })
       yield* Fiber.await(fiber)
 
-      const entry = logs
-        .filter((item): item is ReadonlyArray<unknown> => Array.isArray(item))
-        .find((item) => item[0] === "permission replied")
-      expect(entry).toEqual([
-        "permission replied",
-        {
-          permission: "bash",
-          reply: "reject",
-          patternCount: 2,
-        },
+      const entries = logs.filter(
+        (item): item is ReadonlyArray<unknown> =>
+          Array.isArray(item) && ["evaluated", "asking", "permission replied"].includes(String(item[0])),
+      )
+      expect(entries).toEqual([
+        ["evaluated", { permission: "bash", action: "ask" }],
+        ["evaluated", { permission: "bash", action: "ask" }],
+        [
+          "asking",
+          {
+            id: PermissionV1.ID.make("per_enterprise-log"),
+            permission: "bash",
+            patternCount: 2,
+          },
+        ],
+        [
+          "permission replied",
+          {
+            permission: "bash",
+            reply: "reject",
+            patternCount: 2,
+          },
+        ],
       ])
-      expect(JSON.stringify(entry)).not.toContain("secret")
+      expect(JSON.stringify(entries)).not.toContain("secret")
     }).pipe(Effect.provide(Logger.layer([logger])))
   },
   { git: true },
@@ -894,6 +907,41 @@ it.instance(
         ruleset: [],
       })
       expect(result).toBeUndefined()
+    }),
+  { git: true },
+)
+
+it.instance(
+  "ask - configured deny overrides a cached always approval",
+  () =>
+    Effect.gen(function* () {
+      const sourceID = PermissionV1.ID.make("per_cached_allow_source")
+      const source = yield* ask({
+        id: sourceID,
+        sessionID: SessionID.make("session_cached_allow_source"),
+        permission: "bash",
+        patterns: ["rm harmless.txt"],
+        metadata: {},
+        always: ["rm *"],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(1)
+      yield* reply({ requestID: sourceID, reply: "always" })
+      yield* Fiber.join(source)
+
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_cached_allow_denied"),
+          permission: "bash",
+          patterns: ["rm -rf build"],
+          metadata: {},
+          always: [],
+          ruleset: [{ permission: "bash", pattern: "rm -rf *", action: "deny" }],
+        }),
+      )
+      expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(yield* list()).toHaveLength(0)
     }),
   { git: true },
 )
