@@ -157,6 +157,8 @@ async function configureServers(
   await page.addInitScript(
     ({ serverB, tabs, newLayoutDesigns }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns } }))
+      localStorage.setItem("app-version.v1", JSON.stringify({ version: "1.17.20" }))
+      localStorage.setItem("opencode.settings.dat:defaultServerUrl", serverB)
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify(tabs))
     },

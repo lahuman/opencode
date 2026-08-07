@@ -16,7 +16,7 @@ test("does not show the approval selector in the composer", async ({ page }) => 
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expectSessionTitle(page, title)
 
-  const composer = page.locator('[data-component="session-composer"]')
+  const composer = page.locator('[data-component="prompt-input"]')
   await expect(composer).toBeVisible()
   await expect(composer.getByText("Ask for approval")).toHaveCount(0)
   await expect(composer.getByText("Approve for me")).toHaveCount(0)
@@ -141,7 +141,7 @@ test("rejects a pending permission", async ({ page }) => {
       request.method() === "POST" &&
       new URL(request.url()).pathname === `/api/session/${sessionID}/permission/permission-reject/reply`,
   )
-  await permission.getByRole("button", { name: "Reject" }).click()
+  await permission.getByRole("button", { name: "Deny" }).click()
   expect((await reply).postDataJSON()).toEqual({ reply: "reject" })
 })
 test("allows a permission permanently when patterns are provided", async ({ page }) => {
