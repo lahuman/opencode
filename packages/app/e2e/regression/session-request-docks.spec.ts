@@ -16,10 +16,12 @@ test("does not show the approval selector in the composer", async ({ page }) => 
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expectSessionTitle(page, title)
 
-  const composer = page.locator('[data-component="prompt-input"]')
-  await expect(composer).toBeVisible()
-  await expect(composer.getByText("Ask for approval")).toHaveCount(0)
-  await expect(composer.getByText("Approve for me")).toHaveCount(0)
+  const dock = page.locator('[data-component="session-prompt-dock"]')
+  await expect(dock).toBeVisible()
+  await expect(dock.locator('[data-component="prompt-input"]')).toBeVisible()
+  await expect(dock.locator('[data-component="prompt-approval-control"]')).toHaveCount(0)
+  await expect(dock.getByText("Ask for approval")).toHaveCount(0)
+  await expect(dock.getByText("Approve for me")).toHaveCount(0)
 })
 
 test("shows a pending question dock", async ({ page }) => {
@@ -50,7 +52,7 @@ test("shows a pending question dock", async ({ page }) => {
   await expect(question.getByText("Which implementation should be used?")).toBeVisible()
   await expect(question.getByRole("radio", { name: /Minimal/ })).toBeVisible()
   await expect(question.getByRole("radio", { name: /Extended/ })).toBeVisible()
-  await expect(page.locator('[data-component="session-composer"]')).toHaveCount(0)
+  await expect(page.locator('[data-component="prompt-input"]')).toHaveCount(0)
 
   const rejectRequests: string[] = []
   page.on("request", (request) => {
@@ -108,7 +110,7 @@ test("shows a pending permission dock", async ({ page }) => {
   await expect(permission.getByText("git status")).toBeVisible()
   await expect(permission.getByText("git diff")).toBeVisible()
   await expect(permission.locator('[data-slot="permission-footer-actions"] button')).toHaveCount(2)
-  await expect(page.locator('[data-component="session-composer"]')).toHaveCount(0)
+  await expect(page.locator('[data-component="prompt-input"]')).toHaveCount(0)
 
   const reply = page.waitForRequest((request) => request.method() === "POST")
   await permission.getByRole("button", { name: "Allow once" }).click()
