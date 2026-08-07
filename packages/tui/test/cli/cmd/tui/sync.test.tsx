@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
-import { directory, json, mount, wait } from "./sync-fixture"
+import { directory, mount, wait } from "./sync-fixture"
 import type { GlobalEvent, PermissionRequest } from "@opencode-ai/sdk/v2"
 
 function branchEvent(branch: string, workspace?: string): GlobalEvent {
@@ -82,52 +82,11 @@ describe("tui sync", () => {
     }
   })
 
-  test("keeps auto-review server permissions pending in normal mode", async () => {
-    const sessionID = "ses_auto_review"
-    const { app, emit, replies, sync } = await mount({
-      fetch(url) {
-        if (url.pathname !== "/session") return undefined
-        return json([
-          {
-            id: sessionID,
-            slug: "auto-review",
-            projectID: "proj_test",
-            directory,
-            title: "Auto review",
-            approvalMode: "auto_review",
-            time: { created: 0, updated: 0 },
-          },
-        ])
-      },
-    })
-
-    try {
-      await wait(() => sync.session.get(sessionID)?.approvalMode === "auto_review")
-      emit(permissionEvent("permission_normal", sessionID))
-      await Bun.sleep(30)
-
-      expect(replies).toEqual([])
-      expect(sync.data.permission[sessionID]).toEqual([
-        {
-          id: "permission_normal",
-          sessionID,
-          permission: "edit",
-          patterns: [],
-          metadata: {},
-          always: [],
-        },
-      ])
-    } finally {
-      app.renderer.destroy()
-    }
-  })
-
   test("blind auto replies once without enqueuing the permission", async () => {
     const sessionID = "ses_auto"
-    const { app, emit, permission, replies, sync } = await mount({ args: { auto: true } })
+    const { app, emit, replies, sync } = await mount({ args: { auto: true } })
 
     try {
-      expect(permission.mode).toBe("auto")
       emit(permissionEvent("permission_auto", sessionID))
       await wait(() => replies.length === 1)
 
@@ -144,110 +103,4 @@ describe("tui sync", () => {
     }
   })
 
-  test("claims a deferred blind reply until the synchronized reply event", async () => {
-    const sessionID = "ses_deferred"
-    const { app, emit, permission, replies, sync } = await mount({ args: { auto: true } })
-    let release!: () => void
-    const pending = permission.run(
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve
-        }),
-    )
-
-    try {
-      await wait(() => permission.approvalPending)
-      emit(permissionEvent("permission_deferred", sessionID))
-      emit(permissionEvent("permission_deferred", sessionID))
-      await Bun.sleep(30)
-
-      expect(replies).toEqual([])
-      expect(sync.data.permission[sessionID]).toHaveLength(1)
-
-      release()
-      await pending
-      await wait(() => replies.length === 1)
-      emit(permissionEvent("permission_deferred", sessionID))
-      await Bun.sleep(30)
-
-      expect(replies).toHaveLength(1)
-      expect(sync.data.permission[sessionID]).toHaveLength(1)
-    } finally {
-      release?.()
-      app.renderer.destroy()
-    }
-  })
-
-  test("drops a deferred blind reply after a synchronized reply", async () => {
-    const sessionID = "ses_replied"
-    const { app, emit, permission, replies, sync } = await mount({ args: { auto: true } })
-    let release!: () => void
-    const pending = permission.run(
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve
-        }),
-    )
-
-    try {
-      await wait(() => permission.approvalPending)
-      emit(permissionEvent("permission_replied", sessionID))
-      emit({
-        directory,
-        project: "proj_test",
-        payload: {
-          id: "evt_permission_replied",
-          type: "permission.replied",
-          properties: { requestID: "permission_replied", sessionID, reply: "once" },
-        },
-      })
-      await wait(() => sync.data.permission[sessionID]?.length === 0)
-      release()
-      await pending
-      await Bun.sleep(30)
-
-      expect(replies).toEqual([])
-      expect(sync.data.permission[sessionID]).toEqual([])
-    } finally {
-      release?.()
-      app.renderer.destroy()
-    }
-  })
-
-  test("releases a deferred claim after a data-less reply response", async () => {
-    const sessionID = "ses_retry"
-    let responses = 0
-    const { app, emit, permission, replies } = await mount({
-      args: { auto: true },
-      fetch(url) {
-        if (!/^\/permission\/[^/]+\/reply$/.test(url.pathname)) return undefined
-        responses++
-        if (responses === 1) return new Response(null, { status: 200 })
-        return json(true)
-      },
-    })
-    let release!: () => void
-    const pending = permission.run(
-      () =>
-        new Promise<void>((resolve) => {
-          release = resolve
-        }),
-    )
-
-    try {
-      await wait(() => permission.approvalPending)
-      emit(permissionEvent("permission_retry", sessionID))
-      release()
-      await pending
-      await wait(() => replies.length === 1)
-
-      emit(permissionEvent("permission_retry", sessionID))
-      await wait(() => replies.length === 2)
-
-      expect(responses).toBe(2)
-    } finally {
-      release?.()
-      app.renderer.destroy()
-    }
-  })
 })

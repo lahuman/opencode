@@ -6,7 +6,7 @@ import { KVProvider, useKV } from "../../../../src/context/kv"
 import { ProjectProvider, useProject } from "../../../../src/context/project"
 import { SDKProvider } from "../../../../src/context/sdk"
 import { SyncProvider, useSync } from "../../../../src/context/sync"
-import { PermissionProvider, usePermission } from "../../../../src/context/permission"
+import { PermissionProvider } from "../../../../src/context/permission"
 import { ExitProvider } from "../../../../src/context/exit"
 import { createEventSource, createFetch, type FetchHandler, directory, json } from "../../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../../fixture/tui-environment"
@@ -22,7 +22,6 @@ export async function wait(fn: () => boolean, timeout = 2000) {
 
 type Ctx = {
   kv: ReturnType<typeof useKV>
-  permission: ReturnType<typeof usePermission>
   project: ReturnType<typeof useProject>
   sync: ReturnType<typeof useSync>
 }
@@ -40,19 +39,17 @@ export async function mount(input: MountOptions | FetchHandler = {}, state?: str
   let sync!: ReturnType<typeof useSync>
   let project!: ReturnType<typeof useProject>
   let kv!: ReturnType<typeof useKV>
-  let permission!: ReturnType<typeof usePermission>
   let done!: () => void
   const ready = new Promise<void>((resolve) => {
     done = resolve
   })
 
   function Probe() {
-    const ctx: Ctx = { kv: useKV(), permission: usePermission(), project: useProject(), sync: useSync() }
+    const ctx: Ctx = { kv: useKV(), project: useProject(), sync: useSync() }
     onMount(() => {
       sync = ctx.sync
       project = ctx.project
       kv = ctx.kv
-      permission = ctx.permission
       done()
     })
     return <box />
@@ -91,5 +88,5 @@ export async function mount(input: MountOptions | FetchHandler = {}, state?: str
 
   await ready
   await wait(() => sync.status === "complete")
-  return { app, emit: events.emit, kv, permission, project, replies, sync, session: calls.session }
+  return { app, emit: events.emit, kv, project, replies, sync, session: calls.session }
 }

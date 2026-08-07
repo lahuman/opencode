@@ -144,7 +144,6 @@ export const {
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
     const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string> }>()
-    const permissionClaims = new Set<string>()
     const touchMessage = (sessionID: string, messageID: string) => {
       hydratingSessions.get(sessionID)?.messages.add(messageID)
     }
@@ -168,59 +167,12 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
-    function enqueuePermission(request: PermissionRequest) {
-      const requests = store.permission[request.sessionID]
-      if (!requests) {
-        setStore("permission", request.sessionID, [request])
-        return
-      }
-      const match = search(requests, request.id, (item) => item.id)
-      if (match.found) {
-        setStore("permission", request.sessionID, match.index, reconcile(request))
-        return
-      }
-      setStore(
-        "permission",
-        request.sessionID,
-        produce((draft) => {
-          draft.splice(match.index, 0, request)
-        }),
-      )
-    }
-
-    async function replyDeferredPermission(request: PermissionRequest, directory: string, workspace?: string) {
-      while (true) {
-        await permission.idle()
-        const requests = store.permission[request.sessionID]
-        const match = requests ? search(requests, request.id, (item) => item.id) : undefined
-        if (!match?.found) {
-          permissionClaims.delete(request.id)
-          return
-        }
-        if (permission.approvalPending) continue
-        if (permission.mode !== "auto") return
-        try {
-          const result = await sdk.client.permission.reply({
-            requestID: request.id,
-            reply: "once",
-            directory,
-            workspace,
-          })
-          if (result.error || !result.data) permissionClaims.delete(request.id)
-        } catch {
-          permissionClaims.delete(request.id)
-        }
-        return
-      }
-    }
-
     event.subscribe((event, { directory, workspace }) => {
       switch (event.type) {
         case "server.instance.disposed":
           void bootstrap()
           break
         case "permission.replied": {
-          permissionClaims.delete(event.properties.requestID)
           const requests = store.permission[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -237,16 +189,6 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permissionClaims.has(request.id)) {
-            enqueuePermission(request)
-            break
-          }
-          if (permission.approvalPending) {
-            enqueuePermission(request)
-            permissionClaims.add(request.id)
-            void replyDeferredPermission(request, directory, workspace)
-            break
-          }
           if (permission.mode === "auto") {
             void sdk.client.permission.reply({
               requestID: request.id,
@@ -256,7 +198,23 @@ export const {
             })
             break
           }
-          enqueuePermission(request)
+          const requests = store.permission[request.sessionID]
+          if (!requests) {
+            setStore("permission", request.sessionID, [request])
+            break
+          }
+          const match = search(requests, request.id, (r) => r.id)
+          if (match.found) {
+            setStore("permission", request.sessionID, match.index, reconcile(request))
+            break
+          }
+          setStore(
+            "permission",
+            request.sessionID,
+            produce((draft) => {
+              draft.splice(match.index, 0, request)
+            }),
+          )
           break
         }
 

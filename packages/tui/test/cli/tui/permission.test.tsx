@@ -104,23 +104,6 @@ async function mountPermission(input: {
   return app
 }
 
-test("shows typed review risk and reason", async () => {
-  await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
-  const app = await mountPermission({
-    state: tmp.path,
-    request: () => request({ review: { risk: "medium", reason: "This request needs manual review." } }),
-  })
-
-  try {
-    const frame = app.captureCharFrame()
-    expect(frame).toContain("medium")
-    expect(frame).toContain("This request needs manual review.")
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
 test("omits Always when there are no persistent patterns", async () => {
   await using tmp = await tmpdir()
   await Bun.write(path.join(tmp.path, "kv.json"), "{}")
@@ -132,36 +115,6 @@ test("omits Always when there are no persistent patterns", async () => {
     expect(frame).toContain("Reject")
     expect(frame).not.toContain("Allow always")
     expect(frame).not.toContain("Always allow")
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("removes review context without leaving an empty section", async () => {
-  await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
-  const [current, setCurrent] = createSignal(
-    request({
-      id: "per_reviewed",
-      review: { risk: "medium", reason: "This request needs manual review." },
-    }),
-  )
-  const app = await mountPermission({ state: tmp.path, request: current })
-
-  try {
-    await wait(() => app.captureCharFrame().includes("This request needs manual review."))
-    setCurrent(request({ id: "per_plain", permission: "doom_loop" }))
-    await wait(() => app.captureCharFrame().includes("Continue after repeated failures"))
-
-    const frame = app.captureCharFrame()
-    const lines = frame.split("\n")
-    const detail = lines.findIndex((line) => line.includes("This keeps the session running despite repeated failures."))
-    const controls = lines.findIndex((line) => line.includes("Allow once"))
-    expect(detail).toBeGreaterThan(-1)
-    expect(controls - detail).toBe(3)
-    expect(frame).not.toContain("medium")
-    expect(frame).not.toContain("undefined")
-    expect(frame).not.toContain("This request needs manual review.")
   } finally {
     app.renderer.destroy()
   }

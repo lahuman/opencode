@@ -409,19 +409,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             <Prompt
               title="Permission required"
               header={header()}
-              body={
-                <>
-                  {current.body}
-                  <Show when={props.request.review}>
-                    {(review) => (
-                      <box paddingLeft={1}>
-                        <text fg={theme.text}>{review().risk}</text>
-                        <text fg={theme.textMuted}>{review().reason}</text>
-                      </box>
-                    )}
-                  </Show>
-                </>
-              }
+              body={current.body}
               options={{
                 once: "Allow once",
                 ...(props.request.always.length > 0 ? { always: "Allow always" } : {}),
