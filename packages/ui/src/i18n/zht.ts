@@ -156,6 +156,7 @@ export const dict = {
 
   "ui.permission.deny": "拒絕",
   "ui.permission.allowAlways": "永遠允許",
+  "ui.permission.allowAlwaysScope": "這些模式將在 OpenCode 重新啟動前，套用於目前目錄中的所有工作階段。",
   "ui.permission.allowOnce": "允許一次",
 
   "ui.message.expand": "展開訊息",

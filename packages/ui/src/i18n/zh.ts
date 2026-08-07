@@ -156,6 +156,7 @@ export const dict = {
 
   "ui.permission.deny": "拒绝",
   "ui.permission.allowAlways": "始终允许",
+  "ui.permission.allowAlwaysScope": "这些模式将在 OpenCode 重启前对当前目录中的所有会话保持允许。",
   "ui.permission.allowOnce": "允许一次",
 
   "ui.message.expand": "展开消息",

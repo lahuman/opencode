@@ -159,6 +159,8 @@ export const dict = {
 
   "ui.permission.deny": "Reddet",
   "ui.permission.allowAlways": "Her zaman izin ver",
+  "ui.permission.allowAlwaysScope":
+    "Bu desenlere OpenCode yeniden başlatılana kadar bu dizindeki tüm oturumlarda izin verilir.",
   "ui.permission.allowOnce": "Bir kez izin ver",
 
   "ui.message.expand": "Mesajı genişlet",

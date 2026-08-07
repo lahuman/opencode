@@ -152,6 +152,8 @@ export const dict = {
 
   "ui.permission.deny": "拒否",
   "ui.permission.allowAlways": "常に許可",
+  "ui.permission.allowAlwaysScope":
+    "これらのパターンは、OpenCode が再起動するまで現在のディレクトリ内のすべてのセッションで許可されます。",
   "ui.permission.allowOnce": "今回のみ許可",
 
   "ui.message.expand": "メッセージを展開",

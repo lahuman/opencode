@@ -176,6 +176,8 @@ export const dict: Record<string, string> = {
 
   "ui.permission.deny": "Deny",
   "ui.permission.allowAlways": "Allow always",
+  "ui.permission.allowAlwaysScope":
+    "These patterns will be allowed for all sessions in this directory until OpenCode restarts.",
   "ui.permission.allowOnce": "Allow once",
 
   "ui.message.expand": "Expand message",

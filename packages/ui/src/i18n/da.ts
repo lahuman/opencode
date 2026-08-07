@@ -152,6 +152,8 @@ export const dict = {
 
   "ui.permission.deny": "Afvis",
   "ui.permission.allowAlways": "Tillad altid",
+  "ui.permission.allowAlwaysScope":
+    "Disse mønstre tillades for alle sessioner i denne mappe, indtil OpenCode genstartes.",
   "ui.permission.allowOnce": "Tillad én gang",
 
   "ui.message.expand": "Udvid besked",

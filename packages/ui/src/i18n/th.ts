@@ -154,6 +154,8 @@ export const dict = {
 
   "ui.permission.deny": "ปฏิเสธ",
   "ui.permission.allowAlways": "อนุญาตเสมอ",
+  "ui.permission.allowAlwaysScope":
+    "รูปแบบเหล่านี้จะได้รับอนุญาตสำหรับทุกเซสชันในไดเรกทอรีนี้จนกว่า OpenCode จะเริ่มต้นใหม่",
   "ui.permission.allowOnce": "อนุญาตครั้งเดียว",
 
   "ui.message.expand": "ขยายข้อความ",

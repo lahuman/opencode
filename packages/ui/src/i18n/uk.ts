@@ -166,6 +166,8 @@ export const dict: Record<string, string> = {
 
   "ui.permission.deny": "Заборонити",
   "ui.permission.allowAlways": "Дозволяти завжди",
+  "ui.permission.allowAlwaysScope":
+    "Ці шаблони буде дозволено для всіх сеансів у цьому каталозі до перезапуску OpenCode.",
   "ui.permission.allowOnce": "Дозволити один раз",
 
   "ui.message.expand": "Розгорнути повідомлення",

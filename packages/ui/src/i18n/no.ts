@@ -132,6 +132,8 @@ export const dict: Record<Keys, string> = {
 
   "ui.permission.deny": "Avslå",
   "ui.permission.allowAlways": "Tillat alltid",
+  "ui.permission.allowAlwaysScope":
+    "Disse mønstrene tillates for alle økter i denne mappen til OpenCode startes på nytt.",
   "ui.permission.allowOnce": "Tillat én gang",
 
   "ui.message.expand": "Utvid melding",

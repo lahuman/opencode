@@ -153,6 +153,8 @@ export const dict = {
 
   "ui.permission.deny": "Negar",
   "ui.permission.allowAlways": "Permitir sempre",
+  "ui.permission.allowAlwaysScope":
+    "Estes padrões serão permitidos em todas as sessões neste diretório até que o OpenCode seja reiniciado.",
   "ui.permission.allowOnce": "Permitir uma vez",
 
   "ui.message.expand": "Expandir mensagem",

@@ -9,7 +9,6 @@ const projectID = "proj_request_docks"
 const sessionID = "ses_request_docks"
 const title = "Request dock regression"
 
-
 test("does not show the approval selector in the composer", async ({ page }) => {
   await mockServer(page, { permissions: [] })
 
@@ -119,7 +118,6 @@ test("shows a pending permission dock", async ({ page }) => {
   expect(request.postDataJSON()).toEqual({ reply: "once" })
 })
 
-
 test("rejects a pending permission", async ({ page }) => {
   await mockServer(page, {
     permissions: [
@@ -146,7 +144,7 @@ test("rejects a pending permission", async ({ page }) => {
   await permission.getByRole("button", { name: "Deny" }).click()
   expect((await reply).postDataJSON()).toEqual({ reply: "reject" })
 })
-test("allows a permission permanently when patterns are provided", async ({ page }) => {
+test("confirms a directory permission for all sessions until restart", async ({ page }) => {
   await mockServer(page, {
     permissions: [
       {
@@ -155,7 +153,7 @@ test("allows a permission permanently when patterns are provided", async ({ page
         permission: "bash",
         patterns: ["git status"],
         metadata: {},
-        always: ["git status"],
+        always: ["git *"],
       },
     ],
   })
@@ -165,9 +163,79 @@ test("allows a permission permanently when patterns are provided", async ({ page
 
   const permission = page.locator('[data-component="dock-prompt"][data-kind="permission"]')
   await expect(permission.getByRole("button", { name: "Allow always" })).toBeVisible()
-  const reply = page.waitForRequest((request) => request.method() === "POST")
+
+  const replies: string[] = []
+  page.on("request", (request) => {
+    if (request.method() !== "POST") return
+    if (new URL(request.url()).pathname !== `/api/session/${sessionID}/permission/permission-always/reply`) return
+    replies.push(request.postData() ?? "")
+  })
+
   await permission.getByRole("button", { name: "Allow always" }).click()
+  await expect(permission.getByText("git *", { exact: true })).toBeVisible()
+  await expect(
+    permission.getByText("These patterns will be allowed for all sessions in this directory until OpenCode restarts.", {
+      exact: true,
+    }),
+  ).toBeVisible()
+  await expect(permission.getByRole("button", { name: "Cancel" })).toBeVisible()
+  await expect(permission.getByRole("button", { name: "Confirm" })).toBeVisible()
+  expect(replies).toEqual([])
+
+  const reply = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === `/api/session/${sessionID}/permission/permission-always/reply`,
+  )
+  await permission.getByRole("button", { name: "Confirm" }).click()
   expect((await reply).postDataJSON()).toEqual({ reply: "always" })
+})
+
+test("resets always confirmation when the permission request changes", async ({ page }) => {
+  const transport = await installSseTransport(page, {
+    server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`,
+    retry: 20,
+  })
+  await mockServer(page, {
+    permissions: [
+      {
+        id: "permission-z",
+        sessionID,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: ["git *"],
+      },
+    ],
+  })
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await transport.waitForConnection()
+  await expectSessionTitle(page, title)
+
+  const permission = page.locator('[data-component="dock-prompt"][data-kind="permission"]')
+  await permission.getByRole("button", { name: "Allow always" }).click()
+  await expect(permission.getByText("git *", { exact: true })).toBeVisible()
+  await expect(permission.getByRole("button", { name: "Confirm" })).toBeVisible()
+
+  await transport.send({
+    directory,
+    payload: {
+      type: "permission.asked",
+      properties: {
+        id: "permission-a",
+        sessionID,
+        permission: "bash",
+        patterns: ["npm test"],
+        metadata: {},
+        always: ["npm *"],
+      },
+    },
+  })
+
+  await expect(permission.getByText("npm test", { exact: true })).toBeVisible()
+  await expect(permission.getByRole("button", { name: "Allow always" })).toBeVisible()
+  await expect(permission.getByRole("button", { name: "Confirm" })).toHaveCount(0)
+  await expect(permission.getByText("git *", { exact: true })).toHaveCount(0)
 })
 
 test("restores the draft caret before typing after a request dock closes", async ({ page }) => {

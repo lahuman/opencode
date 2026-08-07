@@ -157,6 +157,8 @@ export const dict = {
 
   "ui.permission.deny": "Zabrani",
   "ui.permission.allowAlways": "Uvijek dozvoli",
+  "ui.permission.allowAlwaysScope":
+    "Ovi obrasci će biti dozvoljeni za sve sesije u ovom direktoriju dok se OpenCode ponovo ne pokrene.",
   "ui.permission.allowOnce": "Dozvoli jednom",
 
   "ui.message.expand": "Proširi poruku",

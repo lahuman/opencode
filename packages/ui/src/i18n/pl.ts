@@ -152,6 +152,8 @@ export const dict = {
 
   "ui.permission.deny": "Odmów",
   "ui.permission.allowAlways": "Zezwalaj zawsze",
+  "ui.permission.allowAlwaysScope":
+    "Te wzorce będą dozwolone we wszystkich sesjach w tym katalogu do czasu ponownego uruchomienia OpenCode.",
   "ui.permission.allowOnce": "Zezwól raz",
 
   "ui.message.expand": "Rozwiń wiadomość",

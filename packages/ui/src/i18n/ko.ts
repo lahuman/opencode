@@ -139,6 +139,8 @@ export const dict = {
 
   "ui.permission.deny": "거부",
   "ui.permission.allowAlways": "항상 허용",
+  "ui.permission.allowAlwaysScope":
+    "표시된 패턴은 OpenCode가 다시 시작될 때까지 현재 디렉터리의 모든 세션에서 허용됩니다.",
   "ui.permission.allowOnce": "한 번만 허용",
 
   "ui.message.expand": "메시지 펼치기",
