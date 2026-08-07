@@ -149,14 +149,18 @@ type PermissionResponse = {
   body: unknown
 }
 
-async function configureServers(page: Page, tabs: { type: "session"; server: string; sessionId: string }[] = []) {
+async function configureServers(
+  page: Page,
+  tabs: { type: "session"; server: string; sessionId: string }[] = [],
+  newLayoutDesigns = true,
+) {
   await page.addInitScript(
-    ({ serverB, tabs }) => {
-      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
+    ({ serverB, tabs, newLayoutDesigns }) => {
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns } }))
       localStorage.setItem("opencode.global.dat:server", JSON.stringify({ list: [serverB] }))
       localStorage.setItem("opencode.window.browser.dat:tabs", JSON.stringify(tabs))
     },
-    { serverB, tabs },
+    { serverB, tabs, newLayoutDesigns },
   )
 }
 
