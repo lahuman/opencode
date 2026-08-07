@@ -10,6 +10,7 @@ import { Todo } from "../../src/session/todo"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 
 // Covers the session-domain Effect Schema migration. For each migrated
 // schema we assert:
@@ -40,7 +41,6 @@ describe("Session.Info", () => {
       projectID,
       directory: "/tmp/proj",
       title: "First session",
-      approvalMode: "ask" as const,
       version: "0.1.0",
       time: { created: 1, updated: 2 },
     }
@@ -64,7 +64,6 @@ describe("Session.Info", () => {
       },
       share: { url: "https://share.example.com/s/1" },
       title: "Full session",
-      approvalMode: "ask" as const,
       version: "1.0.0",
       metadata: { source: "test" },
       time: { created: 100, updated: 200, compacting: 150, archived: 300 },
@@ -86,7 +85,6 @@ describe("Session.Info", () => {
       projectID,
       directory: "/tmp/proj",
       title: "Legacy diff",
-      approvalMode: "ask" as const,
       version: "0.1.0",
       summary: {
         additions: 1,
@@ -97,6 +95,25 @@ describe("Session.Info", () => {
       time: { created: 1, updated: 2 },
     }
     expect(decode(input)).toEqual(input)
+  })
+
+
+  test("strips legacy approval mode", () => {
+    const sessionFixture = {
+      id: sessionID,
+      slug: "legacy-approval",
+      projectID,
+      directory: "/tmp/proj",
+      title: "Legacy approval",
+      version: "0.1.0",
+      time: { created: 1, updated: 2 },
+    }
+    const decoded = Schema.decodeUnknownSync(SessionV1.SessionInfo)({
+      ...sessionFixture,
+      approvalMode: "auto_review",
+    })
+
+    expect("approvalMode" in decoded).toBe(false)
   })
 
   test("rejects unbranded session id", () => {
@@ -131,7 +148,6 @@ describe("Session.GlobalInfo", () => {
       projectID,
       directory: "/tmp/proj",
       title: "global",
-      approvalMode: "ask" as const,
       version: "0",
       time: { created: 0, updated: 0 },
       project: null,
@@ -146,7 +162,6 @@ describe("Session.GlobalInfo", () => {
       projectID,
       directory: "/tmp/proj",
       title: "global",
-      approvalMode: "ask" as const,
       version: "0",
       time: { created: 0, updated: 0 },
       project: { id: projectID, worktree: "/tmp/wt", name: "alpha" },

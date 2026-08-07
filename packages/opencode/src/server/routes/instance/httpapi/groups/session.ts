@@ -25,7 +25,6 @@ import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
-import { ApprovalMode } from "@opencode-ai/schema/session-v1"
 
 const root = "/session"
 export const ListQuery = Schema.Struct({
@@ -51,7 +50,6 @@ export const UpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
   permission: Schema.optional(PermissionV1.Ruleset),
-  approvalMode: Schema.optional(ApprovalMode),
   time: Schema.optional(
     Schema.Struct({
       archived: Schema.optional(Session.ArchivedTimestamp),

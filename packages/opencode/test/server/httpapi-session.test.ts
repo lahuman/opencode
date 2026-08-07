@@ -728,7 +728,7 @@ describe("session HttpApi", () => {
           headers,
         })
         expect(createdEmpty.id).toBeTruthy()
-        expect(createdEmpty.approvalMode).toBe("ask")
+        expect("approvalMode" in createdEmpty).toBe(false)
 
         const created = yield* requestJson<Session.Info>(SessionPaths.create, {
           method: "POST",
@@ -736,14 +736,11 @@ describe("session HttpApi", () => {
           body: JSON.stringify({ title: "created", approvalMode: "auto_review" }),
         })
         expect(created.title).toBe("created")
-        expect(created.approvalMode).toBe("auto_review")
+        expect("approvalMode" in created).toBe(false)
         expect(
-          (
-            yield* requestJson<Session.Info>(pathFor(SessionPaths.get, { sessionID: created.id }), {
-              headers,
-            })
-          ).approvalMode,
-        ).toBe("auto_review")
+          "approvalMode" in
+            (yield* requestJson<Session.Info>(pathFor(SessionPaths.get, { sessionID: created.id }), { headers })),
+        ).toBe(false)
 
         const updated = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
           method: "PATCH",
@@ -751,15 +748,15 @@ describe("session HttpApi", () => {
           body: JSON.stringify({ title: "updated", approvalMode: "ask", time: { archived: 1 } }),
         })
         expect(updated).toMatchObject({ id: created.id, title: "updated", time: { archived: 1 } })
-        expect(updated.approvalMode).toBe("ask")
 
+        expect("approvalMode" in updated).toBe(false)
         const forked = yield* requestJson<Session.Info>(pathFor(SessionPaths.fork, { sessionID: created.id }), {
           method: "POST",
           headers,
         })
         expect(forked.id).not.toBe(created.id)
-        expect(forked.approvalMode).toBe("ask")
 
+        expect("approvalMode" in forked).toBe(false)
         const forkedWithoutContentType = yield* requestJson<Session.Info>(
           pathFor(SessionPaths.fork, { sessionID: created.id }),
           {

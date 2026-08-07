@@ -92,25 +92,16 @@ describe("SessionV2.create", () => {
       ).toMatchObject({ location: { directory: location.directory, workspaceID }, agent: "build", model })
     }),
   )
-
-  it.effect("round-trips an explicit approval mode through get", () =>
-    Effect.gen(function* () {
-      const session = yield* SessionV2.Service
-      const created = yield* session.create({ location, approvalMode: "auto_review" })
-
-      expect(created.approvalMode).toBe("auto_review")
-      expect((yield* session.get(created.id)).approvalMode).toBe("auto_review")
-    }),
-  )
-
-  it.effect("defaults an omitted approval mode to ask", () =>
+  it.effect("creates and reads field-free Session info", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const created = yield* session.create({ location })
 
-      expect((yield* session.get(created.id)).approvalMode).toBe("ask")
+      expect("approvalMode" in created).toBe(false)
+      expect("approvalMode" in (yield* session.get(created.id))).toBe(false)
     }),
   )
+
 
   it.effect("returns the existing Session when one ID is reused with different create arguments", () =>
     Effect.gen(function* () {

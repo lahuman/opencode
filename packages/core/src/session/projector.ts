@@ -56,7 +56,6 @@ function sessionRowWithoutUsage(
     directory: info.directory,
     path: info.path,
     title: info.title,
-    approval_mode: info.approvalMode,
     agent: info.agent,
     model: info.model,
     version: info.version,

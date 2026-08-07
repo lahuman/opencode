@@ -119,7 +119,6 @@ describe("SessionProjector", () => {
         slug: "test",
         directory: "/project",
         title: "Before",
-        approvalMode: "ask",
         version: "test",
         cost: 10,
         tokens: { input: 20, output: 30, reasoning: 40, cache: { read: 50, write: 60 } },
@@ -129,7 +128,6 @@ describe("SessionProjector", () => {
       const stale = SessionV1.SessionInfo.make({
         ...info,
         title: "After",
-        approvalMode: "auto_review",
         time: { created: 1, updated: 2 },
       })
 
@@ -143,7 +141,6 @@ describe("SessionProjector", () => {
         yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       ).toMatchObject({
         title: "After",
-        approval_mode: "auto_review",
         cost: 11,
         tokens_input: 22,
         tokens_output: 33,

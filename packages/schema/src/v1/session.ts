@@ -9,11 +9,8 @@ import { Model } from "../model"
 import { NonNegativeInt, optional, statics } from "../schema"
 import { ascending } from "../identifier"
 import { SessionID } from "../session-id"
-import { Session } from "../session"
 import { WorkspaceID } from "../workspace-id"
 import { PermissionV1 } from "./permission"
-
-export { ApprovalMode } from "../session"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -556,10 +553,6 @@ export const SessionInfo = Schema.Struct({
   tokens: optional(SessionTokens),
   share: optional(SessionShare),
   title: Schema.String,
-  approvalMode: Session.ApprovalMode.pipe(
-    Schema.withConstructorDefault(Effect.succeed("ask" as const)),
-    Schema.withDecodingDefaultKey(Effect.succeed("ask" as const)),
-  ),
   agent: optional(Schema.String),
   model: optional(SessionModel),
   version: Schema.String,

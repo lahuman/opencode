@@ -80,6 +80,10 @@ describe("DatabaseMigration", () => {
             sql`SELECT name FROM pragma_table_info('session_context_epoch') WHERE name IN ('agent', 'replacement_seq', 'revision')`,
           ),
         ).toBeUndefined()
+        expect(
+          (yield* db.all<{ name: string }>(sql`PRAGMA table_info(session)`)).map((column) => column.name),
+        ).not.toContain("approval_mode")
+        expect(migrations.map((migration) => migration.id)).not.toContain("20260805063214_plan_approval_mode")
         expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: migrations.length })
         expect(
           yield* db.all(
@@ -279,7 +283,6 @@ describe("DatabaseMigration", () => {
               projectID: ProjectV2.ID.global,
               directory: "/project",
               title: "After",
-              approvalMode: "ask",
               version: "test",
               time: { created: 1, updated: 2 },
             },
@@ -399,45 +402,6 @@ describe("DatabaseMigration", () => {
           tokens_reasoning: 4,
           tokens_cache_read: 5,
           tokens_cache_write: 6,
-        })
-      }),
-    )
-  })
-
-  test("defaults approval mode when migrating the immediately previous Session schema", async () => {
-    const migration = migrations.find((migration) => migration.id.endsWith("_plan_approval_mode"))
-    expect(migration).toBeDefined()
-    if (!migration) return
-
-    await run(
-      Effect.gen(function* () {
-        const db = yield* makeDb
-        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY)`)
-        yield* db.run(sql`INSERT INTO session (id) VALUES ('session')`)
-
-        yield* DatabaseMigration.applyOnly(db, [migration])
-
-        expect(yield* db.get(sql`SELECT approval_mode FROM session WHERE id = 'session'`)).toEqual({
-          approval_mode: "ask",
-        })
-      }),
-    )
-  })
-
-  test("defaults approval mode for directly inserted Sessions", async () => {
-    await run(
-      Effect.gen(function* () {
-        const db = yield* makeDb
-        yield* DatabaseMigration.apply(db)
-        yield* db.run(
-          sql`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('global', '/project', 1, 1, '[]')`,
-        )
-        yield* db.run(
-          sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('session', 'global', 'session', '/project', 'Session', 'test', 1, 1)`,
-        )
-
-        expect(yield* db.get(sql`SELECT approval_mode FROM session WHERE id = 'session'`)).toEqual({
-          approval_mode: "ask",
         })
       }),
     )

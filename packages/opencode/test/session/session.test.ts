@@ -258,47 +258,37 @@ describe("step-finish token propagation via event", () => {
 })
 
 describe("Session", () => {
-  it.instance("defaults approval mode to ask", () =>
+  it.instance("creates, reads, and forks field-free Session info", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const created = yield* Effect.acquireRelease(session.create({}), (info) =>
-        session.remove(info.id).pipe(Effect.ignore),
-      )
-
-      expect(created.approvalMode).toBe("ask")
-    }),
-  )
-
-  it.instance("persists explicit approval mode and resets it on fork", () =>
-    Effect.gen(function* () {
-      const session = yield* SessionNs.Service
-      const created = yield* Effect.acquireRelease(session.create({ approvalMode: "auto_review" }), (info) =>
         session.remove(info.id).pipe(Effect.ignore),
       )
       const forked = yield* Effect.acquireRelease(session.fork({ sessionID: created.id }), (info) =>
         session.remove(info.id).pipe(Effect.ignore),
       )
 
-      expect(created.approvalMode).toBe("auto_review")
-      expect((yield* session.get(created.id)).approvalMode).toBe("auto_review")
-      expect(forked.approvalMode).toBe("ask")
+      expect("approvalMode" in created).toBe(false)
+      expect("approvalMode" in (yield* session.get(created.id))).toBe(false)
+      expect("approvalMode" in forked).toBe(false)
     }),
   )
 
-  patchRace.it.instance("preserves concurrent approval mode and permission updates", () =>
+  patchRace.it.instance("preserves concurrent metadata and permission updates", () =>
     Effect.gen(function* () {
       const deny = [{ permission: "bash", pattern: "git status", action: "deny" as const }]
+      const metadata = { source: "race" }
 
-      for (const first of ["approval", "permission"] as const) {
+      for (const first of ["metadata", "permission"] as const) {
         const session = yield* SessionNs.Service
-        const created = yield* Effect.acquireRelease(session.create({ approvalMode: "auto_review" }), (info) =>
+        const created = yield* Effect.acquireRelease(session.create({}), (info) =>
           session.remove(info.id).pipe(Effect.ignore),
         )
         const race = yield* patchRace.arm
-        const approval = session.setApprovalMode({ sessionID: created.id, approvalMode: "ask" })
+        const updateMetadata = session.setMetadata({ sessionID: created.id, metadata })
         const permission = session.setPermission({ sessionID: created.id, permission: deny })
-        const firstUpdate = first === "approval" ? approval : permission
-        const secondUpdate = first === "approval" ? permission : approval
+        const firstUpdate = first === "metadata" ? updateMetadata : permission
+        const secondUpdate = first === "metadata" ? permission : updateMetadata
 
         const firstFiber = yield* firstUpdate.pipe(Effect.forkChild)
         yield* awaitDeferred(race.firstAtPublish, `timed out waiting for the first ${first} update to reach publish`)
@@ -311,7 +301,7 @@ describe("Session", () => {
         yield* Fiber.join(firstFiber)
 
         const stored = yield* session.get(created.id)
-        expect(stored.approvalMode).toBe("ask")
+        expect(stored.metadata).toEqual(metadata)
         expect(stored.permission).toEqual(deny)
       }
     }),

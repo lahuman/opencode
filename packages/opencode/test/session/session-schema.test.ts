@@ -16,7 +16,6 @@ const info = {
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   share: undefined,
   title: "Test session",
-  approvalMode: "ask",
   version: "1.0.0",
   time: {
     created: 1,
@@ -29,36 +28,21 @@ const info = {
 } satisfies Session.Info
 
 describe("Session schema", () => {
-  test("defaults legacy approval mode before row mapping", () => {
+  test("strips legacy approval mode before row mapping", () => {
     const decoded = Schema.decodeUnknownSync(Session.Info)({
       id: info.id,
-      slug: "legacy-session",
+      slug: info.slug,
       projectID: info.projectID,
-      directory: "/tmp/legacy",
-      title: "Legacy session",
-      version: "0.1.0",
-      time: { created: 1, updated: 2 },
-    })
-
-    expect(decoded.approvalMode).toBe("ask")
-    expect(Session.toRow(decoded).approval_mode).toBe("ask")
-  })
-
-  test("retains approval mode in create input", () => {
-    expect(Schema.decodeUnknownSync(Session.CreateInput)({})).toEqual({})
-    expect(Schema.decodeUnknownSync(Session.CreateInput)({ approvalMode: "auto_review" })).toEqual({
+      directory: info.directory,
+      title: info.title,
       approvalMode: "auto_review",
+      version: info.version,
+      time: { created: info.time.created, updated: info.time.updated },
     })
-  })
 
-  test("requires approval mode in update input", () => {
-    const sessionID = SessionID.descending()
-
-    expect(() => Schema.decodeUnknownSync(Session.SetApprovalModeInput)({ sessionID })).toThrow()
-    expect(Schema.decodeUnknownSync(Session.SetApprovalModeInput)({ sessionID, approvalMode: "auto_review" })).toEqual({
-      sessionID,
-      approvalMode: "auto_review",
-    })
+    expect("approvalMode" in decoded).toBe(false)
+    expect("approval_mode" in Session.toRow(decoded)).toBe(false)
+    expect(Schema.decodeUnknownSync(Session.CreateInput)({ approvalMode: "auto_review" })).toEqual({})
   })
 
   test("encodes undefined optional session fields as omitted keys", () => {

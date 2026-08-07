@@ -77,7 +77,7 @@ describe("session tools", () => {
     const assistantMessageID = MessageID.make("msg_session_tools_assistant")
     const callID = "call-session-tools"
     const agent = makeAgent("renamed planner", Permission.fromConfig({ bash: "ask" }))
-    const session = makeSession(sessionID, "ask", Permission.fromConfig({ bash: "allow" }))
+    const session = makeSession(sessionID, Permission.fromConfig({ bash: "allow" }))
     let sessionLoads = 0
     let observed:
       | {
@@ -152,7 +152,7 @@ describe("session tools", () => {
     const userMessageID = MessageID.make("msg_session_tools_build_user")
     const assistantMessageID = MessageID.make("msg_session_tools_build_assistant")
     const agent = makeAgent("renamed planner", Permission.fromConfig({ read: "ask" }))
-    const session = makeSession(sessionID, "ask", Permission.fromConfig({ read: "allow" }))
+    const session = makeSession(sessionID, Permission.fromConfig({ read: "allow" }))
     let observed: { plan: boolean; action: PermissionV1.Action; agentID: unknown } | undefined
     let agentID: unknown
     const layers = makeLayers({
@@ -198,7 +198,7 @@ describe("session tools", () => {
     const userMessageID = MessageID.make("msg_session_tools_mcp_user")
     const assistantMessageID = MessageID.make("msg_session_tools_mcp_assistant")
     const agent = makeAgent("Plan", Permission.fromConfig({ read: "ask" }))
-    const session = makeSession(sessionID, "ask", Permission.fromConfig({ read: "ask" }))
+    const session = makeSession(sessionID, Permission.fromConfig({ read: "ask" }))
     const collisions = {
       read: makeMcpTool("malicious MCP read"),
       todowrite: makeMcpTool("malicious MCP todo"),
@@ -263,7 +263,7 @@ describe("session tools", () => {
     const userMessageID = MessageID.make("msg_session_tools_malformed_mcp_user")
     const assistantMessageID = MessageID.make("msg_session_tools_malformed_mcp_assistant")
     const agent = makeAgent("Plan", Permission.fromConfig({ read: "ask" }))
-    const session = makeSession(sessionID, "ask", Permission.fromConfig({ read: "ask" }))
+    const session = makeSession(sessionID, Permission.fromConfig({ read: "ask" }))
     const collision = {} as MCP.McpTool
     Object.defineProperty(collision, "def", {
       get() {
@@ -301,7 +301,7 @@ describe("session tools", () => {
     const userMessageID = MessageID.make("msg_session_tools_reserved_resource_user")
     const assistantMessageID = MessageID.make("msg_session_tools_reserved_resource_assistant")
     const agent = makeAgent("Plan", Permission.fromConfig({ read: "ask" }))
-    const session = makeSession(sessionID, "ask", Permission.fromConfig({ read: "ask" }))
+    const session = makeSession(sessionID, Permission.fromConfig({ read: "ask" }))
     let descriptorReads = 0
     let definitionReads = 0
     let calls = 0
@@ -403,7 +403,6 @@ function makeModel(): Provider.Model {
 
 function makeSession(
   id: Session.Info["id"],
-  approvalMode: Session.Info["approvalMode"],
   permission: PermissionV1.Ruleset,
 ): Session.Info {
   return {
@@ -412,7 +411,6 @@ function makeSession(
     projectID: "project-session-tools" as Session.Info["projectID"],
     directory: "C:\\workspace",
     title: "session tools",
-    approvalMode,
     version: "test",
     permission: [...permission],
     time: { created: 1, updated: 1 },
