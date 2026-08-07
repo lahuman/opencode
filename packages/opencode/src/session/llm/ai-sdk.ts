@@ -23,14 +23,14 @@ function finishReason(value: string | undefined): FinishReason {
   return Schema.is(FinishReason)(value) ? value : "unknown"
 }
 
-export function providerMetadata(value: unknown): ProviderMetadata | undefined {
+function providerMetadata(value: unknown): ProviderMetadata | undefined {
   if (value == null) return undefined
   return Schema.is(ProviderMetadata)(value) ? value : undefined
 }
 
 // Temporary AI SDK bridge: Copilot billing survives only in raw provider chunks here.
 // Move this extraction into @opencode-ai/llm when Copilot is handled by the native runtime.
-export function copilotTotalNanoAiu(value: unknown): number | undefined {
+function copilotTotalNanoAiu(value: unknown): number | undefined {
   if (!isRecord(value)) return undefined
   const response = isRecord(value.response) ? value.response : undefined
   const usage = value.copilot_usage ?? response?.copilot_usage
@@ -40,7 +40,7 @@ export function copilotTotalNanoAiu(value: unknown): number | undefined {
   return total
 }
 
-export function usage(value: unknown) {
+function usage(value: unknown) {
   if (!value || typeof value !== "object") return undefined
   const item = value as {
     inputTokens?: number

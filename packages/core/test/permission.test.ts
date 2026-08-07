@@ -113,41 +113,13 @@ const legacyRequest = {
 }
 
 describe("PermissionV1 contracts", () => {
-  test.each(["low", "medium", "high", "critical"] as const)(
-    "preserves %s review risk on request and ask input",
-    (risk) => {
-      const review = { risk, reason: "writes outside the workspace" }
+  test("drops legacy review metadata", () => {
+    const decoded = Schema.decodeUnknownSync(PermissionV1.Request)({
+      ...legacyRequest,
+      review: { risk: "low", reason: "legacy" },
+    })
 
-      expect(Schema.decodeUnknownSync(PermissionV1.Request)({ ...legacyRequest, review }).review).toEqual(review)
-      expect(
-        Schema.decodeUnknownSync(PermissionV1.AskInput)({ ...legacyRequest, ruleset: [], review }).review,
-      ).toEqual(review)
-    },
-  )
-
-  test("rejects unknown review risk", () => {
-    expect(() =>
-      Schema.decodeUnknownSync(PermissionV1.AskInput)({
-        ...legacyRequest,
-        ruleset: [],
-        review: { risk: "extreme", reason: "unsupported risk" },
-      }),
-    ).toThrow()
-  })
-
-  test("denial messages identify their source and safe next action", () => {
-    expect(new PermissionV1.PlanReadOnlyError({ reason: "mutation", alternative: "inspect files" }).message).toContain(
-      "Plan read-only denial: mutation. Safe alternative: inspect files",
-    )
-    expect(new PermissionV1.PlanReadOnlyError({ reason: "mutation" }).message).toContain(
-      "must not retry an equivalent request",
-    )
-    expect(
-      new PermissionV1.ReviewedDeniedError({ reason: "unsafe command", alternative: "ask the user" }).message,
-    ).toContain("Automatic-review denial: unsafe command. Safe alternative: ask the user")
-    expect(new PermissionV1.ReviewedDeniedError({ reason: "unsafe command" }).message).toContain(
-      "must not retry an equivalent request",
-    )
+    expect("review" in decoded).toBe(false)
   })
 })
 

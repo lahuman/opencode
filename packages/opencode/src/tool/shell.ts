@@ -260,38 +260,7 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
-const AMBIENT_ENV = /^(?:BASH_ENV|ENV|BASHOPTS|SHELLOPTS|PS4|PROMPT_COMMAND|BASH_FUNC_.+%%|DIRCMD|GIT_EXTERNAL_DIFF|GIT_CONFIG_.*|GIT_PAGER|PAGER|RIPGREP_CONFIG_PATH|LESSOPEN|NODE_OPTIONS|BUN_OPTIONS|LD_PRELOAD|LD_AUDIT|DYLD_.*)$/i
-
-function shellName(shell: string) {
-  const name = Shell.name(shell)
-  if (name === "bash" || name === "pwsh" || name === "powershell" || name === "cmd") return name
-  return "other" as const
-}
-
-function shellEnvironment(env: NodeJS.ProcessEnv) {
-  return Object.keys(env).some((key) => AMBIENT_ENV.test(key)) ? ("ambient" as const) : ("plain" as const)
-}
-
-const ask = Effect.fn("ShellTool.ask")(function* (
-  ctx: Tool.Context,
-  scan: Scan,
-  input: {
-    command: string
-    cwd: string
-    shell: ShellID.Kind
-    shellName: "bash" | "pwsh" | "powershell" | "cmd" | "other"
-    environment: "plain" | "ambient"
-    parsed: boolean
-  },
-) {
-  const metadata = {
-    command: input.command,
-    shell: input.shell === "pwsh" ? "powershell" : input.shell,
-    shellName: input.shellName,
-    environment: input.environment,
-    parsed: input.parsed,
-    cwd: input.cwd,
-  }
+const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -303,7 +272,7 @@ const ask = Effect.fn("ShellTool.ask")(function* (
       patterns: globs,
       always: globs,
       metadata: {
-        ...metadata,
+        command: input.command,
         directories,
         patterns: globs,
       },
@@ -315,7 +284,9 @@ const ask = Effect.fn("ShellTool.ask")(function* (
     permission: ShellID.ToolID,
     patterns: Array.from(scan.patterns),
     always: Array.from(scan.always),
-    metadata,
+    metadata: {
+      command: input.command,
+    },
   })
 })
 
@@ -651,18 +622,12 @@ export const ShellTool = Tool.define(
                     Effect.sync(() => tree.delete()),
                   )
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
-                  const parsed = !tree.rootNode.hasError && scan.patterns.size > 0
-                  if (!parsed && ctx.extra?.agentID === "plan") scan.patterns.add(params.command)
+                  if ((tree.rootNode.hasError || scan.patterns.size === 0) && ctx.extra?.agentID === "plan") {
+                    scan.patterns.add(params.command)
+                  }
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
                   const env = yield* shellEnv(ctx, cwd)
-                  yield* ask(ctx, scan, {
-                    command: params.command,
-                    cwd,
-                    shell: ShellID.toKind(name),
-                    shellName: shellName(shell),
-                    environment: shellEnvironment(env),
-                    parsed,
-                  })
+                  yield* ask(ctx, scan, params)
                   return env
                 }),
               )

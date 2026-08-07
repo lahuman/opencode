@@ -24,15 +24,6 @@ export type Rule = typeof Rule.Type
 export const Ruleset = Schema.Array(Rule).annotate({ identifier: "PermissionRuleset" })
 export type Ruleset = typeof Ruleset.Type
 
-export const ReviewRisk = Schema.Literals(["low", "medium", "high", "critical"])
-export type ReviewRisk = typeof ReviewRisk.Type
-
-export const Review = Schema.Struct({
-  risk: ReviewRisk,
-  reason: Schema.String,
-})
-export type Review = typeof Review.Type
-
 export const Request = Schema.Struct({
   id: ID,
   sessionID: SessionID,
@@ -41,7 +32,6 @@ export const Request = Schema.Struct({
   metadata: Schema.Record(Schema.String, Schema.Unknown),
   always: Schema.Array(Schema.String),
   tool: Schema.optional(Schema.Struct({ messageID: Schema.String, callID: Schema.String })),
-  review: Schema.optional(Review),
 }).annotate({ identifier: "PermissionRequest" })
 export type Request = typeof Request.Type
 

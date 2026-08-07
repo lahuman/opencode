@@ -3,16 +3,7 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import path from "path"
-import { generateObject, streamObject, tool, type ModelMessage } from "ai"
-import { createOpenAI } from "@ai-sdk/openai"
-import { createAzure } from "@ai-sdk/azure"
-import { createXai } from "@ai-sdk/xai"
-import { createGoogleGenerativeAI } from "@ai-sdk/google"
-import { createAnthropic } from "@ai-sdk/anthropic"
-import { createGateway } from "@ai-sdk/gateway"
-import { createBedrockMantle } from "@ai-sdk/amazon-bedrock/mantle"
-import { createOpenaiCompatible } from "@opencode-ai/core/github-copilot/copilot-provider"
-import type { SharedV3ProviderOptions } from "@ai-sdk/provider"
+import { tool, type ModelMessage } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
@@ -29,7 +20,6 @@ import type { Agent } from "../../src/agent/agent"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { PlanReview } from "@/permission/plan-review"
 import { LLMAISDK } from "@/session/llm/ai-sdk"
 import { Session as SessionNs } from "@/session/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -194,33 +184,6 @@ describe("session.llm.ai-sdk adapter", () => {
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- tests defensive adapter branches outside AI SDK's current typed surface
   const uncheckedAdapterEvent = (input: unknown) => input as AISDKAdapterEvent
 
-  test("exposes typed usage, provider metadata, and guarded Copilot billing conversion", () => {
-    const usage = LLMAISDK.usage({
-      inputTokens: 10,
-      outputTokens: 7,
-      totalTokens: 17,
-      inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 2 },
-      outputTokenDetails: { reasoningTokens: 4 },
-    })
-
-    expect(usage).toBeInstanceOf(Usage)
-    expect(usage).toMatchObject({
-      inputTokens: 10,
-      outputTokens: 7,
-      totalTokens: 17,
-      reasoningTokens: 4,
-      cacheReadInputTokens: 3,
-      cacheWriteInputTokens: 2,
-    })
-    expect(usage?.visibleOutputTokens).toBe(3)
-    expect(LLMAISDK.providerMetadata({ anthropic: { cacheCreationInputTokens: 2 } })).toEqual({
-      anthropic: { cacheCreationInputTokens: 2 },
-    })
-    expect(LLMAISDK.providerMetadata({ invalid: "flat" })).toBeUndefined()
-    expect(LLMAISDK.copilotTotalNanoAiu({ response: { copilot_usage: { total_nano_aiu: 123 } } })).toBe(123)
-    expect(LLMAISDK.copilotTotalNanoAiu({ copilot_usage: { total_nano_aiu: -1 } })).toBeUndefined()
-  })
-
   test("maps AI SDK stream chunks without losing session-visible fields", async () => {
     const metadata = { openai: { itemID: "item-1" } }
     const events = await adapt([
@@ -339,6 +302,9 @@ describe("session.llm.ai-sdk adapter", () => {
         },
       },
     ])
+    const normalized = events.find((event) => event.type === "step-finish")
+    if (normalized?.type !== "step-finish") throw new Error("expected step-finish")
+    expect(normalized.usage).toBeInstanceOf(Usage)
   })
 
   test("creates stable block ids when AI SDK omits them", async () => {
@@ -563,6 +529,10 @@ describe("session.llm.ai-sdk adapter", () => {
         },
         providerMetadata: { anthropic: { cacheCreationInputTokens: 11_771 } },
       },
+      uncheckedAdapterEvent({
+        type: "raw",
+        rawValue: { response: { copilot_usage: { total_nano_aiu: -1 } } },
+      }),
       {
         type: "finish-step",
         response: { id: "msg_follow_up", timestamp: new Date(0), modelId: "claude-sonnet-4.6" },
@@ -589,370 +559,6 @@ describe("session.llm.ai-sdk adapter", () => {
     expect(events[1]).toMatchObject({ type: "step-finish", providerMetadata: { anthropic: {} } })
     if (events[1].type !== "step-finish") throw new Error("expected step-finish")
     expect(events[1].providerMetadata?.copilot).toBeUndefined()
-  })
-})
-
-const reviewerWireValue = { decision: "allow" as const, risk: "low" as const, reason: "Safe" }
-const reviewerWireText = JSON.stringify(reviewerWireValue)
-const reviewerWireSchema = z.object({
-  decision: z.enum(["allow", "ask", "deny"]),
-  risk: z.enum(["low", "medium", "high", "critical"]),
-  reason: z.string(),
-  alternative: z.string().optional(),
-})
-const reviewerWireMessages: ModelMessage[] = [
-  { role: "system", content: PlanReview.REVIEW_POLICY },
-  { role: "user", content: "<UNTRUSTED_REVIEW_DATA>{}</UNTRUSTED_REVIEW_DATA>" },
-]
-
-function captureProviderWire(response: unknown) {
-  let captured: { url: string; body: Record<string, unknown> } | undefined
-  const fetch = Object.assign(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      const raw = init?.body ?? (input instanceof Request ? await input.clone().text() : undefined)
-      captured = {
-        url: input instanceof Request ? input.url : String(input),
-        body: JSON.parse(String(raw)) as Record<string, unknown>,
-      }
-      return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } })
-    },
-    { preconnect: globalThis.fetch.preconnect },
-  )
-  return {
-    fetch,
-    captured: () => {
-      if (!captured) throw new Error("provider request was not captured")
-      return captured
-    },
-  }
-}
-
-function openAIReviewerResponse(model: string) {
-  return {
-    id: "resp_review",
-    object: "response",
-    created_at: 1,
-    status: "completed",
-    error: null,
-    model,
-    output: [
-      {
-        type: "message",
-        role: "assistant",
-        id: "msg_review",
-        status: "completed",
-        phase: null,
-        content: [{ type: "output_text", text: reviewerWireText, logprobs: null, annotations: [] }],
-      },
-    ],
-    service_tier: null,
-    incomplete_details: null,
-    usage: {
-      input_tokens: 1,
-      input_tokens_details: null,
-      output_tokens: 1,
-      output_tokens_details: null,
-    },
-  }
-}
-
-async function generateReviewerWire(
-  model: Parameters<typeof generateObject>[0]["model"],
-  providerOptions: SharedV3ProviderOptions,
-) {
-  return await generateObject({
-    model,
-    schema: reviewerWireSchema,
-    messages: reviewerWireMessages,
-    providerOptions,
-    maxRetries: 0,
-  })
-}
-
-function expectIsolatedWire(body: Record<string, unknown>) {
-  expect(JSON.stringify(body)).not.toContain("INJECTED_")
-  expect(body.tools).toBeUndefined()
-  expect(body.tool_choice).toBeUndefined()
-  expect(body.previous_response_id).toBeUndefined()
-  expect(body.previous_interaction_id).toBeUndefined()
-}
-
-describe("plan reviewer installed provider wire", () => {
-  test("serializes OpenAI and Azure retention controls without cache keys or continuation", async () => {
-    const options = {
-      store: false,
-      promptCacheOptions: { mode: "explicit" },
-      promptCacheRetention: "in_memory",
-    }
-    const openai = captureProviderWire(openAIReviewerResponse("gpt-4.1"))
-    const openaiResult = await generateReviewerWire(
-      createOpenAI({ apiKey: "test", baseURL: "https://openai.test/v1", fetch: openai.fetch }).responses("gpt-4.1"),
-      { openai: options },
-    )
-    expect(openaiResult.object).toEqual(reviewerWireValue)
-    expect(openai.captured().url).toEndWith("/v1/responses")
-    expect(openai.captured().body).toMatchObject({
-      store: false,
-      prompt_cache_options: { mode: "explicit" },
-      prompt_cache_retention: "in_memory",
-    })
-    expect(openai.captured().body.prompt_cache_key).toBeUndefined()
-    expectIsolatedWire(openai.captured().body)
-
-    const azure = captureProviderWire(openAIReviewerResponse("deployment"))
-    const azureResult = await generateReviewerWire(
-      createAzure({ apiKey: "test", baseURL: "https://azure.test/openai/v1", fetch: azure.fetch }).responses("deployment"),
-      { openai: options, azure: options },
-    )
-    expect(azureResult.object).toEqual(reviewerWireValue)
-    expect(azure.captured().url).toContain("/openai/v1/responses")
-    expect(azure.captured().body).toMatchObject({
-      store: false,
-      prompt_cache_options: { mode: "explicit" },
-      prompt_cache_retention: "in_memory",
-    })
-    expect(azure.captured().body.prompt_cache_key).toBeUndefined()
-    expectIsolatedWire(azure.captured().body)
-  })
-
-  test("streams OpenAI OAuth with policy instructions and no alternate authority", async () => {
-    let body: Record<string, unknown> | undefined
-    const events = [
-      {
-        type: "response.created",
-        response: { id: "resp_review", created_at: 1, model: "gpt-4.1", service_tier: null },
-      },
-      {
-        type: "response.output_item.added",
-        output_index: 0,
-        item: { type: "message", id: "msg_review", phase: null },
-      },
-      { type: "response.output_text.delta", item_id: "msg_review", delta: reviewerWireText, logprobs: null },
-      {
-        type: "response.output_item.done",
-        output_index: 0,
-        item: { type: "message", id: "msg_review", phase: null },
-      },
-      {
-        type: "response.completed",
-        response: {
-          incomplete_details: null,
-          usage: {
-            input_tokens: 1,
-            input_tokens_details: null,
-            output_tokens: 1,
-            output_tokens_details: null,
-          },
-          reasoning: null,
-          service_tier: null,
-        },
-      },
-    ]
-    const fetch = Object.assign(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const raw = init?.body ?? (input instanceof Request ? await input.clone().text() : undefined)
-        body = JSON.parse(String(raw)) as Record<string, unknown>
-        return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, {
-          headers: { "content-type": "text/event-stream" },
-        })
-      },
-      { preconnect: globalThis.fetch.preconnect },
-    )
-    const streamed = streamObject({
-      model: createOpenAI({ apiKey: "test", baseURL: "https://openai.test/v1", fetch }).responses("gpt-4.1"),
-      schema: reviewerWireSchema,
-      messages: [reviewerWireMessages[1]],
-      providerOptions: {
-        openai: {
-          store: false,
-          promptCacheOptions: { mode: "explicit" },
-          promptCacheRetention: "in_memory",
-          instructions: PlanReview.REVIEW_POLICY,
-        },
-      },
-      maxRetries: 0,
-    })
-    for await (const _ of streamed.fullStream) {
-      // drain the installed OAuth-compatible streaming path
-    }
-    expect(await streamed.object).toEqual(reviewerWireValue)
-    if (!body) throw new Error("provider request was not captured")
-    expect(body).toMatchObject({
-      stream: true,
-      store: false,
-      instructions: PlanReview.REVIEW_POLICY,
-      prompt_cache_options: { mode: "explicit" },
-      prompt_cache_retention: "in_memory",
-    })
-    expect(JSON.stringify(body.input)).not.toContain('"role":"system"')
-    expectIsolatedWire(body)
-  })
-
-  for (const modelID of ["o1-mini", "o1-preview"] as const) {
-    test(`keeps only reviewer instructions on GitHub Copilot ${modelID}`, async () => {
-      const copilot = captureProviderWire(openAIReviewerResponse(modelID))
-      const result = await generateReviewerWire(
-        createOpenaiCompatible({
-          name: "github-copilot",
-          apiKey: "test",
-          baseURL: "https://copilot.test",
-          fetch: copilot.fetch,
-        }).responses(modelID),
-        { copilot: { store: false, instructions: PlanReview.REVIEW_POLICY } },
-      )
-      expect(result.object).toEqual(reviewerWireValue)
-      expect(copilot.captured().body).toMatchObject({ store: false, instructions: PlanReview.REVIEW_POLICY })
-      expect(JSON.stringify(copilot.captured().body.input)).not.toContain('"role":"system"')
-      expect(copilot.captured().body.prompt_cache_options).toBeUndefined()
-      expectIsolatedWire(copilot.captured().body)
-    })
-  }
-
-  test("serializes xAI statelessly without search or continuation controls", async () => {
-    const xai = captureProviderWire({
-      id: "resp_review",
-      created_at: 1,
-      model: "grok-4",
-      object: "response",
-      status: "completed",
-      output: [
-        {
-          type: "message",
-          role: "assistant",
-          id: "msg_review",
-          status: "completed",
-          content: [{ type: "output_text", text: reviewerWireText, annotations: [] }],
-        },
-      ],
-      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
-    })
-    expect(
-      (
-        await generateReviewerWire(
-          createXai({ apiKey: "test", baseURL: "https://xai.test/v1", fetch: xai.fetch }).responses("grok-4"),
-          { xai: { store: false } },
-        )
-      ).object,
-    ).toEqual(reviewerWireValue)
-    expect(xai.captured().body.store).toBe(false)
-    expect(xai.captured().body.search_parameters).toBeUndefined()
-    expect(xai.captured().body.prompt_cache_options).toBeUndefined()
-    expectIsolatedWire(xai.captured().body)
-  })
-
-  test("serializes Google Interactions without stateful IDs or agent controls", async () => {
-    const google = captureProviderWire({
-      status: "completed",
-      model: "gemini-2.5-flash",
-      outputs: [{ type: "text", text: reviewerWireText }],
-      usage: { total_input_tokens: 1, total_output_tokens: 1, total_tokens: 2 },
-    })
-    expect(
-      (
-        await generateReviewerWire(
-          createGoogleGenerativeAI({ apiKey: "test", baseURL: "https://google.test/v1beta", fetch: google.fetch }).interactions(
-            "gemini-2.5-flash",
-          ),
-          { google: { store: false } },
-        )
-      ).object,
-    ).toEqual(reviewerWireValue)
-    expect(google.captured().body).toMatchObject({ store: false, system_instruction: PlanReview.REVIEW_POLICY })
-    expect(google.captured().body.previous_interaction_id).toBeUndefined()
-    expect(google.captured().body.agent).toBeUndefined()
-    expect(google.captured().body.agent_config).toBeUndefined()
-    expectIsolatedWire(google.captured().body)
-  })
-
-  test("serializes Mantle and Anthropic without provider-side tools or cache directives", async () => {
-    const mantle = captureProviderWire({
-      id: "chat_review",
-      created: 1,
-      model: "openai.gpt-oss-20b",
-      object: "chat.completion",
-      choices: [{ index: 0, message: { role: "assistant", content: reviewerWireText }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    })
-    expect(
-      (
-        await generateReviewerWire(
-          createBedrockMantle({ apiKey: "test", baseURL: "https://mantle.test/v1", fetch: mantle.fetch }).languageModel(
-            "openai.gpt-oss-20b",
-          ),
-          { openai: { store: false } },
-        )
-      ).object,
-    ).toEqual(reviewerWireValue)
-    expect(mantle.captured().body.store).toBe(false)
-    expect(mantle.captured().body.cache_control).toBeUndefined()
-    expect(mantle.captured().body.cachePoint).toBeUndefined()
-    expectIsolatedWire(mantle.captured().body)
-
-    const anthropic = captureProviderWire({
-      type: "message",
-      id: "msg_review",
-      model: "claude-sonnet-4-6",
-      content: [{ type: "text", text: reviewerWireText }],
-      stop_reason: "end_turn",
-      stop_sequence: null,
-      usage: { input_tokens: 1, output_tokens: 1 },
-    })
-    expect(
-      (
-        await generateReviewerWire(
-          createAnthropic({ apiKey: "test", baseURL: "https://anthropic.test/v1", fetch: anthropic.fetch }).languageModel(
-            "claude-sonnet-4-6",
-          ),
-          { anthropic: { inferenceGeo: "us" } },
-        )
-      ).object,
-    ).toEqual(reviewerWireValue)
-    expect(anthropic.captured().body.inference_geo).toBe("us")
-    expect(anthropic.captured().body.mcp_servers).toBeUndefined()
-    expect(anthropic.captured().body.container).toBeUndefined()
-    expect(anthropic.captured().body.context_management).toBeUndefined()
-    expect(anthropic.captured().body.cache_control).toBeUndefined()
-    expectIsolatedWire(anthropic.captured().body)
-  })
-
-  test("serializes Gateway privacy flags and isolated upstream retention controls", async () => {
-    const gateway = captureProviderWire({
-      content: [{ type: "text", text: reviewerWireText }],
-      finishReason: { unified: "stop" },
-      usage: {
-        inputTokens: { total: 1, noCache: 1 },
-        outputTokens: { total: 1, text: 1 },
-      },
-      warnings: [],
-    })
-    expect(
-      (
-        await generateReviewerWire(
-          createGateway({ apiKey: "test", baseURL: "https://gateway.test/v1/ai", fetch: gateway.fetch }).languageModel(
-            "openai/gpt-4.1",
-          ),
-          {
-            gateway: { zeroDataRetention: true, disallowPromptTraining: true, hipaaCompliant: true },
-            openai: {
-              store: false,
-              promptCacheOptions: { mode: "explicit" },
-              promptCacheRetention: "in_memory",
-            },
-          },
-        )
-      ).object,
-    ).toEqual(reviewerWireValue)
-    expect(gateway.captured().body.providerOptions).toEqual({
-      gateway: { zeroDataRetention: true, disallowPromptTraining: true, hipaaCompliant: true },
-      openai: {
-        store: false,
-        promptCacheOptions: { mode: "explicit" },
-        promptCacheRetention: "in_memory",
-      },
-    })
-    expect(gateway.captured().body.routing).toBeUndefined()
-    expect(gateway.captured().body.byok).toBeUndefined()
-    expectIsolatedWire(gateway.captured().body)
   })
 })
 

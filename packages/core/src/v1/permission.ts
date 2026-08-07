@@ -26,29 +26,8 @@ export class DeniedError extends Schema.TaggedErrorClass<DeniedError>()("Permiss
   }
 }
 
-export class PlanReadOnlyError extends Schema.TaggedErrorClass<PlanReadOnlyError>()("PermissionPlanReadOnlyError", {
-  reason: Schema.String,
-  alternative: Schema.optional(Schema.String),
-}) {
-  override get message() {
-    return `Plan read-only denial: ${this.reason}. Safe alternative: ${this.alternative ?? "continue planning with read-only tools and ask the user to perform the mutation"}. The Plan agent must not retry an equivalent request.`
-  }
-}
-
-export class ReviewedDeniedError extends Schema.TaggedErrorClass<ReviewedDeniedError>()(
-  "PermissionReviewedDeniedError",
-  {
-    reason: Schema.String,
-    alternative: Schema.optional(Schema.String),
-  },
-) {
-  override get message() {
-    return `Automatic-review denial: ${this.reason}. Safe alternative: ${this.alternative ?? "ask the user to review the request manually or choose a safer action"}. The Plan agent must not retry an equivalent request.`
-  }
-}
-
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Permission.NotFoundError", {
   requestID: ID,
 }) {}
 
-export type Error = DeniedError | RejectedError | CorrectedError | PlanReadOnlyError | ReviewedDeniedError
+export type Error = DeniedError | RejectedError | CorrectedError
