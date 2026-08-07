@@ -195,7 +195,6 @@ export type Session = {
     url: string
   }
   title: string
-  approvalMode?: "ask" | "auto_review"
   agent?: string
   model?: {
     id: string
@@ -1392,10 +1391,6 @@ export type GlobalEvent = {
             messageID: string
             callID: string
           }
-          review?: {
-            risk: "low" | "medium" | "high" | "critical"
-            reason: string
-          }
         }
       }
     | {
@@ -2223,7 +2218,6 @@ export type GlobalSession = {
     url: string
   }
   title: string
-  approvalMode?: "ask" | "auto_review"
   agent?: string
   model?: {
     id: string
@@ -2481,10 +2475,6 @@ export type PermissionRequest = {
   tool?: {
     messageID: string
     callID: string
-  }
-  review?: {
-    risk: "low" | "medium" | "high" | "critical"
-    reason: string
   }
 }
 
@@ -3932,7 +3922,6 @@ export type SessionV2Info = {
     archived?: number
   }
   title: string
-  approvalMode?: "ask" | "auto_review"
   location: LocationRef
   subpath?: string
   revert?: RevertState
@@ -5727,10 +5716,6 @@ export type PermissionAsked = {
       messageID: string
       callID: string
     }
-    review?: {
-      risk: "low" | "medium" | "high" | "critical"
-      reason: string
-    }
   }
 }
 
@@ -6884,10 +6869,6 @@ export type EventPermissionAsked = {
     tool?: {
       messageID: string
       callID: string
-    }
-    review?: {
-      risk: "low" | "medium" | "high" | "critical"
-      reason: string
     }
   }
 }
@@ -9545,7 +9526,6 @@ export type SessionCreateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
-    approvalMode?: "ask" | "auto_review"
     workspaceID?: string
   }
   path?: never
@@ -9679,7 +9659,6 @@ export type SessionUpdateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
-    approvalMode?: "ask" | "auto_review"
     time?: {
       archived?: number
     }
@@ -11439,7 +11418,6 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
-    approvalMode?: "ask" | "auto_review"
   }
   path?: never
   query?: never

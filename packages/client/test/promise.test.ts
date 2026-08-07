@@ -52,6 +52,7 @@ test("sessions.get returns the wire projection", async () => {
   const result = await client.sessions.get({ sessionID: "ses_test" })
 
   expect(result.time.created).toBe(1_717_171_717_000)
+  expect(result).not.toHaveProperty("approvalMode")
 })
 
 test("events.subscribe exposes the Promise event stream wire projection", async () => {
@@ -114,10 +115,7 @@ test("session methods use the public HTTP contract", async () => {
 
   const page = await client.sessions.list({ limit: 10, order: "desc" })
   const active = await client.sessions.active()
-  const created = await client.sessions.create({
-    location: { directory: "/tmp/project" },
-    approvalMode: "auto_review",
-  })
+  const created = await client.sessions.create({ location: { directory: "/tmp/project" } })
   await client.sessions.switchAgent({ sessionID: "ses_test", agent: "build" })
   await client.sessions.switchModel({
     sessionID: "ses_test",
@@ -144,6 +142,7 @@ test("session methods use the public HTTP contract", async () => {
   expect(page.cursor.next).toBe("next")
   expect(active).toEqual({ ses_test: { type: "running" } })
   expect(created.id).toBe("ses_test")
+  expect(created).not.toHaveProperty("approvalMode")
   expect(admitted.id).toBe("msg_test")
   expect(context).toEqual([])
   expect(history).toEqual({ data: [modelSwitchedEvent], hasMore: true })
@@ -177,7 +176,6 @@ test("session methods use the public HTTP contract", async () => {
   )?.init?.body
   if (typeof createBody !== "string") throw new Error("Expected JSON create request body")
   expect(JSON.parse(createBody)).toEqual({
-    approvalMode: "auto_review",
     location: { directory: "/tmp/project" },
   })
 })
