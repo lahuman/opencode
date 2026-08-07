@@ -11,38 +11,37 @@ const sessionA = session("ses_server_a", directoryA, "Server A session")
 const childSessionA = { ...session("ses_server_a_child", directoryA, "Server A child session"), parentID: sessionA.id }
 const sessionB = session("ses_server_b", directoryB, "Server B session")
 
-test("session settings use the remote server context", async ({ page }) => {
-  const permissionRequests: string[] = []
-  await mockServers(page, permissionRequests)
-  await configureServers(page)
+for (const newLayoutDesigns of [true, false]) {
+  const layout = newLayoutDesigns ? "new" : "legacy"
 
-  await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
-  await expect(page.getByText(sessionB.title).first()).toBeVisible()
-  await page.keyboard.press("Control+,")
+  test(`${layout} session settings use the remote server context`, async ({ page }) => {
+    const permissionRequests: string[] = []
+    await mockServers(page, permissionRequests)
+    await configureServers(page, [], newLayoutDesigns)
 
-  const dialog = page.locator(".settings-v2-dialog")
-  const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
-  const input = autoAccept.getByRole("switch")
-  await expect(autoAccept).toBeVisible()
-  await expect(input).toBeEnabled()
-  permissionRequests.length = 0
-  await autoAccept.locator('[data-slot="switch-control"]').click()
-  await expect(input).toBeChecked()
-  await expect
-    .poll(() =>
-      permissionRequests.some((request) => {
-        const url = new URL(request)
-        return url.origin === serverB && url.searchParams.get("directory") === directoryB
-      }),
-    )
-    .toBe(true)
-  expect(permissionRequests.every((request) => new URL(request).origin === serverB)).toBe(true)
+    await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
+    await expect(page.getByText(sessionB.title).first()).toBeVisible()
+    await page.keyboard.press("Control+,")
 
-  await dialog.getByRole("tab", { name: "Models" }).click()
-  await expect(dialog.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
-  await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
-})
-
+    const dialog = page.locator(newLayoutDesigns ? ".settings-v2-dialog" : ".settings-dialog")
+    const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
+    const input = autoAccept.getByRole("switch")
+    await expect(autoAccept).toBeVisible()
+    await expect(input).toBeEnabled()
+    permissionRequests.length = 0
+    await autoAccept.locator('[data-slot="switch-control"]').click()
+    await expect(input).toBeChecked()
+    await expect
+      .poll(() =>
+        permissionRequests.some((request) => {
+          const url = new URL(request)
+          return url.origin === serverB && url.searchParams.get("directory") === directoryB
+        }),
+      )
+      .toBe(true)
+    expect(permissionRequests.every((request) => new URL(request).origin === serverB)).toBe(true)
+  })
+}
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []

@@ -118,6 +118,32 @@ test("shows a pending permission dock", async ({ page }) => {
 })
 
 
+test("rejects a pending permission", async ({ page }) => {
+  await mockServer(page, {
+    permissions: [
+      {
+        id: "permission-reject",
+        sessionID,
+        permission: "bash",
+        patterns: ["git status"],
+        metadata: {},
+        always: [],
+      },
+    ],
+  })
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expectSessionTitle(page, title)
+
+  const permission = page.locator('[data-component="dock-prompt"][data-kind="permission"]')
+  const reply = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === `/api/session/${sessionID}/permission/permission-reject/reply`,
+  )
+  await permission.getByRole("button", { name: "Reject" }).click()
+  expect((await reply).postDataJSON()).toEqual({ reply: "reject" })
+})
 test("allows a permission permanently when patterns are provided", async ({ page }) => {
   await mockServer(page, {
     permissions: [
