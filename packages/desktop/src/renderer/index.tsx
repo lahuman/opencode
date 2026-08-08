@@ -11,6 +11,7 @@ import {
   ServerConnection,
   useCommand,
   useWslServers,
+  useLanguage,
 } from "@opencode-ai/app"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import * as Sentry from "@sentry/solid"
@@ -18,7 +19,7 @@ import { createMemoryHistory, MemoryRouter, type BaseRouterProps } from "@solidj
 import { createEffect, createMemo, createResource, createSignal, onCleanup, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
-import { initI18n, t } from "./i18n"
+import { t } from "./i18n"
 import { initializationData } from "./initialization"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
 import { windowFullscreen } from "./window-fullscreen"
@@ -33,7 +34,7 @@ if (ENTERPRISE_ENABLED) document.title = "Kernexa"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
-  throw new Error(t("error.dev.rootNotFound"))
+  throw new Error(t("desktop.error.dev.rootNotFound"))
 }
 
 if (enterpriseTelemetryEnabled(ENTERPRISE_PROFILE, import.meta.env.VITE_SENTRY_DSN)) {
@@ -58,8 +59,6 @@ if (enterpriseTelemetryEnabled(ENTERPRISE_PROFILE, import.meta.env.VITE_SENTRY_D
     },
   })
 }
-
-void initI18n()
 
 const [updaterState, setUpdaterState] = createSignal<UpdaterState>({ status: "disabled" })
 void window.api.updater.subscribe(setUpdaterState)
@@ -169,6 +168,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   function App() {
     const wslServers = useWslServers()
+    const language = useLanguage()
     const ready = createMemo(
       () => !defaultServer.loading && !sidecar.loading && !locale.loading && !wslServers.isLoading,
     )
@@ -177,7 +177,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
       const list: ServerConnection.Any[] = []
       if (data) {
         list.push({
-          displayName: "Local Server",
+          displayName: language.t("desktop.server.local"),
           type: "sidecar",
           variant: "base",
           http: {
@@ -188,7 +188,7 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
         })
       }
       if (ENTERPRISE_ENABLED) return list.filter(ServerConnection.builtin)
-      list.push(...readyWslConnections(wslServers.data))
+      list.push(...readyWslConnections(wslServers.data, language.t("wsl.server.label")))
       return list
     })
     const effectiveDefaultServer = createMemo(() => {
@@ -221,7 +221,10 @@ function DesktopRoot(props: { windowState: DesktopWindowState }) {
 
   return (
     <PlatformProvider value={platform}>
-      <AppBaseProviders locale={locale.latest}>
+      <AppBaseProviders
+        locale={locale.latest}
+        onNativeTranslations={(bundle) => void window.api.setNativeTranslations(bundle).catch(() => undefined)}
+      >
         <Show when={true}>{(_) => <App />}</Show>
       </AppBaseProviders>
     </PlatformProvider>

@@ -1,6 +1,7 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import type { DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
 import type { EnterpriseProviderAPI } from "../main/enterprise-provider-runtime"
 export type {
   CredentialReplacement,
@@ -119,6 +120,11 @@ export type ElectronAPI = {
   storeClear: (name: string) => Promise<void>
   storeKeys: (name: string) => Promise<string[]>
   storeLength: (name: string) => Promise<number>
+  draftGet: (key: string) => Promise<string | null>
+  draftSet: (key: string, value: string) => Promise<void>
+  draftDelete: (key: string) => Promise<void>
+  draftBlobPut: (data: ArrayBuffer) => Promise<string>
+  draftBlobGet: (id: string) => Promise<ArrayBuffer | null>
 
   getWindowID: () => Promise<string>
   onMenuCommand: (cb: (id: string) => void) => () => void
@@ -162,6 +168,7 @@ export type ElectronAPI = {
   exportDebugLogs: () => Promise<string>
   setForceFocus: (enabled: boolean) => Promise<void>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void>
+  setNativeTranslations: (bundle: DesktopNativeBundle) => Promise<void>
 }
 
 export function createEnterpriseAPI(
@@ -217,9 +224,7 @@ export function createEnterpriseAPI(
       invoke("enterprise-state-restore", backupID) as ReturnType<ElectronAPI["enterprise"]["restoreStateBackup"]>,
     skillPacks: () => invoke("enterprise-skill-packs") as ReturnType<ElectronAPI["enterprise"]["skillPacks"]>,
     setSkillPackEnabled: (id, enabled) =>
-      invoke("enterprise-skill-pack-set", id, enabled) as ReturnType<
-        ElectronAPI["enterprise"]["setSkillPackEnabled"]
-      >,
+      invoke("enterprise-skill-pack-set", id, enabled) as ReturnType<ElectronAPI["enterprise"]["setSkillPackEnabled"]>,
     openSkillPackSource: (id) =>
       invoke("enterprise-skill-pack-source", id) as ReturnType<ElectronAPI["enterprise"]["openSkillPackSource"]>,
   }

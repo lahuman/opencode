@@ -20,7 +20,7 @@ export function DesktopCommands() {
     if (platform.platform === "desktop" && platform.exportDebugLogs) {
       commands.push({
         id: "logs.export",
-        title: "Export logs",
+        title: language.t("command.logs.export"),
         category: language.t("command.category.settings"),
         onSelect: () => {
           void platform.exportDebugLogs?.()
@@ -31,7 +31,10 @@ export function DesktopCommands() {
       enterprise: platform.enterprise,
       category: language.t("command.category.settings"),
       open: (guide, origin) =>
-        dialog.show(() => <DialogCompanyGuide {...guide} />, () => restoreCompanyGuideFocus(origin)),
+        dialog.show(
+          () => <DialogCompanyGuide {...guide} />,
+          () => restoreCompanyGuideFocus(origin),
+        ),
       reportFailure: () => showToast({ title: language.t("common.requestFailed") }),
     })
     if (companyGuide) commands.push(companyGuide)

@@ -29,6 +29,16 @@ test("reports policy-disabled WSL state and rejects actions", () => {
   expect(integration.unavailable).toThrow("WSL integration is disabled in this build")
 })
 
+test("resolves unavailable WSL messages when each action runs", () => {
+  let message = "English"
+  const integration = unavailableWslIntegration(false, () => message)
+
+  expect(integration.state().runtime.error).toBe("English")
+  message = "번역됨"
+  expect(integration.state().runtime.error).toBe("번역됨")
+  expect(integration.unavailable).toThrow("번역됨")
+})
+
 test("starts every configured WSL server on initialization", () => {
   expect(
     wslServerIdsToStartOnInitialize([

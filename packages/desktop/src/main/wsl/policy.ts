@@ -1,13 +1,15 @@
 import type { WslDistroProbe, WslOpencodeCheck, WslServerItem, WslServersState } from "../../preload/types"
 
-export function unavailableWslIntegration(enabled: boolean) {
-  const error = enabled ? "WSL is only available on Windows" : "WSL integration is disabled in this build"
+export function unavailableWslIntegration(enabled: boolean, message?: string | (() => string)) {
+  const error = () =>
+    (typeof message === "function" ? message() : message) ??
+    (enabled ? "WSL is only available on Windows" : "WSL integration is disabled in this build")
   return {
     unavailable: () => {
-      throw new Error(error)
+      throw new Error(error())
     },
     state: (): WslServersState => ({
-      runtime: { available: false, version: null, error },
+      runtime: { available: false, version: null, error: error() },
       installed: [],
       online: [],
       distroProbes: {},

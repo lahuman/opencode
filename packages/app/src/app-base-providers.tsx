@@ -27,7 +27,13 @@ declare global {
 
 function UiI18nBridge(props: ParentProps) {
   const language = useLanguage()
-  return <I18nProvider value={{ locale: language.intl, t: language.t }}>{props.children}</I18nProvider>
+  return (
+    <I18nProvider
+      value={{ locale: language.intl, layoutLocale: language.layoutLocale, t: language.t, plural: language.plural }}
+    >
+      {props.children}
+    </I18nProvider>
+  )
 }
 
 export function QueryProvider(props: ParentProps) {
@@ -43,7 +49,12 @@ export function QueryProvider(props: ParentProps) {
   return <QueryClientProvider client={client}>{props.children}</QueryClientProvider>
 }
 
-export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
+export function AppBaseProviders(
+  props: ParentProps<{
+    locale?: Locale
+    onNativeTranslations?: Parameters<typeof LanguageProvider>[0]["onNativeTranslations"]
+  }>,
+) {
   return (
     <MetaProvider>
       <Font />
@@ -52,7 +63,7 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
           void window.api?.setTitlebar?.({ mode, scheme })
         }}
       >
-        <LanguageProvider locale={props.locale}>
+        <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
           <UiI18nBridge>
             <DialogProvider>
               <MarkedProvider>

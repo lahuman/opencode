@@ -1,4 +1,4 @@
-import type { Platform, ServerConnection } from "@opencode-ai/app"
+import { createDraftStore, type Platform, type ServerConnection } from "@opencode-ai/app"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import type { Accessor } from "solid-js"
@@ -10,7 +10,6 @@ import {
   ENTERPRISE_PROFILE,
 } from "../enterprise"
 import { mapEnterpriseAPI } from "../preload/types"
-import { t } from "./i18n"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 
 export type DesktopWindowState = {
@@ -98,14 +97,14 @@ export function createPlatform(
     async openDirectoryPickerDialog(opts) {
       return window.api.openDirectoryPicker({
         multiple: opts?.multiple ?? false,
-        title: opts?.title ?? t("desktop.dialog.chooseFolder"),
+        title: opts?.title,
       })
     },
 
     async openAttachmentPickerDialog(opts, onFile) {
       const result = await window.api.openFilePicker({
         multiple: opts?.multiple ?? false,
-        title: opts?.title ?? t("desktop.dialog.chooseFile"),
+        title: opts?.title,
         defaultPath: opts?.defaultPath,
         extensions: opts?.extensions ?? runtime.acceptedFileExtensions,
       })
@@ -127,7 +126,7 @@ export function createPlatform(
 
     async saveFilePickerDialog(opts) {
       return window.api.saveFilePicker({
-        title: opts?.title ?? t("desktop.dialog.saveFile"),
+        title: opts?.title,
         defaultPath: opts?.defaultPath,
       })
     },
@@ -144,6 +143,13 @@ export function createPlatform(
     revealPath: (path: string) => window.api.revealPath(path),
 
     storage,
+    draftStore: createDraftStore({
+      get: window.api.draftGet,
+      set: window.api.draftSet,
+      remove: window.api.draftDelete,
+      putBlob: (blob) => blob.arrayBuffer().then(window.api.draftBlobPut),
+      getBlob: (id) => window.api.draftBlobGet(id).then((data) => data && new Blob([data])),
+    }),
 
     updater: {
       state: updaterState,

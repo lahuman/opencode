@@ -45,7 +45,10 @@ test("creates a bootstrap backup when metadata is introduced over existing durab
 
   expect(result).toEqual({ status: "pending", backupID: "20260716T000000-bootstrap" })
   expect(
-    await readFile(join(fixture.root, "enterprise-backups/20260716T000000-bootstrap/data/opencode/opencode.db"), "utf8"),
+    await readFile(
+      join(fixture.root, "enterprise-backups/20260716T000000-bootstrap/data/opencode/opencode.db"),
+      "utf8",
+    ),
   ).toBe("legacy-database")
   expect(await readEnterpriseStateMetadata(fixture.root)).toMatchObject({
     pendingAppVersion: "2.0.0",
@@ -90,6 +93,36 @@ test("backs up durable AppData before a version upgrade and excludes logs and ca
   expect(await readFile(join(backup, "data/opencode/opencode.db"), "utf8")).toBe("database")
   expect(await Bun.file(join(backup, "logs/run/main.log")).exists()).toBeFalse()
   expect(await Bun.file(join(backup, "cache/bin/lsp.exe")).exists()).toBeFalse()
+})
+
+test("keeps active drafts outside version backups and restores", async () => {
+  await using fixture = await stateFixture()
+  await prepareEnterpriseState({ enabled: true, userData: fixture.root, appVersion: "1.0.0", now: fixture.now })
+  await markEnterpriseStateHealthy({ enabled: true, userData: fixture.root, appVersion: "1.0.0" })
+  await Bun.write(join(fixture.root, "durable.dat"), "version-1")
+  await Bun.write(join(fixture.root, "drafts.sqlite"), "active-draft")
+  await Bun.write(join(fixture.root, "drafts.sqlite-wal"), "active-wal")
+  await Bun.write(join(fixture.root, "drafts.sqlite-shm"), "active-shm")
+
+  const result = await prepareEnterpriseState({
+    enabled: true,
+    userData: fixture.root,
+    appVersion: "2.0.0",
+    now: new Date("2026-07-17T00:00:00.000Z"),
+  })
+  const backup = join(fixture.root, "enterprise-backups", result.backupID!)
+  expect(await Bun.file(join(backup, "drafts.sqlite")).exists()).toBeFalse()
+  expect(await Bun.file(join(backup, "drafts.sqlite-wal")).exists()).toBeFalse()
+  expect(await Bun.file(join(backup, "drafts.sqlite-shm")).exists()).toBeFalse()
+
+  await Bun.write(join(fixture.root, "durable.dat"), "partially-migrated")
+  await Bun.write(join(fixture.root, "drafts.sqlite"), "latest-draft")
+  await restoreEnterpriseBackup({ userData: fixture.root, backupID: result.backupID! })
+
+  expect(await readFile(join(fixture.root, "durable.dat"), "utf8")).toBe("version-1")
+  expect(await readFile(join(fixture.root, "drafts.sqlite"), "utf8")).toBe("latest-draft")
+  expect(await readFile(join(fixture.root, "drafts.sqlite-wal"), "utf8")).toBe("active-wal")
+  expect(await readFile(join(fixture.root, "drafts.sqlite-shm"), "utf8")).toBe("active-shm")
 })
 
 test("rejects downgrades and malformed metadata without changing durable files", async () => {

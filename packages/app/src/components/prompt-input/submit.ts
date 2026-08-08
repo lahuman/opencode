@@ -23,6 +23,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
+import { blobDataUrl } from "@/utils/draft-store"
 
 type PendingPrompt = {
   abort: AbortController
@@ -96,10 +97,12 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
           providerID: input.draft.model.providerID,
           variant: input.draft.variant,
         },
-        files: images.map((attachment) => ({
-          uri: attachment.dataUrl,
-          name: attachment.filename,
-        })),
+        files: await Promise.all(
+          images.map(async (attachment) => ({
+            uri: await blobDataUrl(attachment.blob, attachment.mime),
+            name: attachment.filename,
+          })),
+        ),
       })
       return true
     } catch (err) {
@@ -109,10 +112,18 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   }
 
   const messageID = input.messageID ?? Identifier.ascending("message")
+  const encodedImages = images.length
+    ? await Promise.all(
+        images.map(async (attachment) => ({
+          ...attachment,
+          dataUrl: await blobDataUrl(attachment.blob, attachment.mime),
+        })),
+      )
+    : []
   const { requestParts, optimisticParts } = buildRequestParts({
     prompt: input.draft.prompt,
     context: input.draft.context,
-    images,
+    images: encodedImages,
     text,
     sessionID: input.draft.sessionID,
     messageID,
@@ -382,70 +393,69 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     if (!session && isNewSession) {
       const result = await (async () => {
-          const shouldAutoAccept = input.autoAccept()
-          const worktreeSelection = input.newSessionWorktree?.() || "main"
-          let directory = projectDirectory
-          let client = sdk().client
+        const shouldAutoAccept = input.autoAccept()
+        const worktreeSelection = input.newSessionWorktree?.() || "main"
+        let directory = projectDirectory
+        let client = sdk().client
 
-          input.addToHistory(currentPrompt, mode)
-          input.resetHistoryNavigation()
-          clearInput()
+        input.addToHistory(currentPrompt, mode)
+        input.resetHistoryNavigation()
+        clearInput()
 
-          if (worktreeSelection === "create") {
-            const createdWorktree = await client.worktree
-              .create({ directory: projectDirectory })
-              .then((value) => value.data)
-              .catch((err) => {
-                showToast({
-                  title: language.t("prompt.toast.worktreeCreateFailed.title"),
-                  description: errorMessage(err),
-                })
-                return undefined
-              })
-
-            if (!createdWorktree?.directory) {
+        if (worktreeSelection === "create") {
+          const createdWorktree = await client.worktree
+            .create({ directory: projectDirectory })
+            .then((value) => value.data)
+            .catch((err) => {
               showToast({
                 title: language.t("prompt.toast.worktreeCreateFailed.title"),
-                description: language.t("common.requestFailed"),
+                description: errorMessage(err),
               })
-              restoreInput()
-              return
-            }
-            WorktreeState.pending(sdk().scope, createdWorktree.directory)
-            directory = createdWorktree.directory
-          }
-
-          if (worktreeSelection !== "main" && worktreeSelection !== "create") directory = worktreeSelection
-
-          if (directory !== projectDirectory) {
-            client = sdk().createClient({
-              directory,
-              throwOnError: true,
+              return undefined
             })
-            serverSync().child(directory)
-          }
 
-          input.onNewSessionWorktreeReset?.()
-
-          const created = await sdk().api.session.create({
-            agent: currentAgent.name,
-            model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
-            location: { directory },
-          })
-          const authoritative = normalizeSessionInfo(created)
-          if (shouldAutoAccept) {
-            permissionState.enableAutoAccept(authoritative.id, directory)
+          if (!createdWorktree?.directory) {
+            showToast({
+              title: language.t("prompt.toast.worktreeCreateFailed.title"),
+              description: language.t("common.requestFailed"),
+            })
+            restoreInput()
+            return
           }
-          return { session: authoritative, directory }
-        })()
-        .catch((err) => {
-          showToast({
-            title: language.t("prompt.toast.sessionCreateFailed.title"),
-            description: errorMessage(err),
+          WorktreeState.pending(sdk().scope, createdWorktree.directory)
+          directory = createdWorktree.directory
+        }
+
+        if (worktreeSelection !== "main" && worktreeSelection !== "create") directory = worktreeSelection
+
+        if (directory !== projectDirectory) {
+          client = sdk().createClient({
+            directory,
+            throwOnError: true,
           })
-          restoreInput()
-          return undefined
+          serverSync().child(directory)
+        }
+
+        input.onNewSessionWorktreeReset?.()
+
+        const created = await sdk().api.session.create({
+          agent: currentAgent.name,
+          model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
+          location: { directory },
         })
+        const authoritative = normalizeSessionInfo(created)
+        if (shouldAutoAccept) {
+          permissionState.enableAutoAccept(authoritative.id, directory)
+        }
+        return { session: authoritative, directory }
+      })().catch((err) => {
+        showToast({
+          title: language.t("prompt.toast.sessionCreateFailed.title"),
+          description: errorMessage(err),
+        })
+        restoreInput()
+        return undefined
+      })
 
       if (!result) return
       sessionDirectory = result.directory
@@ -540,10 +550,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             arguments: args.join(" "),
             agent,
             model: { id: model.modelID, providerID: model.providerID, variant },
-            files: images.map((attachment) => ({
-              uri: attachment.dataUrl,
-              name: attachment.filename,
-            })),
+            files: await Promise.all(
+              images.map(async (attachment) => ({
+                uri: await blobDataUrl(attachment.blob, attachment.mime),
+                name: attachment.filename,
+              })),
+            ),
           })
           .catch((err) => {
             serverSync().session.status.set(session.id, { type: "idle" })

@@ -2,6 +2,7 @@ import { app, ipcMain } from "electron"
 import type { IpcMainInvokeEvent } from "electron"
 import type { WslServersController } from "./servers"
 import { requireWslIpcString, requireWslIpcStrings, unavailableWslIntegration } from "./policy"
+import { nativeT } from "../native-translations"
 
 export function registerWslIpcHandlers(controller: WslServersController, enabled = true) {
   if (process.platform !== "win32" || !enabled) {
@@ -66,7 +67,9 @@ export function registerWslIpcHandlers(controller: WslServersController, enabled
 }
 
 function registerUnavailableWslIpcHandlers(enabled: boolean) {
-  const integration = unavailableWslIntegration(enabled)
+  const integration = unavailableWslIntegration(enabled, () =>
+    nativeT(enabled ? "desktop.wsl.error.windowsOnly" : "desktop.wsl.error.unavailable"),
+  )
 
   ipcMain.handle("wsl-servers-subscribe", (event) => {
     event.sender.send("wsl-servers-event", { type: "state", state: integration.state() })

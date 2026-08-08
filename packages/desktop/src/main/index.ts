@@ -5,7 +5,7 @@ import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Event } from "electron"
-import { app, safeStorage, shell } from "electron"
+import { app, BrowserWindow, safeStorage, shell } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -86,6 +86,7 @@ import {
   createEnterpriseReadinessReport,
   findEnterpriseExecutable,
 } from "./enterprise-readiness"
+import { setNativeTranslations } from "./native-translations"
 
 const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
 const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
@@ -273,14 +274,11 @@ const main = Effect.gen(function* () {
     setAppQuitting()
     void stopSidecars().finally(() => {
       app.relaunch()
-      app.exit(0)
+      app.quit()
     })
   }
   const enabledSkillPackPaths = () => {
-    const state = resolveEnterpriseSkillPackState(
-      verifiedSkillPacks,
-      getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
-    )
+    const state = resolveEnterpriseSkillPackState(verifiedSkillPacks, getStore().get(ENTERPRISE_SKILL_PACKS_KEY))
     return verifiedSkillPacks.flatMap((pack) => (state[pack.id] ? [pack.root] : []))
   }
 
@@ -366,7 +364,7 @@ const main = Effect.gen(function* () {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       setAppQuitting()
-      void stopSidecars().finally(() => app.exit(0))
+      void stopSidecars().finally(() => app.quit())
     })
   }
 
@@ -400,7 +398,11 @@ const main = Effect.gen(function* () {
         await enterpriseProviders.initialize(profile)
         return
       }
-      await initializeEnterpriseProviderStores({ catalog: enterpriseProviders, credentials: enterpriseCredentials, profile })
+      await initializeEnterpriseProviderStores({
+        catalog: enterpriseProviders,
+        credentials: enterpriseCredentials,
+        profile,
+      })
     })
   }
   let restartEnterpriseSidecar: (
@@ -411,23 +413,24 @@ const main = Effect.gen(function* () {
     throw new Error("Enterprise sidecar is not ready")
   }
   const enqueueEnterpriseSidecarTransition = createEnterpriseSidecarTransitionQueue()
-  const enterpriseProviderRuntime: EnterpriseProviderAPI = ENTERPRISE_ENABLED && !enterpriseStartupFailure
-    ? createEnterpriseProviderRuntime({
-        catalog: {
-          read: async () => (await enterpriseProviders.read()) ?? { schemaVersion: 1, providers: [] },
-          write: enterpriseProviders.write,
-        },
-        credentials: {
-          read: enterpriseCredentials.read,
-          write: enterpriseCredentials.write,
-          health: enterpriseCredentials.health,
-        },
-        restart: (catalog, credentials) =>
-          enqueueEnterpriseSidecarTransition(() =>
-            restartEnterpriseSidecar(enabledSkillPackPaths(), catalog, credentials),
-          ),
-      })
-    : unavailableEnterpriseProviderAPI()
+  const enterpriseProviderRuntime: EnterpriseProviderAPI =
+    ENTERPRISE_ENABLED && !enterpriseStartupFailure
+      ? createEnterpriseProviderRuntime({
+          catalog: {
+            read: async () => (await enterpriseProviders.read()) ?? { schemaVersion: 1, providers: [] },
+            write: enterpriseProviders.write,
+          },
+          credentials: {
+            read: enterpriseCredentials.read,
+            write: enterpriseCredentials.write,
+            health: enterpriseCredentials.health,
+          },
+          restart: (catalog, credentials) =>
+            enqueueEnterpriseSidecarTransition(() =>
+              restartEnterpriseSidecar(enabledSkillPackPaths(), catalog, credentials),
+            ),
+        })
+      : unavailableEnterpriseProviderAPI()
   const enterpriseSkillPacks = createEnterpriseSkillPackController({
     packs: verifiedSkillPacks,
     read: () => getStore().get(ENTERPRISE_SKILL_PACKS_KEY),
@@ -496,6 +499,15 @@ const main = Effect.gen(function* () {
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
+  const menuDeps = {
+    edition: ENTERPRISE_ENABLED ? ("enterprise" as const) : ("public" as const),
+    trigger: (id: string) => {
+      const win = getLastFocusedWindow()
+      if (win) sendMenuCommand(win, id)
+    },
+    checkForUpdates: () => void showUpdaterDialog(updater, true),
+    relaunch,
+  }
   registerMainIpcHandlers(
     {
       killSidecar: () => killSidecar(),
@@ -524,6 +536,9 @@ const main = Effect.gen(function* () {
       setBackgroundColor: (color) => setBackgroundColor(color),
       exportDebugLogs: () => exportDebugLogs(),
       recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+      setNativeTranslations: (bundle) => {
+        if (setNativeTranslations(bundle)) createMenu(menuDeps)
+      },
       enterprise: {
         ...enterpriseProviderRuntime,
         readiness: enterpriseReadiness,
@@ -701,22 +716,17 @@ const main = Effect.gen(function* () {
 
   yield* Fiber.await(loadingTask)
 
+  app.on("window-all-closed", () => {
+    if (process.platform === "darwin") return
+    app.quit()
+  })
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length > 0) return
+    restoreMainWindows()
+  })
+
   const windows = restoreMainWindows()
-  if (windows.length) {
-    createMenu({
-      edition: ENTERPRISE_ENABLED ? "enterprise" : "public",
-      trigger: (id) => {
-        const win = getLastFocusedWindow()
-        if (win) sendMenuCommand(win, id)
-      },
-      checkForUpdates: () => {
-        void showUpdaterDialog(updater, true)
-      },
-      relaunch: () => {
-        relaunch()
-      },
-    })
-  }
+  if (windows.length) createMenu(menuDeps)
 })
 
 Effect.runFork(main)

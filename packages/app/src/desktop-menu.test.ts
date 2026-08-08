@@ -4,7 +4,7 @@ import { DESKTOP_MENU, desktopMenuForEdition } from "./desktop-menu"
 describe("desktop menu", () => {
   test("exports logs through the desktop command registry", () => {
     const items = DESKTOP_MENU.flatMap((menu) => menu.items ?? []).filter(
-      (item) => item.type === "item" && item.label === "Export Logs...",
+      (item) => item.type === "item" && item.labelKey === "desktop.menu.exportLogs",
     )
 
     expect(items).toHaveLength(2)
@@ -13,9 +13,9 @@ describe("desktop menu", () => {
 
   test("enterprise help menu contains only local guide and log export", () => {
     const help = desktopMenuForEdition("enterprise").find((menu) => menu.id === "help")
-    expect(help?.items?.filter((item) => item.type === "item").map((item) => item.label)).toEqual([
+    expect(help?.items?.filter((item) => item.type === "item").map((item) => item.labelKey ?? item.label)).toEqual([
       "Kernexa AI 가이드",
-      "Export Logs...",
+      "desktop.menu.exportLogs",
     ])
     expect(help?.items?.some((item) => item.type === "item" && "href" in item && item.href)).toBe(false)
   })
@@ -24,5 +24,15 @@ describe("desktop menu", () => {
     expect(desktopMenuForEdition("public").find((menu) => menu.id === "help")?.items).toEqual(
       expect.arrayContaining([expect.objectContaining({ href: "https://opencode.ai/docs" })]),
     )
+  })
+
+  test("provides translated labels for role-backed entries", () => {
+    const windowMenu = DESKTOP_MENU.find((menu) => menu.role === "windowMenu")
+    const roleItems = DESKTOP_MENU.flatMap((menu) => menu.items ?? []).filter(
+      (item) => item.type === "item" && item.role && item.labelKey,
+    )
+
+    expect(windowMenu?.labelKey).toBe("desktop.menu.window")
+    expect(roleItems.length).toBeGreaterThan(0)
   })
 })

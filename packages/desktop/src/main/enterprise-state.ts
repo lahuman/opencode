@@ -9,6 +9,9 @@ const excluded = new Set(
   [
     backupsName,
     "enterprise-legacy-adoption.json",
+    "drafts.sqlite",
+    "drafts.sqlite-wal",
+    "drafts.sqlite-shm",
     "logs",
     "cache",
     "Crashpad",
@@ -17,9 +20,7 @@ const excluded = new Set(
     "DawnCache",
     "Network",
     "Session Storage",
-  ].map(
-    (name) => name.toLowerCase(),
-  ),
+  ].map((name) => name.toLowerCase()),
 )
 
 export type EnterpriseStateMetadataV1 = {
@@ -105,7 +106,9 @@ export async function prepareEnterpriseState(input: {
     backups: retained,
   })
   await Promise.all(
-    backups.slice(0, -3).map((backup) => rm(join(input.userData, backupsName, backup.id), { recursive: true, force: true })),
+    backups
+      .slice(0, -3)
+      .map((backup) => rm(join(input.userData, backupsName, backup.id), { recursive: true, force: true })),
   )
   return { status: "pending" as const, backupID }
 }
@@ -235,7 +238,12 @@ async function writeMetadata(userData: string, metadata: EnterpriseStateMetadata
 }
 
 function isMetadata(value: unknown): value is EnterpriseStateMetadataV1 {
-  if (!isRecord(value) || value.schemaVersion !== 1 || value.stateSchemaVersion !== 1 || !Array.isArray(value.backups)) {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    value.stateSchemaVersion !== 1 ||
+    !Array.isArray(value.backups)
+  ) {
     return false
   }
   if (value.lastSuccessfulAppVersion !== undefined && !isVersion(value.lastSuccessfulAppVersion)) return false
