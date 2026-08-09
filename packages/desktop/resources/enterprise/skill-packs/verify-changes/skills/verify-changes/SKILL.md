@@ -5,16 +5,16 @@ description: 작업 완료를 선언하거나 커밋·PR을 만들기 전, 변�
 
 # Verify Changes
 
-Base completion claims on fresh evidence from the current working tree. Confidence, earlier output, and code inspection do not replace verification.
+Base completion claims on fresh evidence from the exact change set being verified. Confidence, earlier output, and code inspection do not replace verification.
 
 ## Verification workflow
 
 1. Restate the requested outcomes as checkable conditions.
-2. Inspect the current diff and identify every affected package or runtime boundary.
+2. Identify the intended comparison range (working tree, staged changes, or branch against its base), inspect that diff, and identify every affected package or runtime boundary.
 3. Read project instructions to select the authoritative test, type-check, lint, and build commands.
 4. Run the narrowest relevant checks first, followed by broader checks proportional to the change risk.
-5. Read the complete command output and confirm the exit status, failure count, and skipped checks.
-6. Compare the final diff with the requested scope and check for unintended files or generated artifacts.
+5. Read the complete command output and confirm the intended checks actually ran, including the exit status, result count, failures, and skipped checks.
+6. Compare the same final change set with the requested scope and check for unintended files or generated artifacts.
 
 Run commands from the package directory required by the project. Do not substitute an easier command for the documented one without saying so.
 

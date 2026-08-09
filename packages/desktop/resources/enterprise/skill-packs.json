@@ -5,7 +5,7 @@
       "id": "analyze-codebase",
       "displayName": "Codebase Analysis",
       "description": "기존 코드의 구조, 동작 흐름, 변경 영향 범위를 분석합니다.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "repository": "https://github.com/anomalyco/opencode",
       "defaultEnabled": true,
       "root": "skill-packs/analyze-codebase/skills",
@@ -13,13 +13,13 @@
         "analyze-codebase"
       ],
       "license": "skill-packs/analyze-codebase/LICENSE",
-      "treeSHA256": "61674f0c5f473b1266f912ea7f258fe53c6df3cc8ddd7a4d6f2537cc2aa1b316"
+      "treeSHA256": "a242c0677c610c711b3b02f5e6d2bf93b7996fae8ff52849eec93eb30d07ec97"
     },
     {
       "id": "debug-problems",
       "displayName": "Problem Debugging",
       "description": "버그, 테스트 실패, 빌드 오류의 근본 원인을 체계적으로 조사합니다.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "repository": "https://github.com/anomalyco/opencode",
       "defaultEnabled": true,
       "root": "skill-packs/debug-problems/skills",
@@ -27,13 +27,13 @@
         "debug-problems"
       ],
       "license": "skill-packs/debug-problems/LICENSE",
-      "treeSHA256": "536d1d736f0f2260f5ee2ad90cc0aadb4619c15c88bd7432a60c4afdcbfc3938"
+      "treeSHA256": "ea1eb4be13cf610dd5723041c8149acc3e08c721e2489750aa32790ffd2d6cfc"
     },
     {
       "id": "verify-changes",
       "displayName": "Change Verification",
       "description": "변경사항을 테스트, 타입 검사, 빌드와 diff로 최종 검증합니다.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "repository": "https://github.com/anomalyco/opencode",
       "defaultEnabled": true,
       "root": "skill-packs/verify-changes/skills",
@@ -41,7 +41,7 @@
         "verify-changes"
       ],
       "license": "skill-packs/verify-changes/LICENSE",
-      "treeSHA256": "8a70a54f02419ce20fe10d2dd55b6410f3ec5840aed80917cb9f80d966293ad4"
+      "treeSHA256": "7c05ebccedd7d24c49364920b4e93db705f5b4cef31acb2ad7decebfd92f25cf"
     }
   ]
 }

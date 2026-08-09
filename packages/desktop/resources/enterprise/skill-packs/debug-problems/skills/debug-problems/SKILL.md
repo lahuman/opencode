@@ -9,6 +9,7 @@ Find the root cause before proposing a fix. A plausible edit is not evidence tha
 
 ## 1. Reproduce
 
+- Reproduce only in a safe local or test environment. Do not mutate production data, external systems, or user state without explicit authorization.
 - Run the smallest documented command that demonstrates the failure from the owning package.
 - Capture the exact error, inputs, environment assumptions, and whether the failure is deterministic.
 - Read the complete failing path, nearby tests, and relevant recent changes.
@@ -25,7 +26,7 @@ Find the root cause before proposing a fix. A plausible edit is not evidence tha
 
 State one falsifiable explanation: "The failure occurs because X, as shown by Y." Run the smallest experiment that can disprove it. Change one variable at a time.
 
-If three distinct fixes fail, stop patching and reconsider the architecture, assumptions, and reproduction evidence.
+If three distinct hypotheses or experiments fail, stop and reconsider the architecture, assumptions, and reproduction evidence before proposing another fix.
 
 ## 4. Fix and verify
 

@@ -5,7 +5,7 @@ description: 기존 코드의 구조와 동작 흐름을 이해하거나 변경 
 
 # Analyze Codebase
 
-Build an evidence-based map of the relevant code before recommending or making changes. Distinguish observed behavior, reasonable inference, and missing information.
+Build an evidence-based map of the relevant code before explaining behavior, recommending changes, or making changes. Distinguish observed behavior, reasonable inference, and missing information.
 
 ## Analysis workflow
 
@@ -13,7 +13,7 @@ Build an evidence-based map of the relevant code before recommending or making c
 2. Locate entry points with repository search, then trace calls and data flow to their consumers.
 3. Inspect tests, types, schemas, generated boundaries, and configuration that constrain the behavior.
 4. Check recent local history when it explains why the code has its current shape.
-5. Identify the smallest change surface and the downstream behavior it can affect.
+5. When a change is requested, identify the smallest change surface and the downstream behavior it can affect.
 
 Prefer symbol and text search before broad directory reading. Read complete functions and nearby types instead of reasoning from isolated matching lines.
 
@@ -31,8 +31,8 @@ Report:
 
 - Current behavior and its entry point
 - Relevant control flow and data flow
-- Files and tests likely to change
+- Relevant files and tests; when a change is requested, identify which are likely to change
 - Compatibility, state, security, or migration risks
-- Open questions that materially affect the implementation
+- Open questions that materially affect the requested analysis or implementation
 
 Keep the report scoped to the requested behavior. Exclude unrelated architecture observations unless they create a concrete risk.

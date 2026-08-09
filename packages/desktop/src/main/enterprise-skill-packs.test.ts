@@ -153,9 +153,9 @@ test("ships three focused development skills", async () => {
   const verified = await verifyEnterpriseSkillPacks(enterprise)
 
   expect(verified.packs.map((pack) => ({ id: pack.id, version: pack.version, enabled: pack.defaultEnabled }))).toEqual([
-    { id: "analyze-codebase", version: "1.0.0", enabled: true },
-    { id: "debug-problems", version: "1.0.0", enabled: true },
-    { id: "verify-changes", version: "1.0.0", enabled: true },
+    { id: "analyze-codebase", version: "1.0.1", enabled: true },
+    { id: "debug-problems", version: "1.0.1", enabled: true },
+    { id: "verify-changes", version: "1.0.1", enabled: true },
   ])
   expect(verified.packs.map((pack) => pack.members)).toEqual([
     ["analyze-codebase"],
