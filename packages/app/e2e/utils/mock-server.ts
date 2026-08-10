@@ -24,6 +24,7 @@ export interface MockServerConfig {
   todos?: (sessionID: string) => unknown[]
   permissions?: unknown[] | (() => unknown[])
   questions?: unknown[] | (() => unknown[])
+  agents?: unknown[]
   fileList?: (path: string) => unknown | Promise<unknown>
   fileContent?: (path: string) => unknown | Promise<unknown>
   findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown
@@ -123,7 +124,7 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/api/agent")
       return json(route, {
         location: location(config),
-        data: [
+        data: config.agents ?? [
           {
             id: "build",
             name: "Build",

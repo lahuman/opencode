@@ -304,6 +304,7 @@ async function mockServer(
   requests: {
     permissions?: unknown[] | (() => unknown[])
     questions?: unknown[] | (() => unknown[])
+    agents?: unknown[]
   },
 ) {
   await mockOpenCodeServer(page, {
@@ -348,8 +349,123 @@ async function mockServer(
     pageMessages: () => ({ items: [] }),
     permissions: requests.permissions,
     questions: requests.questions,
+    agents: requests.agents,
   })
   await page.addInitScript(() => {
     localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
   })
 }
+test("switches the composer to Build from the durable plan approval message", async ({ page }) => {
+  const transport = await installSseTransport(page, {
+    server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`,
+    retry: 20,
+  })
+  await mockServer(page, {
+    questions: [],
+    agents: [
+      {
+        id: "build",
+        name: "Build",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+      {
+        id: "plan",
+        name: "Plan",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+    ],
+  })
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await transport.waitForConnection()
+  await expectSessionTitle(page, title)
+
+  const agent = page.getByRole("button", { name: "Choose agent" })
+  await expect(agent).toContainText("Build")
+  await page.keyboard.press("Control+.")
+  await expect(agent).toContainText("Plan")
+
+  await transport.send({
+    directory,
+    payload: {
+      type: "question.asked",
+      properties: {
+        id: "question-plan-exit",
+        sessionID,
+        questions: [
+          {
+            header: "Plan complete",
+            question: "The plan is ready. What should happen next?",
+            options: [
+              { label: "Build now", description: "Switch to Build and implement the plan" },
+              { label: "Keep planning", description: "Stay in Plan mode" },
+            ],
+          },
+        ],
+        tool: { messageID: "message-plan-exit", callID: "call-plan-exit" },
+      },
+    },
+  })
+
+  const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await question.getByRole("radio", { name: /Build now/ }).click()
+  const reply = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === `/api/session/${sessionID}/question/question-plan-exit/reply`,
+  )
+  await question.getByRole("button", { name: "Submit" }).click()
+  expect((await reply).postDataJSON()).toEqual({ answers: [["Build now"]] })
+
+  const approval = {
+    directory,
+    payload: {
+      type: "message.updated",
+      properties: {
+        sessionID,
+        info: {
+          id: "message-plan-approved",
+          sessionID,
+          role: "user",
+          time: { created: 1700000001000 },
+          agent: "build",
+          model: { providerID: "opencode", modelID: "claude-opus-4-6" },
+        },
+      },
+    },
+  }
+  await transport.burst([
+    {
+      directory,
+      payload: {
+        type: "question.replied",
+        properties: { sessionID, requestID: "question-plan-exit", answers: [["Build now"]] },
+      },
+    },
+    approval,
+  ])
+
+  await expect(agent).toContainText("Build")
+  await transport.send({
+    ...approval,
+    payload: {
+      ...approval.payload,
+      properties: {
+        ...approval.payload.properties,
+        info: {
+          ...approval.payload.properties.info,
+          id: "message-plan-approved-next",
+        },
+      },
+    },
+  })
+  await page.keyboard.press("Control+.")
+  await expect(agent).toContainText("Plan")
+  await transport.send(approval)
+  await expect(agent).toContainText("Plan")
+})

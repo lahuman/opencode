@@ -239,6 +239,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     createEffect(() => {
+      const sessionID = id()
+      const buildMessageIDs = new Set<string>()
+      const unsubscribe = sdk().event.on("message.updated", (event) => {
+        const message = event.properties.info
+        if (message.role !== "user" || message.sessionID !== sessionID) return
+        if (message.agent !== "build" || buildMessageIDs.has(message.id)) return
+        buildMessageIDs.add(message.id)
+        agent.set("build")
+      })
+      onCleanup(unsubscribe)
+    })
+
+    createEffect(() => {
       const unsubscribe = sdk().event.on("message.part.updated", (event) => {
         const part = event.properties.part
         if (part.type !== "tool" || part.tool !== "plan_exit") return
