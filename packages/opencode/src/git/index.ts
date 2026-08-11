@@ -17,7 +17,7 @@ const cfg = [
   "core.quotepath=false",
 ] as const
 
-const READ_ONLY_ENV = { GIT_NO_LAZY_FETCH: "1" }
+const READ_ONLY_ENV = { GIT_NO_LAZY_FETCH: "1", GIT_NO_REPLACE_OBJECTS: "1" }
 
 const out = (result: { text(): string }) => result.text().trim()
 const nuls = (text: string) => text.split("\0").filter(Boolean)

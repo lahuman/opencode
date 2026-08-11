@@ -74,7 +74,7 @@ function normalizePath(worktree: string, input: string) {
   if (path.isAbsolute(input)) throw new Error("Path must be repository-relative")
   const absolute = path.resolve(worktree, input)
   if (!FSUtil.contains(worktree, absolute)) throw new Error("Path must stay within the worktree")
-  const relative = path.relative(worktree, absolute).replaceAll("\\", "/")
+  const relative = path.relative(worktree, absolute).split(path.sep).join("/")
   if (!relative) throw new Error("Path must identify one file from the summary")
   return relative
 }

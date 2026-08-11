@@ -13,6 +13,8 @@ import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Git.node, Truncate.node, Agent.node])))
+// Windows cannot create a filename containing a literal backslash.
+const posix = process.platform === "win32" ? it.instance.skip : it.instance
 
 const ctx: Tool.Context = {
   sessionID: SessionID.make("ses_git-diff"),
@@ -87,7 +89,7 @@ describe("tool.git_diff", () => {
     "returns a sorted summary and resolved commit metadata without patches",
     () =>
       Effect.gen(function* () {
-        yield* TestInstance
+        const test = yield* TestInstance
         const tool = yield* init()
         const result = yield* tool.execute({ base: "base-revision", target: "target-revision" }, ctx)
         const files = JSON.parse(result.output)
@@ -105,8 +107,8 @@ describe("tool.git_diff", () => {
           { file: "zeta.txt", status: "deleted", additions: 0, deletions: 1 },
         ])
         expect(result.output).not.toContain("diff --git")
-        expect(result.metadata.base).toMatch(/^[0-9a-f]{40}$/)
-        expect(result.metadata.target).toMatch(/^[0-9a-f]{40}$/)
+        expect(result.metadata.base).toBe(yield* git(test.directory, "rev-parse", "base-revision^{commit}"))
+        expect(result.metadata.target).toBe(yield* git(test.directory, "rev-parse", "target-revision^{commit}"))
         expect(result.metadata.files).toBe(4)
         expect(result.title).toBe(`${result.metadata.base.slice(0, 12)}..${result.metadata.target.slice(0, 12)}`)
       }),
@@ -134,6 +136,52 @@ describe("tool.git_diff", () => {
         expect(result.output).not.toContain("zeta.txt")
       }),
     { git: true, init: history },
+  )
+
+  posix(
+    "preserves a literal backslash in a POSIX file path",
+    () =>
+      Effect.gen(function* () {
+        yield* TestInstance
+        const tool = yield* init()
+        const summary = yield* tool.execute({ base: "backslash-base", target: "backslash-target" }, ctx)
+        const files = JSON.parse(summary.output) as Array<{
+          file: string
+          status: string
+          additions: number
+          deletions: number
+        }>
+        expect(files).toEqual([
+          { file: "literal\\name.txt", status: "modified", additions: 1, deletions: 1 },
+        ])
+        const file = files[0]?.file
+        expect(file).toBe("literal\\name.txt")
+        if (!file) return
+
+        const result = yield* tool.execute(
+          { base: summary.metadata.base, target: summary.metadata.target, path: file },
+          ctx,
+        )
+        expect(result.title).toBe("literal\\name.txt")
+        expect(result.metadata.path).toBe("literal\\name.txt")
+        expect(result.output).toContain("-before")
+        expect(result.output).toContain("+after")
+      }),
+    {
+      git: true,
+      init: (directory) =>
+        Effect.gen(function* () {
+          const file = "literal\\name.txt"
+          yield* Effect.promise(() => Bun.write(path.join(directory, file), "before\n"))
+          yield* git(directory, "add", "--", file)
+          yield* git(directory, "commit", "-m", "backslash base")
+          yield* git(directory, "tag", "backslash-base")
+          yield* Effect.promise(() => Bun.write(path.join(directory, file), "after\n"))
+          yield* git(directory, "add", "--", file)
+          yield* git(directory, "commit", "-m", "backslash target")
+          yield* git(directory, "tag", "backslash-target")
+        }),
+    },
   )
 
   it.instance(

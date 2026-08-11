@@ -275,6 +275,52 @@ describe("Git", () => {
     }),
   )
 
+  it.live("read-only commit comparisons ignore replacement refs", () =>
+    Effect.gen(function* () {
+      const tmp = yield* scopedTmpdir({ git: true })
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "tracked.txt"), "before\n", "utf-8"))
+      yield* Effect.promise(() => runGit(tmp.path, "add", "."))
+      yield* Effect.promise(() => runGit(tmp.path, "commit", "--no-gpg-sign", "-m", "base"))
+      const base = yield* Effect.promise(() => gitText(tmp.path, "rev-parse", "HEAD"))
+
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "tracked.txt"), "after\n", "utf-8"))
+      yield* Effect.promise(() => runGit(tmp.path, "add", "."))
+      yield* Effect.promise(() => runGit(tmp.path, "commit", "--no-gpg-sign", "-m", "target"))
+      const target = yield* Effect.promise(() => gitText(tmp.path, "rev-parse", "HEAD"))
+
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "tracked.txt"), "replacement\nextra\n", "utf-8"))
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "replacement-only.txt"), "replacement\n", "utf-8"))
+      yield* Effect.promise(() => runGit(tmp.path, "add", "."))
+      const tree = yield* Effect.promise(() => gitText(tmp.path, "write-tree"))
+      const replacement = yield* Effect.promise(() =>
+        gitText(tmp.path, "commit-tree", tree, "-p", base, "-m", "replacement"),
+      )
+      yield* Effect.promise(() => runGit(tmp.path, "replace", target, replacement))
+
+      const git = yield* Git.Service
+      const resolvedBase = yield* git.resolveCommit(tmp.path, base)
+      const resolvedTarget = yield* git.resolveCommit(tmp.path, target)
+      expect(resolvedBase).toBe(base)
+      expect(resolvedTarget).toBe(target)
+      if (!resolvedBase || !resolvedTarget) return
+      const replacedSummary = yield* git.changedFiles(tmp.path, resolvedBase, resolvedTarget)
+      const replacedPatch = yield* git.patchBetween(tmp.path, resolvedBase, resolvedTarget, "tracked.txt")
+
+      yield* Effect.promise(() => runGit(tmp.path, "replace", "-d", target))
+      const originalSummary = yield* git.changedFiles(tmp.path, resolvedBase, resolvedTarget)
+      const originalPatch = yield* git.patchBetween(tmp.path, resolvedBase, resolvedTarget, "tracked.txt")
+
+      expect(replacedSummary).toEqual([
+        { file: "tracked.txt", status: "modified", additions: 1, deletions: 1 },
+      ])
+      expect(replacedPatch).toContain("-before")
+      expect(replacedPatch).toContain("+after")
+      expect(replacedPatch).not.toContain("+replacement")
+      expect(originalSummary).toEqual(replacedSummary)
+      expect(originalPatch).toBe(replacedPatch)
+    }),
+  )
+
   it.live("patchBetween() treats pathspec syntax literally", () =>
     Effect.gen(function* () {
       const tmp = yield* scopedTmpdir({ git: true })
