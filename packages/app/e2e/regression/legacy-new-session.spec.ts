@@ -8,6 +8,7 @@ const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${pr
 
 test("redirects a draft to the legacy new-session route", async ({ page }) => {
   await mockOpenCodeServer(page, {
+    protocol: "v2",
     directory,
     project: {
       id: "proj_legacy_new_session",
@@ -20,6 +21,24 @@ test("redirects a draft to the legacy new-session route", async ({ page }) => {
     provider: { all: [], connected: [], default: {} },
     sessions: [],
     pageMessages: () => ({ items: [] }),
+    agents: [
+      {
+        id: "build",
+        name: "Build",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+      {
+        id: "plan",
+        name: "Plan",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+    ],
   })
   await page.addInitScript(
     ({ directory, draftID, server }) => {
@@ -37,5 +56,29 @@ test("redirects a draft to the legacy new-session route", async ({ page }) => {
 
   await expect(page).toHaveURL(`/${base64Encode(directory)}/session`)
   await expect(page.locator("header[data-tauri-drag-region]")).toBeVisible()
-  await expect(page.locator('[data-component="prompt-input"]')).toBeVisible()
+
+  const editor = page.locator('[data-component="prompt-input"]')
+  const agent = page.locator('[data-action="prompt-agent"]')
+  await expect(editor).toBeVisible()
+  await expect(agent).toContainText("Build")
+
+  await editor.click()
+  await page.keyboard.press("Control+Shift+X")
+  await expect(editor).toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await editor.press("Escape")
+
+  await editor.fill("keep this draft")
+  await page.keyboard.press("Control+Shift+X")
+  await expect(editor).toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await page.keyboard.press("Control+.")
+  await expect(agent).toContainText("Plan")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await expect(editor).toHaveText("keep this draft")
+
+  await editor.fill("")
+  await page.keyboard.press("Control+Shift+X")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await editor.press("!")
+  await expect(editor).toHaveText("!")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
 })

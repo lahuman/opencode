@@ -385,10 +385,38 @@ test("switches the composer to Build from the durable plan approval message", as
   await transport.waitForConnection()
   await expectSessionTitle(page, title)
 
-  const agent = page.getByRole("button", { name: "Choose agent" })
+  const agent = page.getByRole("button", { name: "Choose agent", includeHidden: true })
+  const composer = page.locator('[data-component="prompt-input-v2"]')
+  const editor = composer.locator('[data-component="prompt-input"]')
+  const add = composer.getByRole("button", { name: "Add images and files" })
+  const shell = page.getByRole("menuitem", { name: "Shell command" })
+
   await expect(agent).toContainText("Build")
+  await add.click()
+  await expect(shell).toBeVisible()
+  await shell.click()
+  await expect(editor).toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await editor.press("Escape")
+
+  await editor.fill("keep this draft")
+  await page.keyboard.press("Control+Shift+X")
+  await expect(editor).toHaveClass(/(^|\s)font-mono!(\s|$)/)
   await page.keyboard.press("Control+.")
   await expect(agent).toContainText("Plan")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await expect(editor).toHaveText("keep this draft")
+
+  await editor.fill("")
+  await add.click()
+  await expect(shell).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await editor.click()
+  await page.keyboard.press("Control+Shift+X")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await editor.press("!")
+  await expect(editor).toHaveText("!")
+  await expect(editor).not.toHaveClass(/(^|\s)font-mono!(\s|$)/)
+  await editor.fill("")
 
   await transport.send({
     directory,

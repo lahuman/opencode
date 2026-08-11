@@ -126,6 +126,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   })
   const info = createMemo(() => (props.controls.session.id ? sync().session.get(props.controls.session.id) : undefined))
   const working = createMemo(() => sync().data.session_working(props.controls.session.id ?? ""))
+  const shellEnabled = () => props.controls.agents.current !== "plan"
   const attachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
@@ -397,6 +398,9 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
     view: {
       placeholder: designPlaceholder,
+      shell: {
+        enabled: shellEnabled,
+      },
       get agent() {
         return props.controls.agents.visible && props.controls.agents.options.length > 0
           ? {
@@ -437,7 +441,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       title: language.t("command.prompt.mode.shell"),
       category: language.t("command.category.session"),
       keybind: "mod+shift+x",
-      disabled: controller.state.mode === "shell",
+      disabled: controller.state.mode === "shell" || !shellEnabled(),
       onSelect: () => controller.dispatch({ type: "mode.shell" }),
     },
     {

@@ -362,6 +362,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    if (mode === "shell" && currentAgent.name === "plan") {
+      input.setMode("normal")
+      return
+    }
+
     const clearInput = () => {
       submission.clear()
       input.setMode("normal")

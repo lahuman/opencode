@@ -300,6 +300,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
   const info = createMemo(() => (props.controls.session.id ? sync().session.get(props.controls.session.id) : undefined))
   const working = createMemo(() => sync().data.session_working(props.controls.session.id ?? ""))
+  const shellEnabled = () => props.controls.agents.current !== "plan"
   const imageAttachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
@@ -481,10 +482,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   const setMode = (mode: "normal" | "shell") => {
+    if (mode === "shell" && !shellEnabled()) return
     setStore("mode", mode)
     setStore({ popover: null, slashMenu: false, slashMenuQuery: "" })
     requestAnimationFrame(() => editorRef?.focus())
   }
+
+  createEffect(() => {
+    if (store.mode !== "shell" || shellEnabled()) return
+    setMode("normal")
+  })
 
   const shellModeKey = "mod+shift+x"
   const normalModeKey = "mod+shift+e"
@@ -503,7 +510,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       title: language.t("command.prompt.mode.shell"),
       category: language.t("command.category.session"),
       keybind: shellModeKey,
-      disabled: store.mode === "shell",
+      disabled: store.mode === "shell" || !shellEnabled(),
       onSelect: () => setMode("shell"),
     },
     {
@@ -1302,7 +1309,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    if (event.key === "!" && store.mode === "normal") {
+    if (event.key === "!" && store.mode === "normal" && shellEnabled()) {
       const cursorPosition = getCursorPosition(editorRef)
       if (cursorPosition === 0) {
         setStore("mode", "shell")

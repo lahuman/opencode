@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import type { Prompt, PromptStore } from "@/context/prompt"
 import { createPromptState, DEFAULT_PROMPT } from "@/context/prompt-state"
@@ -51,6 +51,7 @@ let shellFailure: Error | undefined
 let commandFailure: Error | undefined
 let promptFailure: Error | undefined
 let enterprise = false
+let currentAgentName = "agent"
 
 function createPromptSubmit(input: Parameters<typeof createPromptSubmitImpl>[0]) {
   return createPromptSubmitImpl(input)
@@ -177,7 +178,7 @@ beforeAll(async () => {
         variant: { current: () => variant },
       },
       agent: {
-        current: () => ({ name: "agent" }),
+        current: () => ({ name: currentAgentName }),
       },
       session: {
         promote(directory: string, sessionID: string) {
@@ -353,7 +354,55 @@ beforeEach(() => {
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
+afterEach(() => {
+  currentAgentName = "agent"
+})
+
 describe("prompt submit worktree selection", () => {
+  test("does not submit or create a session for Plan Shell mode", async () => {
+    currentAgentName = "plan"
+    const current = createPromptState({ prompt: "git status" })
+    current.context.add({ type: "file", path: "src/index.ts" })
+    const history: Prompt[] = []
+    const queued: Prompt[] = []
+    const modes: string[] = []
+    let submitted = 0
+    const submit = createPromptSubmit({
+      prompt: current,
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: (value) => history.push(value),
+      resetHistoryNavigation: () => undefined,
+      setMode: (mode) => modes.push(mode),
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      shouldQueue: () => true,
+      onQueue: (draft) => queued.push(draft.prompt),
+      onSubmit: () => submitted++,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(createdSessions).toEqual([])
+    expect(sentShell).toEqual([])
+    expect(history).toEqual([])
+    expect(queued).toEqual([])
+    expect(submitted).toBe(0)
+    expect(current.current()).toEqual([{ type: "text", content: "git status", start: 0, end: 10 }])
+    expect(current.store[0]().context.items).toEqual([
+      expect.objectContaining({ type: "file", path: "src/index.ts" }),
+    ])
+    expect(modes).toEqual(["normal"])
+  })
+
   test("clears and admits a repeated initial submission only once", async () => {
     let release = () => {}
     createSessionGate = new Promise<void>((resolve) => {
