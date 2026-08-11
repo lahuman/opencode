@@ -192,19 +192,23 @@ describe("Git", () => {
       yield* Effect.promise(() => runGit(tmp.path, "add", "."))
       yield* Effect.promise(() => runGit(tmp.path, "commit", "--no-gpg-sign", "-m", "second"))
       const second = yield* Effect.promise(() => gitText(tmp.path, "rev-parse", "HEAD"))
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "third.txt"), "third\n", "utf-8"))
+      yield* Effect.promise(() => runGit(tmp.path, "add", "."))
+      yield* Effect.promise(() => runGit(tmp.path, "commit", "--no-gpg-sign", "-m", "third"))
+      const third = yield* Effect.promise(() => gitText(tmp.path, "rev-parse", "HEAD"))
       yield* Effect.promise(() => runGit(tmp.path, "branch", "comparison", first))
       yield* Effect.promise(() => runGit(tmp.path, "tag", "-a", "comparison-tag", "-m", "tagged", second))
 
       const git = yield* Git.Service
       const revisions = yield* Effect.all([
-        git.resolveCommit(tmp.path, second),
-        git.resolveCommit(tmp.path, second.slice(0, 12)),
+        git.resolveCommit(tmp.path, third),
+        git.resolveCommit(tmp.path, third.slice(0, 12)),
         git.resolveCommit(tmp.path, "comparison"),
         git.resolveCommit(tmp.path, "comparison-tag"),
         git.resolveCommit(tmp.path, "HEAD~1"),
       ])
 
-      expect(revisions).toEqual([second, second, first, second, first])
+      expect(revisions).toEqual([third, third, first, second, second])
     }),
   )
 
