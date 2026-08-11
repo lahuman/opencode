@@ -251,6 +251,16 @@ describe("session HttpApi", () => {
     }),
   )
 
+  it.effect("preserves unrelated errors sharing the busy tag", () =>
+    Effect.gen(function* () {
+      const counterfeit = { _tag: "SessionBusyError" as const, reason: "counterfeit" }
+      const exit = yield* HttpSessionError.mapBusy(Effect.fail(counterfeit)).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(counterfeit)
+    }),
+  )
+
   it.instance(
     "returns declared not found errors for read routes",
     () =>
