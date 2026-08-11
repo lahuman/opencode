@@ -1548,6 +1548,17 @@ const scenarios: Scenario[] = [
       "status",
     ),
   http.protected
+    .post("/session/{sessionID}/shell", "session.shell.plan")
+    .preserveDatabase()
+    .mutating()
+    .seeded((ctx) => ctx.session({ title: "Plan shell session" }))
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/shell", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { agent: "plan", model: { providerID: "test", modelID: "test-model" }, command: "printf plan-shell" },
+    }))
+    .json(400, object, "status"),
+  http.protected
     .post("/session/{sessionID}/summarize", "session.summarize")
     .preserveDatabase()
     .withLlm()

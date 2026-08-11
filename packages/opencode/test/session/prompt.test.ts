@@ -1646,6 +1646,29 @@ noLLMServer.instance("assertNotBusy succeeds when idle", () =>
 
 // Shell semantics
 
+noLLMServer.instance(
+  "shell rejects Plan before runner or process startup",
+  () =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      const { prompt, run, sessions, chat } = yield* boot()
+      const marker = path.join(directory, "plan-shell-ran")
+      const script = `await Bun.write(${JSON.stringify(marker)}, "ran")`
+      const command = `bun -e ${JSON.stringify(script)}`
+
+      const exit = yield* prompt.shell({ sessionID: chat.id, agent: "plan", command }).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.squash(exit.cause)).toMatchObject({ _tag: "PlanShellUnavailableError", sessionID: chat.id })
+      }
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+      expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+      yield* run.assertNotBusy(chat.id)
+    }),
+  { config: cfg },
+)
+
 it.instance("shell rejects with BusyError when loop running", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

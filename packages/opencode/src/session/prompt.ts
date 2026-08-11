@@ -103,7 +103,9 @@ export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
-  readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
+  readonly shell: (
+    input: ShellInput,
+  ) => Effect.Effect<SessionV1.WithParts, Session.BusyError | PlanShellUnavailableError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
@@ -1376,9 +1378,14 @@ const layer = Layer.effect(
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
+    const shell: (
+      input: ShellInput,
+    ) => Effect.Effect<SessionV1.WithParts, Session.BusyError | PlanShellUnavailableError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
+      if (input.agent === "plan") {
+        return yield* new PlanShellUnavailableError({ sessionID: input.sessionID })
+      }
       const ready = yield* Latch.make()
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
@@ -1574,6 +1581,11 @@ export const ShellInput = Schema.Struct({
   command: Schema.String,
 })
 export type ShellInput = Schema.Schema.Type<typeof ShellInput>
+
+export class PlanShellUnavailableError extends Schema.TaggedErrorClass<PlanShellUnavailableError>()(
+  "PlanShellUnavailableError",
+  { sessionID: SessionID },
+) {}
 
 export const CommandInput = Schema.Struct({
   messageID: Schema.optional(MessageID),

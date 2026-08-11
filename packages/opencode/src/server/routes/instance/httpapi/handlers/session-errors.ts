@@ -7,15 +7,16 @@ export function mapStorageNotFound<A, R>(self: Effect.Effect<A, StorageNotFoundE
   return self.pipe(Effect.mapError((error) => ApiError.notFound(error.message)))
 }
 
-export function mapBusy<A, R>(self: Effect.Effect<A, Session.BusyError, R>) {
+export function mapBusy<A, E, R>(self: Effect.Effect<A, Session.BusyError | E, R>) {
   return self.pipe(
-    Effect.catchTag("SessionBusyError", (error) =>
-      Effect.fail(
+    Effect.catchTag("SessionBusyError", (error) => {
+      const busy = error as Session.BusyError
+      return Effect.fail(
         new ApiError.SessionBusyError({
-          sessionID: error.sessionID,
-          message: `Session is busy: ${error.sessionID}`,
+          sessionID: busy.sessionID,
+          message: `Session is busy: ${busy.sessionID}`,
         }),
-      ),
-    ),
+      )
+    }),
   )
 }
