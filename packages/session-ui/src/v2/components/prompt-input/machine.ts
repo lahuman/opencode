@@ -14,6 +14,10 @@ export type PromptInputV2InteractionState = {
   savedHistory?: PromptInputV2HistoryEntry
 }
 
+export type PromptInputV2Capabilities = {
+  shell: boolean
+}
+
 export type PromptInputV2InteractionEvent =
   | { type: "input.changed"; value: string; persist?: boolean }
   | { type: "commands.open" }
@@ -60,8 +64,11 @@ export function transitionPromptInputV2(
   state: PromptInputV2InteractionState,
   event: PromptInputV2InteractionEvent,
   persisted: PromptInputV2PersistedState,
+  capabilities: PromptInputV2Capabilities = { shell: true },
 ): PromptInputV2Transition {
-  if (event.type === "input.changed") return inputChanged(state, event.value, event.persist !== false, persisted.cursor)
+  if (event.type === "input.changed") {
+    return inputChanged(state, event.value, event.persist !== false, persisted.cursor, capabilities.shell)
+  }
   if (event.type === "commands.open") return openCommands(state, persisted)
   if (event.type === "context.open") return openContext(state, persisted)
   if (event.type === "popover.query") return queryChanged(state, event.value)
@@ -70,7 +77,10 @@ export function transitionPromptInputV2(
   if (event.type === "popover.close") return changed({ ...state, popover: { type: "closed" } })
   if (event.type === "popover.select") return suggestionSelected(state, event.item, persisted)
   if (event.type === "key.down") return keyDown(state, event)
-  if (event.type === "mode.shell") return changed({ ...state, mode: "shell", popover: { type: "closed" } })
+  if (event.type === "mode.shell") {
+    if (!capabilities.shell) return unchanged(state)
+    return changed({ ...state, mode: "shell", popover: { type: "closed" } })
+  }
   if (event.type === "mode.normal") return changed({ ...state, mode: "normal" })
   if (event.type === "drag.enter") return changed({ ...state, drag: "active" })
   if (event.type === "drag.leave") return changed({ ...state, drag: "idle" })
@@ -86,9 +96,10 @@ function inputChanged(
   value: string,
   persist: boolean,
   cursor: number | undefined,
+  shell: boolean,
 ): PromptInputV2Transition {
   const setText: PromptInputV2InteractionCommand[] = persist ? [{ type: "draft.setText", value }] : []
-  if (state.mode === "normal" && value === "!") {
+  if (shell && state.mode === "normal" && value === "!") {
     return changed({ ...state, mode: "shell", popover: { type: "closed" }, focus: "editor" }, [
       { type: "draft.setText", value: "" },
     ])

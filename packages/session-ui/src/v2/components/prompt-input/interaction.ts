@@ -41,8 +41,9 @@ export type PromptInputV2ViewConfig = {
     onStop: () => void
   }
   shell?: {
-    onOpen: () => void
-    onClose: () => void
+    enabled?: Accessor<boolean>
+    onOpen?: () => void
+    onClose?: () => void
   }
   onKeyDown?: (event: KeyboardEvent) => void
   onPaste?: (event: ClipboardEvent) => void
@@ -161,7 +162,9 @@ export function createPromptInputV2Controller(input: {
 
   function dispatch(event: PromptInputV2InteractionEvent) {
     const mode = state.mode
-    const result = transitionPromptInputV2(state, event, draft.state)
+    const result = transitionPromptInputV2(state, event, draft.state, {
+      shell: input.view.shell?.enabled?.() ?? true,
+    })
     const action = event.type === "popover.select" ? input.onSuggestionSelect?.(event.item) : undefined
     if (event.type === "popover.select") {
       if (!action || state.popover.type !== "command-menu") result.commands.forEach(execute)
@@ -175,8 +178,8 @@ export function createPromptInputV2Controller(input: {
     setState(reconcile(result.state))
     if (event.type !== "popover.select") result.commands.forEach(execute)
     if (mode !== result.state.mode) {
-      if (result.state.mode === "shell") input.view.shell?.onOpen()
-      if (result.state.mode === "normal") input.view.shell?.onClose()
+      if (result.state.mode === "shell") input.view.shell?.onOpen?.()
+      if (result.state.mode === "normal") input.view.shell?.onClose?.()
     }
     if (event.type === "popover.select") {
       if (!action) return result.handled
@@ -184,6 +187,11 @@ export function createPromptInputV2Controller(input: {
     }
     return result.handled
   }
+
+  createEffect(() => {
+    if ((input.view.shell?.enabled?.() ?? true) || state.mode !== "shell") return
+    dispatch({ type: "mode.normal" })
+  })
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (

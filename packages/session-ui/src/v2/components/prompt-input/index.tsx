@@ -204,6 +204,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
           >
             <PromptInputV2AddMenu
               disabled={state.mode === "shell"}
+              shellEnabled={view.shell?.enabled?.() ?? true}
               title={i18n.t("ui.promptInput.add")}
               keybind={props.attachKeybind ?? ["Mod", "U"]}
               attachLabel={i18n.t("ui.promptInput.attachments")}
@@ -469,6 +470,7 @@ export function PromptInputV2Attachments(props: {
 
 export function PromptInputV2AddMenu(props: {
   disabled?: boolean
+  shellEnabled?: boolean
   title: string
   keybind?: string[]
   attachLabel: string
@@ -514,9 +516,11 @@ export function PromptInputV2AddMenu(props: {
             <MenuV2.Item onSelect={props.onContext} shortcut="@">
               {props.contextLabel}
             </MenuV2.Item>
-            <MenuV2.Item onSelect={props.onShell} shortcut="!">
-              {props.shellLabel}
-            </MenuV2.Item>
+            <Show when={props.shellEnabled ?? true}>
+              <MenuV2.Item onSelect={props.onShell} shortcut="!">
+                {props.shellLabel}
+              </MenuV2.Item>
+            </Show>
           </MenuV2.Content>
         </MenuV2.Portal>
       </MenuV2>
