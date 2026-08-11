@@ -1,0 +1,5 @@
+Compare committed Git snapshots without reading or changing the current worktree.
+
+This tool compares committed snapshots only. Call it first with `base` and `target` and no `path`; that first call returns a changed-file summary, not patches. For each follow-up call, select one exact path from that summary and reuse the resolved base and target commit IDs returned in the summary metadata.
+
+Use `read`, `glob`, and `grep` for current worktree content. This tool cannot mutate Git state or run arbitrary commands.

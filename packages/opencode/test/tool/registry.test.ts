@@ -191,7 +191,10 @@ describe("tool.registry", () => {
         agentID: "build",
       })
 
-      expect(tools.map((tool) => tool.id)).not.toContain("plan_exit")
+      const ids = tools.map((tool) => tool.id)
+      expect(ids).toContain("bash")
+      expect(ids).toContain("git_diff")
+      expect(ids).not.toContain("plan_exit")
     }),
   )
 

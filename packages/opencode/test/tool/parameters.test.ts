@@ -13,6 +13,7 @@ import { Parameters as ApplyPatch } from "../../src/tool/apply_patch"
 import { Parameters as Edit } from "../../src/tool/edit"
 import { Parameters as Glob } from "../../src/tool/glob"
 import { Parameters as Grep } from "../../src/tool/grep"
+import { Parameters as GitDiff } from "../../src/tool/git-diff"
 import { Parameters as Invalid } from "../../src/tool/invalid"
 import { Parameters as Lsp } from "../../src/tool/lsp"
 import { Parameters as Plan } from "../../src/tool/plan"
@@ -41,6 +42,7 @@ describe("tool parameters", () => {
     test("edit", () => expect(toJsonSchema(Edit)).toMatchSnapshot())
     test("glob", () => expect(toJsonSchema(Glob)).toMatchSnapshot())
     test("grep", () => expect(toJsonSchema(Grep)).toMatchSnapshot())
+    test("git_diff", () => expect(toJsonSchema(GitDiff)).toMatchSnapshot())
     test("invalid", () => expect(toJsonSchema(Invalid)).toMatchSnapshot())
     test("lsp", () => expect(toJsonSchema(Lsp)).toMatchSnapshot())
     test("plan", () => expect(toJsonSchema(Plan)).toMatchSnapshot())
@@ -160,6 +162,34 @@ describe("tool parameters", () => {
     })
     test("rejects missing pattern", () => {
       expect(accepts(Grep, {})).toBe(false)
+    })
+  })
+
+  describe("git_diff", () => {
+    test("accepts required revisions and optional path", () => {
+      expect(parse(GitDiff, { base: "HEAD~1", target: "HEAD" })).toEqual({ base: "HEAD~1", target: "HEAD" })
+      expect(parse(GitDiff, { base: "HEAD~1", target: "HEAD", path: "src/index.ts" })).toEqual({
+        base: "HEAD~1",
+        target: "HEAD",
+        path: "src/index.ts",
+      })
+    })
+    test("rejects missing or empty revisions", () => {
+      expect(accepts(GitDiff, { target: "HEAD" })).toBe(false)
+      expect(accepts(GitDiff, { base: "HEAD~1" })).toBe(false)
+      expect(accepts(GitDiff, { base: "", target: "HEAD" })).toBe(false)
+      expect(accepts(GitDiff, { base: "HEAD~1", target: "" })).toBe(false)
+    })
+    test("rejects an empty path and ignores no extra command fields", () => {
+      expect(accepts(GitDiff, { base: "HEAD~1", target: "HEAD", path: "" })).toBe(false)
+      const schema = toJsonSchema(GitDiff)
+      expect(schema.properties).toEqual({
+        base: expect.any(Object),
+        target: expect.any(Object),
+        path: expect.any(Object),
+      })
+      expect(schema.properties).not.toHaveProperty("options")
+      expect(schema.properties).not.toHaveProperty("command")
     })
   })
 

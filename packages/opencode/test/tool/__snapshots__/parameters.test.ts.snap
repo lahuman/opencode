@@ -117,6 +117,34 @@ exports[`tool parameters JSON Schema (wire shape) grep 1`] = `
 }
 `;
 
+exports[`tool parameters JSON Schema (wire shape) git_diff 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "base": {
+      "description": "The older Git commit revision",
+      "minLength": 1,
+      "type": "string",
+    },
+    "path": {
+      "description": "One exact repository-relative file path returned by the summary",
+      "minLength": 1,
+      "type": "string",
+    },
+    "target": {
+      "description": "The newer Git commit revision",
+      "minLength": 1,
+      "type": "string",
+    },
+  },
+  "required": [
+    "base",
+    "target",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool parameters JSON Schema (wire shape) invalid 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
