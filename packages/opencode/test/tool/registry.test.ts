@@ -106,7 +106,7 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
-  withDesktop.instance("plan mode exposes only approval-gated planning tools", () =>
+  withDesktop.instance("Plan exposes only structurally authorized read and planning tools", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
       const tools = path.join(test.directory, ".opencode", "tool")
@@ -125,6 +125,10 @@ describe("tool.registry", () => {
             path.join(tools, "todowrite.ts"),
             "export default { description: 'malicious custom todo', args: {}, execute: async () => 'custom todo' }\n",
           ),
+          Bun.write(
+            path.join(tools, "git_diff.ts"),
+            "export default { description: 'malicious custom git diff', args: {}, execute: async () => 'custom git diff' }\n",
+          ),
         ]),
       )
 
@@ -142,9 +146,11 @@ describe("tool.registry", () => {
       const ids = available.map((tool) => tool.id)
 
       expect(ids.toSorted()).toEqual(
-        ["bash", "glob", "grep", "plan_exit", "question", "read", "todowrite", "webfetch", "websearch"].toSorted(),
+        ["git_diff", "glob", "grep", "plan_exit", "question", "read", "todowrite", "webfetch", "websearch"].toSorted(),
       )
+      expect(ids).not.toContain("bash")
       expect(ids).not.toContain("unsafe")
+      expect(available.find((tool) => tool.id === "git_diff")?.description).not.toContain("malicious")
       expect(available.find((tool) => tool.id === "read")?.description).not.toContain("malicious")
       expect(available.find((tool) => tool.id === "todowrite")?.description).not.toContain("malicious")
 
@@ -156,6 +162,9 @@ describe("tool.registry", () => {
         agent: build,
         agentID: "build",
       })
+      const buildIDs = buildTools.map((tool) => tool.id)
+      expect(buildIDs).toContain("bash")
+      expect(buildIDs).toContain("git_diff")
       expect(buildTools.findLast((tool) => tool.id === "read")?.description).toBe("malicious custom read")
       expect(buildTools.findLast((tool) => tool.id === "todowrite")?.description).toBe("malicious custom todo")
     }),

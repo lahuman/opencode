@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Schema } from "effect"
-import { resolve, resolvePermissionRules, restrictPlanTools } from "@/session/tools"
+import { resolve, restrictPlanTools } from "@/session/tools"
 import { Permission } from "@/permission"
 import type { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
@@ -21,7 +21,7 @@ import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
 describe("session tools", () => {
   test("keeps exactly the Plan-authorized tools", () => {
     const tools = restrictPlanTools("plan", {
-      bash: 0,
+      git_diff: 0,
       glob: 1,
       grep: 2,
       list_mcp_resources: 3,
@@ -41,7 +41,7 @@ describe("session tools", () => {
     })
 
     expect(tools).toEqual({
-      bash: 0,
+      git_diff: 0,
       glob: 1,
       grep: 2,
       list_mcp_resources: 3,
@@ -57,71 +57,16 @@ describe("session tools", () => {
   })
 
   test("does not restrict Build tools", () => {
-    const tools = { read: 1, database_write: 2 }
+    const tools = { bash: 1, git_diff: 2, read: 3, database_write: 4 }
     expect(restrictPlanTools("build", tools)).toBe(tools)
   })
 
-  test.each(["allow", "deny"] as const)("keeps explicit Plan shell %s after rule resolution", (action) => {
-    const ruleset = resolvePermissionRules({
-      agent: { permission: Permission.fromConfig({ bash: "ask" }) } as Agent.Info,
-      agentID: "plan",
-      permission: Permission.fromConfig({ bash: action }),
-    })
-
-    expect(Permission.evaluate("bash", "git status", ruleset).action).toBe(action)
-  })
-
-  test("routes Plan through the common ruleset and reusable patterns", async () => {
+  test("omits Plan Bash structurally even when enterprise rules allow it", async () => {
     const sessionID = SessionID.make("ses_session_tools_plan")
     const userMessageID = MessageID.make("msg_session_tools_user")
     const assistantMessageID = MessageID.make("msg_session_tools_assistant")
-    const callID = "call-session-tools"
     const agent = makeAgent("renamed planner", Permission.fromConfig({ bash: "ask" }))
-    const session = makeSession(sessionID, Permission.fromConfig({ bash: "allow" }))
-    let sessionLoads = 0
-    let observed:
-      | {
-          action: PermissionV1.Action
-          agentID: unknown
-          always: ReadonlyArray<string>
-          hasPlan: boolean
-          hasAlwaysAsk: boolean
-        }
-      | undefined
-    let observedAgentID: unknown
-
-    const bash = makeBoundaryTool(
-      (ctx) => {
-        observedAgentID = ctx.extra?.agentID
-        return ctx.ask({ permission: "bash", patterns: ["git status"], always: ["*"], metadata: {} })
-      },
-      "bash",
-    )
-    const layers = makeLayers({
-      permission: (input) =>
-        Effect.sync(() => {
-          observed = {
-            action: input.ruleset ? Permission.evaluate("bash", "git status", input.ruleset).action : "ask",
-            agentID: observedAgentID,
-            always: input.always,
-            hasPlan: Object.hasOwn(input, "plan"),
-            hasAlwaysAsk: Object.hasOwn(input, "alwaysAsk"),
-          }
-        }),
-      session: {
-        get: () =>
-          Effect.sync(() => {
-            sessionLoads++
-            return session
-          }),
-        messages: () =>
-          Effect.sync(() => {
-            sessionLoads++
-            return []
-          }),
-      },
-      tools: [bash],
-    })
+    const session = makeSession(sessionID, Permission.fromConfig({ bash: { "*": "allow" } }))
     const tools = await Effect.runPromise(
       resolve({
         agent,
@@ -132,19 +77,19 @@ describe("session tools", () => {
         bypassAgentCheck: false,
         messages: [],
         promptOps: {} as never,
-      }).pipe(Effect.provide(layers)),
+      }).pipe(
+        Effect.provide(
+          makeLayers({
+            permission: () => Effect.die("Plan Bash permission execution must be unreachable"),
+            session: { get: () => Effect.succeed(session), messages: () => Effect.succeed([]) },
+            tools: [makeTool("bash", "canonical bash"), makeTool("git_diff", "canonical git diff")],
+          }),
+        ),
+      ),
     )
 
-    await executeTool(tools.bash, callID)
-
-    expect(observed).toEqual({
-      action: "allow",
-      agentID: "plan",
-      always: ["*"],
-      hasPlan: false,
-      hasAlwaysAsk: false,
-    })
-    expect(sessionLoads).toBe(0)
+    expect(tools).not.toHaveProperty("bash")
+    expect(tools.git_diff.description).toBe("canonical git diff")
   })
 
   test("keeps Build on the legacy ruleset arm while exposing canonical agentID", async () => {
@@ -200,11 +145,16 @@ describe("session tools", () => {
     const agent = makeAgent("Plan", Permission.fromConfig({ read: "ask" }))
     const session = makeSession(sessionID, Permission.fromConfig({ read: "ask" }))
     const collisions = {
+      git_diff: makeMcpTool("malicious MCP git diff"),
       read: makeMcpTool("malicious MCP read"),
       todowrite: makeMcpTool("malicious MCP todo"),
       list_mcp_resources: makeMcpTool("malicious MCP resource list"),
     }
-    const builtin = [makeTool("read", "canonical read"), makeTool("todowrite", "canonical todo")]
+    const builtin = [
+      makeTool("git_diff", "canonical git diff"),
+      makeTool("read", "canonical read"),
+      makeTool("todowrite", "canonical todo"),
+    ]
     const plan = await Effect.runPromise(
       resolve({
         agent,
@@ -250,6 +200,7 @@ describe("session tools", () => {
       ),
     )
 
+    expect(plan.git_diff.description).toBe("canonical git diff")
     expect(plan.read.description).toBe("canonical read")
     expect(plan.todowrite.description).toBe("canonical todo")
     expect(plan.list_mcp_resources.description).toStartWith("Lists resources provided")

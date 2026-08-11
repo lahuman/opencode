@@ -58,7 +58,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 
 const PLAN_TOOLS = new Set([
-  "bash",
+  "git_diff",
   "glob",
   "grep",
   "list_mcp_resource_templates",

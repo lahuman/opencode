@@ -622,9 +622,6 @@ export const ShellTool = Tool.define(
                     Effect.sync(() => tree.delete()),
                   )
                   const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
-                  if ((tree.rootNode.hasError || scan.patterns.size === 0) && ctx.extra?.agentID === "plan") {
-                    scan.patterns.add(params.command)
-                  }
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
                   const env = yield* shellEnv(ctx, cwd)
                   yield* ask(ctx, scan, params)

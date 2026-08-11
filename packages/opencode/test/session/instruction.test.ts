@@ -370,13 +370,16 @@ describe("Plan workflow reminders", () => {
       "search all references and callers before planning moves, removals, or refactors",
       "use exploration → planning whenever the work creates a new file, changes at least three files, or restructures responsibilities",
       "execution begins only after the user selects build",
-      "plan remains read-only for repository, project, and external state",
-      "`todowrite` may update only task tracking",
-      "the permission boundary decides whether requested commands run",
+      "do not edit files, install dependencies, deploy, or change git state",
+      "inspect project files with `read`, `glob`, and `grep`",
+      "compare committed repository snapshots with `git_diff`",
+      "no shell or generic process execution is available in plan",
     ]) {
       expect(prompt).toContain(invariant)
     }
-    expect(PLAN_MODE).toContain("Permission approval does not change Plan's read-only operating mode.")
+    expect(prompt).not.toContain("request shell commands")
+    expect(prompt).not.toContain("request permission")
+    expect(prompt).not.toContain("permission boundary")
     expect(PLAN_MODE).not.toContain("auto-review")
   })
 

@@ -31,7 +31,7 @@ const MCP_RESOURCE_TOOLS = {
   read: "read_mcp_resource",
 } as const
 const PLAN_TOOLS = new Set([
-  "bash",
+  "git_diff",
   "glob",
   "grep",
   MCP_RESOURCE_TOOLS.list,

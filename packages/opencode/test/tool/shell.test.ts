@@ -1203,7 +1203,7 @@ describe("tool.shell truncation", () => {
   )
 })
 
-describe("Plan shell permission boundary", () => {
+describe("Shell permission boundary", () => {
   it.live("reuses the environment snapshot captured before permission", () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped()
@@ -1242,45 +1242,4 @@ describe("Plan shell permission boundary", () => {
     }),
   )
 
-  each("retains an empty parse as a fallback only for native Plan", () =>
-    Effect.gen(function* () {
-      const tmp = yield* tmpdirScoped()
-      yield* runIn(
-        tmp,
-        Effect.gen(function* () {
-          const renamed: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          yield* run({ command: "cd ." }, capture(renamed, undefined, { agent: "renamed", extra: { agentID: "plan" } }))
-          expect(renamed.find((request) => request.permission === "bash")).toMatchObject({
-            patterns: ["cd ."],
-          })
-
-          const build: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          yield* run({ command: "cd ." }, capture(build, undefined, { agent: "plan", extra: { agentID: "build" } }))
-          expect(build.find((request) => request.permission === "bash")).toBeUndefined()
-        }),
-      )
-    }),
-  )
-
-  each("retains malformed Plan input as one fallback pattern", () =>
-    Effect.gen(function* () {
-      const tmp = yield* tmpdirScoped()
-      yield* runIn(
-        tmp,
-        Effect.gen(function* () {
-          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          const stop = new Error("stop after permission")
-          expect(
-            yield* fail(
-              { command: 'echo "' },
-              capture(requests, stop, { agent: "renamed", extra: { agentID: "plan" } }),
-            ),
-          ).toMatchObject({ message: stop.message })
-          expect(requests.find((request) => request.permission === "bash")).toMatchObject({
-            patterns: expect.arrayContaining(['echo "']),
-          })
-        }),
-      )
-    }),
-  )
 })
