@@ -17,6 +17,8 @@ const cfg = [
   "core.quotepath=false",
 ] as const
 
+const READ_ONLY_ENV = { GIT_NO_LAZY_FETCH: "1" }
+
 const out = (result: { text(): string }) => result.text().trim()
 const nuls = (text: string) => text.split("\0").filter(Boolean)
 const fail = (err: unknown) =>
@@ -47,6 +49,13 @@ export type Stat = {
   readonly deletions: number
 }
 
+export type ChangedFile = {
+  readonly file: string
+  readonly status: Kind
+  readonly additions: number
+  readonly deletions: number
+}
+
 export type Patch = {
   readonly text: string
   readonly truncated: boolean
@@ -65,6 +74,9 @@ export interface Result {
   readonly truncated: boolean
 }
 
+const commandError = (operation: string, result: Result) =>
+  new Error(result.stderr.toString("utf8").trim() || `Git ${operation} failed with exit code ${result.exitCode}`)
+
 export interface Options {
   readonly cwd: string
   readonly env?: Record<string, string>
@@ -79,6 +91,9 @@ export interface Interface {
   readonly defaultBranch: (cwd: string) => Effect.Effect<Base | undefined>
   readonly hasHead: (cwd: string) => Effect.Effect<boolean>
   readonly mergeBase: (cwd: string, base: string, head?: string) => Effect.Effect<string | undefined>
+  readonly resolveCommit: (cwd: string, revision: string) => Effect.Effect<string | undefined>
+  readonly changedFiles: (cwd: string, base: string, target: string) => Effect.Effect<ChangedFile[], Error>
+  readonly patchBetween: (cwd: string, base: string, target: string, file: string) => Effect.Effect<string, Error>
   readonly show: (cwd: string, ref: string, file: string, prefix?: string) => Effect.Effect<string>
   readonly status: (cwd: string) => Effect.Effect<Item[]>
   readonly diff: (cwd: string, ref: string) => Effect.Effect<Item[]>
@@ -204,6 +219,16 @@ const layer = Layer.effect(
       return text || undefined
     })
 
+    const resolveCommit = Effect.fn("Git.resolveCommit")(function* (cwd: string, revision: string) {
+      const result = yield* run(["rev-parse", "--verify", "--end-of-options", `${revision}^{commit}`], {
+        cwd,
+        env: READ_ONLY_ENV,
+      })
+      if (result.exitCode !== 0) return
+      const commit = out(result)
+      return commit || undefined
+    })
+
     const show = Effect.fn("Git.show")(function* (cwd: string, ref: string, file: string, prefix = "") {
       const target = prefix ? `${prefix}${file}` : file
       const result = yield* run(["show", `${ref}:${target}`], { cwd })
@@ -260,12 +285,87 @@ const layer = Layer.effect(
       })
     })
 
+    const changedFiles = Effect.fn("Git.changedFiles")(function* (cwd: string, base: string, target: string) {
+      const names = yield* run(
+        ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-status", "-z", base, target, "--"],
+        { cwd, env: READ_ONLY_ENV },
+      )
+      if (names.exitCode !== 0) return yield* Effect.fail(commandError("diff --name-status", names))
+
+      const numbers = yield* run(
+        ["diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", base, target, "--"],
+        { cwd, env: READ_ONLY_ENV },
+      )
+      if (numbers.exitCode !== 0) return yield* Effect.fail(commandError("diff --numstat", numbers))
+
+      const statistics = new Map(
+        nuls(numbers.text()).flatMap((item) => {
+          const a = item.indexOf("\t")
+          const b = item.indexOf("\t", a + 1)
+          if (a === -1 || b === -1) return []
+          const file = item.slice(b + 1)
+          if (!file) return []
+          const additions = Number.parseInt(item.slice(0, a), 10)
+          const deletions = Number.parseInt(item.slice(a + 1, b), 10)
+          return [
+            [
+              file,
+              {
+                additions: Number.isFinite(additions) ? additions : 0,
+                deletions: Number.isFinite(deletions) ? deletions : 0,
+              },
+            ] as const,
+          ]
+        }),
+      )
+      const files = nuls(names.text()).flatMap((code, idx, list) => {
+        if (idx % 2 !== 0) return []
+        const file = list[idx + 1]
+        if (!code || !file) return []
+        const stat = statistics.get(file)
+        return [
+          {
+            file,
+            status: kind(code),
+            additions: stat?.additions ?? 0,
+            deletions: stat?.deletions ?? 0,
+          } satisfies ChangedFile,
+        ]
+      })
+      return files.toSorted((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+    })
+
     const patch = Effect.fn("Git.patch")(function* (cwd: string, ref: string, file: string, options?: PatchOptions) {
       const result = yield* run(
         ["diff", "--patch", "--no-ext-diff", "--no-renames", `--unified=${options?.context ?? 3}`, ref, "--", file],
         { cwd, maxOutputBytes: options?.maxOutputBytes },
       )
       return { text: result.truncated ? "" : result.text(), truncated: result.truncated } satisfies Patch
+    })
+
+    const patchBetween = Effect.fn("Git.patchBetween")(function* (
+      cwd: string,
+      base: string,
+      target: string,
+      file: string,
+    ) {
+      const result = yield* run(
+        [
+          "--literal-pathspecs",
+          "diff",
+          "--patch",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-renames",
+          base,
+          target,
+          "--",
+          file,
+        ],
+        { cwd, env: READ_ONLY_ENV },
+      )
+      if (result.exitCode !== 0) return yield* Effect.fail(commandError("diff --patch", result))
+      return result.text()
     })
 
     const patchAll = Effect.fn("Git.patchAll")(function* (cwd: string, ref: string, options?: PatchOptions) {
@@ -330,6 +430,9 @@ const layer = Layer.effect(
       defaultBranch,
       hasHead,
       mergeBase,
+      resolveCommit,
+      changedFiles,
+      patchBetween,
       show,
       status,
       diff,
