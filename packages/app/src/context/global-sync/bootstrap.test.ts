@@ -13,6 +13,7 @@ import {
   loadProjectsQuery,
   loadProvidersQuery,
   loadReferencesQuery,
+  refreshPendingRequests,
 } from "./bootstrap"
 import type { State, VcsCache } from "./types"
 import { createServerSession } from "../server-session"
@@ -75,6 +76,18 @@ function directoryState() {
     part: {},
     part_text_accum_delta: {},
   })
+}
+
+function sessionInfo(id: string): Session {
+  return {
+    id,
+    slug: id,
+    projectID: "project",
+    directory: "/project",
+    title: id,
+    version: "1",
+    time: { created: 1, updated: 1 },
+  }
 }
 
 describe("bootstrapDirectory", () => {
@@ -268,7 +281,7 @@ describe("bootstrapDirectory", () => {
     expect(recover()?.next).toEqual({ providerID: "company", modelID: "agent" })
   })
 
-  test("seeds session status even while warming session info stalls", async () => {
+  test("preserves stale busy status while warming session info stalls", async () => {
     const [store, setStore] = directoryState()
     const stalled = Promise.withResolvers<never>()
     const client = {
@@ -326,7 +339,7 @@ describe("bootstrapDirectory", () => {
     await waitFor(() => session.data.session_working("ses_busy"))
 
     expect(session.data.session_status["ses_busy"]?.type).toBe("busy")
-    expect(session.data.session_status[stale.id]).toBeUndefined()
+    expect(session.data.session_status[stale.id]?.type).toBe("busy")
     expect(settled).toBe(false)
   })
 
@@ -434,6 +447,187 @@ describe("bootstrapDirectory", () => {
     await refreshing
 
     expect(store.status).toBe("complete")
+  })
+})
+
+describe("refreshPendingRequests", () => {
+  test("uses legacy pending request lists and clears stale requests", async () => {
+    const [store, setStore] = directoryState()
+    const permission = {
+      id: "perm_v1",
+      sessionID: "ses_pending",
+      permission: "bash",
+      patterns: ["git status"],
+      always: ["git *"],
+      metadata: { command: "git status" },
+      tool: { messageID: "msg_v1", callID: "call_v1" },
+    }
+    const question = {
+      id: "question_v1",
+      sessionID: "ses_pending",
+      questions: [{
+        header: "Plan complete",
+        question: "Build the approved plan?",
+        options: [
+          { label: "Build now", description: "Switch to Build" },
+          { label: "Keep planning", description: "Stay in Plan" },
+        ],
+      }],
+      tool: { messageID: "msg_v1", callID: "call_v1" },
+    }
+    let permissionCalls = 0
+    let questionCalls = 0
+    const client = {
+      permission: { list: async () => { permissionCalls++; return { data: [permission] } } },
+      question: { list: async () => { questionCalls++; return { data: [question] } } },
+    } as unknown as OpencodeClient
+    const session = createServerSession(client)
+    session.remember(sessionInfo("ses_pending"))
+    session.remember(sessionInfo("ses_stale"))
+    session.set("permission", "ses_stale", [{ ...permission, id: "perm_stale", sessionID: "ses_stale" }])
+    session.set("question", "ses_stale", [{ ...question, id: "question_stale", sessionID: "ses_stale" }])
+
+    await refreshPendingRequests({
+      directory: "/project",
+      sdk: client,
+      api: {
+        permission: { request: { list: async () => Promise.reject(new Error("v2 permission list should not be called")) } },
+        question: { request: { list: async () => Promise.reject(new Error("v2 question list should not be called")) } },
+      } as unknown as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+
+    expect(permissionCalls).toBe(1)
+    expect(questionCalls).toBe(1)
+    expect(session.data.permission.ses_pending).toEqual([permission])
+    expect(session.data.question.ses_pending).toEqual([question])
+    expect(session.data.permission.ses_stale).toEqual([])
+    expect(session.data.question.ses_stale).toEqual([])
+  })
+
+  test("uses location-scoped v2 pending request lists and normalizes permissions", async () => {
+    const [store, setStore] = directoryState()
+    const rawPermission = {
+      id: "perm_v2",
+      sessionID: "ses_pending",
+      action: "bash",
+      resources: ["git status"],
+      save: ["git *"],
+      metadata: { command: "git status" },
+      source: { type: "tool", messageID: "msg_v2", callID: "call_v2" },
+    }
+    const question = {
+      id: "question_v1",
+      sessionID: "ses_pending",
+      questions: [{
+        header: "Plan complete",
+        question: "Build the approved plan?",
+        options: [
+          { label: "Build now", description: "Switch to Build" },
+          { label: "Keep planning", description: "Stay in Plan" },
+        ],
+      }],
+      tool: { messageID: "msg_v1", callID: "call_v1" },
+    }
+    const permissionInputs: unknown[] = []
+    const questionInputs: unknown[] = []
+    const client = {
+      permission: { list: async () => Promise.reject(new Error("legacy permission list should not be called")) },
+      question: { list: async () => Promise.reject(new Error("legacy question list should not be called")) },
+    } as unknown as OpencodeClient
+    const session = createServerSession(client)
+    session.remember(sessionInfo("ses_pending"))
+
+    await refreshPendingRequests({
+      directory: "/project",
+      sdk: client,
+      api: {
+        permission: { request: { list: async (input: unknown) => { permissionInputs.push(input); return { location: {}, data: [rawPermission] } } } },
+        question: { request: { list: async (input: unknown) => { questionInputs.push(input); return { location: {}, data: [question] } } } },
+      } as unknown as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v2"),
+    })
+
+    expect(permissionInputs).toEqual([{ location: { directory: "/project" } }])
+    expect(questionInputs).toEqual([{ location: { directory: "/project" } }])
+    expect(session.data.permission.ses_pending).toEqual([{
+      id: "perm_v2",
+      sessionID: "ses_pending",
+      permission: "bash",
+      patterns: ["git status"],
+      always: ["git *"],
+      metadata: { command: "git status" },
+      tool: { messageID: "msg_v2", callID: "call_v2" },
+    }])
+    expect(session.data.question.ses_pending).toEqual([question])
+  })
+
+  test("keeps live request changes while pending request lists are in flight", async () => {
+    const [store, setStore] = directoryState()
+    const permissions = Promise.withResolvers<{ data: unknown[] }>()
+    const questions = Promise.withResolvers<{ data: unknown[] }>()
+    const question = {
+      id: "question_old",
+      sessionID: "ses_pending",
+      questions: [],
+      tool: { messageID: "msg_old", callID: "call_old" },
+    }
+    let permissionCalls = 0
+    let questionCalls = 0
+    const client = {
+      permission: { list: () => { permissionCalls++; return permissions.promise } },
+      question: { list: () => { questionCalls++; return questions.promise } },
+    } as unknown as OpencodeClient
+    const session = createServerSession(client)
+    session.remember(sessionInfo("ses_pending"))
+    session.set("question", "ses_pending", [question])
+
+    const refreshing = refreshPendingRequests({
+      directory: "/project",
+      sdk: client,
+      api: {} as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+    await waitFor(() => permissionCalls === 1 && questionCalls === 1)
+
+    session.apply({
+      type: "permission.asked",
+      properties: {
+        id: "perm_live",
+        sessionID: "ses_pending",
+        permission: "bash",
+        patterns: ["git status"],
+        always: [],
+        metadata: {},
+        tool: { messageID: "msg_live", callID: "call_live" },
+      },
+    })
+    session.apply({ type: "question.replied", properties: { sessionID: "ses_pending", requestID: "question_old" } })
+    permissions.resolve({
+      data: [{
+        id: "perm_old",
+        sessionID: "ses_pending",
+        permission: "bash",
+        patterns: ["git status"],
+        always: [],
+        metadata: {},
+        tool: { messageID: "msg_old", callID: "call_old" },
+      }],
+    })
+    questions.resolve({ data: [question] })
+    await refreshing
+
+    expect(session.data.permission.ses_pending?.map((item) => item.id)).toEqual(["perm_live"])
+    expect(session.data.question.ses_pending).toEqual([])
   })
 })
 
