@@ -184,6 +184,7 @@ function reconcileFetched<T extends { id: string }>(
 }
 
 type ServerSessionOptions = { retry?: typeof retry; protocol?: Promise<"v1" | "v2"> }
+type PendingRequestKind = "permission" | "question"
 
 export function createServerSession(
   client: OpencodeClient,
@@ -211,6 +212,12 @@ export function createServerSession(
   })
   const requests = new Map<string, Promise<Session>>()
   const statusRevisions = new Map<string, number>()
+  const requestGenerations = new Map<PendingRequestKind, object>([
+    ["permission", {}],
+    ["question", {}],
+  ])
+  const requestGeneration = (kind: PendingRequestKind) => requestGenerations.get(kind)!
+  const invalidateRequest = (kind: PendingRequestKind) => requestGenerations.set(kind, {})
   const inflight = new Map<string, Promise<void>>()
   const inflightTodo = new Map<string, Promise<void>>()
   const optimistic = new Map<string, Map<string, OptimisticItem>>()
@@ -484,6 +491,8 @@ export function createServerSession(
 
   const evict = (sessionIDs: string[]) => {
     if (sessionIDs.length === 0) return
+    invalidateRequest("permission")
+    invalidateRequest("question")
     const evicted = new Set(sessionIDs)
     for (const [partID, item] of deltaBases) {
       if (evicted.has(item.sessionID)) deltaBases.delete(partID)
@@ -1245,6 +1254,7 @@ export function createServerSession(
         return
       }
       case "permission.asked": {
+        invalidateRequest("permission")
         const permission = event.properties as PermissionRequest
         const permissions = data.permission[permission.sessionID]
         if (!permissions) {
@@ -1261,7 +1271,9 @@ export function createServerSession(
           )
         return
       }
-      case "permission.replied": {
+      case "permission.replied":
+      case "permission.rejected": {
+        invalidateRequest("permission")
         const props = event.properties as { sessionID: string; requestID: string }
         setData(
           "permission",
@@ -1275,6 +1287,7 @@ export function createServerSession(
         return
       }
       case "question.asked": {
+        invalidateRequest("question")
         const question = event.properties as QuestionRequest
         const questions = data.question[question.sessionID]
         if (!questions) {
@@ -1293,6 +1306,7 @@ export function createServerSession(
       }
       case "question.replied":
       case "question.rejected": {
+        invalidateRequest("question")
         const props = event.properties as { sessionID: string; requestID: string }
         setData(
           "question",
@@ -1310,6 +1324,11 @@ export function createServerSession(
   return {
     data,
     set: setData,
+    request: {
+      capture: requestGeneration,
+      current: (kind: PendingRequestKind, generation: object) => requestGeneration(kind) === generation,
+      invalidate: invalidateRequest,
+    },
     status: {
       set: setStatus,
       revision: (sessionID: string) => statusRevisions.get(sessionID) ?? 0,
