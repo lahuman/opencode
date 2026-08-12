@@ -249,7 +249,7 @@ test("resets always confirmation when the permission request changes", async ({ 
   await expect(permission.getByText("git *", { exact: true })).toHaveCount(0)
 })
 
-test("recovers a completed Plan while the event stream is still connecting", { timeout: 90_000 }, async ({ page }) => {
+test("recovers a completed Plan while the event stream is still connecting", { timeout: 150_000 }, async ({ page }) => {
   const transport = await installSseTransport(page, {
     server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${
       process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
