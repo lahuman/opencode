@@ -353,7 +353,10 @@ test("recovers a completed Plan while the event stream is still connecting", { t
   await Promise.all([recoveryMessages, recoveryQuestions])
 
   const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
-  await expect(page.getByText("Recovered Plan", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('[data-timeline-part-id="part-plan-exit"] [data-component="plan-part"]')).toContainText(
+    "Recovered Plan",
+    { timeout: 30_000 },
+  )
   await expect(question.getByText("The plan is ready. What should happen next?")).toBeVisible()
   await expect(question.getByRole("radio", { name: /Build now/ })).toBeVisible()
   await expect(page.locator('[data-slot="session-turn-thinking"]')).toHaveCount(0)
