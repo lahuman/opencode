@@ -148,9 +148,43 @@ describe("active session query", () => {
     expect(session.data.session_status.ses_fast?.type).toBe("idle")
   })
 
-  test("coalesces identical inactive recovery while its sync is inflight", async () => {
+  test("keeps a status revision received during recovery", async () => {
     const deferred = Promise.withResolvers<void>()
     const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy", phase: "preparing", since: 1 })
+    const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    let calls = 0
+
+    hydrateRecoveredSessions({
+      session: {
+        status: session.status,
+        sync: () => {
+          calls++
+          return deferred.promise
+        },
+      },
+      active: {},
+      sessionIDs: ["ses_recover"],
+      observed,
+      recovery,
+    })
+    session.status.set("ses_recover", { type: "busy", phase: "waiting_model", since: 2 })
+    deferred.resolve()
+    await deferred.promise
+    await Promise.resolve()
+
+    expect(calls).toBe(1)
+    expect(session.data.session_status.ses_recover).toEqual({
+      type: "busy",
+      phase: "waiting_model",
+      since: 2,
+    })
+  })
+
+  test("coalesces identical inactive recovery while its sync is inflight", async () => {
+    const session = createServerSession({} as OpencodeClient)
+    const deferred = Promise.withResolvers<void>()
     const recovery = new Map()
     session.status.set("ses_recover", { type: "busy" })
     const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
