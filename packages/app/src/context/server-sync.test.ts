@@ -12,9 +12,12 @@ import { canDisposeDirectory, pickDirectoriesToEvict } from "./global-sync/evict
 import { estimateRootSessionTotal, loadRootSessions } from "./global-sync/session-load"
 import {
   loadActiveSessionsQuery,
+  activeCheckAccepted,
+  hydrateRecoveredSessions,
   loadMcpQuery,
   loadMcpResourcesQuery,
   reconcileActiveSessionStatuses,
+  staleBusySessionIDs,
 } from "./server-sync"
 import { ServerScope } from "@/utils/server-scope"
 import { createServerSession } from "./server-session"
@@ -95,6 +98,214 @@ describe("active session query", () => {
 
     expect(reconcileActiveSessionStatuses(session, {}, observed)).toEqual(["ses_stale"])
     expect(session.data.session_status.ses_stale).toEqual({ type: "busy" })
+  })
+
+  test("selects busy sessions stale for ten seconds regardless of pending requests", () => {
+    const session = createServerSession({} as OpencodeClient)
+    session.status.set("ses_busy", { type: "busy", since: 1_000 })
+    session.set("session_activity", "ses_busy", 1_000)
+    session.status.set("ses_idle", { type: "idle" })
+    session.set("permission", "ses_busy", [{ id: "permission" }] as never)
+    session.set("question", "ses_busy", [{ id: "question" }] as never)
+    expect(staleBusySessionIDs(session, 10_999)).toEqual([])
+    expect(staleBusySessionIDs(session, 11_000)).toEqual(["ses_busy"])
+  })
+
+  test("accepts an earlier active result until a newer one applies", () => {
+    expect(activeCheckAccepted(1, 0)).toBe(true)
+    expect(activeCheckAccepted(1, 1)).toBe(true)
+    expect(activeCheckAccepted(1, 2)).toBe(false)
+  })
+
+  test("hydrates independent inactive sessions without waiting for a blocked session", async () => {
+    const blocked = Promise.withResolvers<void>()
+    const fast = Promise.withResolvers<void>()
+    const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_blocked", { type: "busy" })
+    session.status.set("ses_fast", { type: "busy" })
+    const observed = new Map([
+      ["ses_blocked", session.status.revision("ses_blocked")],
+      ["ses_fast", session.status.revision("ses_fast")],
+    ])
+    hydrateRecoveredSessions({
+      session: {
+        status: session.status,
+        sync: (id, options) => {
+          expect(options).toEqual({ force: true })
+          return id === "ses_blocked" ? blocked.promise : fast.promise
+        },
+      },
+      active: {},
+      sessionIDs: ["ses_blocked", "ses_fast"],
+      observed,
+      recovery,
+    })
+    fast.resolve()
+    await fast.promise
+    await Promise.resolve()
+    expect(session.data.session_status.ses_blocked?.type).toBe("busy")
+    expect(session.data.session_status.ses_fast?.type).toBe("idle")
+  })
+
+  test("coalesces identical inactive recovery while its sync is inflight", async () => {
+    const deferred = Promise.withResolvers<void>()
+    const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy" })
+    const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    let calls = 0
+    const input = {
+      session: {
+        status: session.status,
+        sync: () => {
+          calls++
+          return deferred.promise
+        },
+      },
+      active: {},
+      sessionIDs: ["ses_recover"],
+      observed,
+      recovery,
+    }
+    hydrateRecoveredSessions(input)
+    hydrateRecoveredSessions(input)
+    deferred.resolve()
+    await deferred.promise
+    await Promise.resolve()
+    expect(calls).toBe(1)
+    expect(session.data.session_status.ses_recover?.type).toBe("idle")
+  })
+
+  test("force-syncs a stale active target and keeps it busy", async () => {
+    const deferred = Promise.withResolvers<void>()
+    const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy" })
+    const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    let calls = 0
+
+    hydrateRecoveredSessions({
+      session: {
+        status: session.status,
+        sync: (_sessionID, options) => {
+          calls++
+          expect(options).toEqual({ force: true })
+          return deferred.promise
+        },
+      },
+      active: { ses_recover: { type: "running" } },
+      sessionIDs: ["ses_recover"],
+      observed,
+      recovery,
+    })
+    deferred.resolve()
+    await deferred.promise
+    await Promise.resolve()
+
+    expect(calls).toBe(1)
+    expect(session.data.session_status.ses_recover?.type).toBe("busy")
+  })
+
+  test("keeps a recovered session busy when a later result marks it active", async () => {
+    const session = createServerSession({} as OpencodeClient)
+    const deferred = Promise.withResolvers<void>()
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy" })
+    const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    const sync = () => deferred.promise
+    hydrateRecoveredSessions({
+      session: { status: session.status, sync },
+      active: {},
+      sessionIDs: ["ses_recover"],
+      observed,
+      recovery,
+    })
+    hydrateRecoveredSessions({
+      session: { status: session.status, sync },
+      active: { ses_recover: { type: "running" } },
+      sessionIDs: [],
+      observed,
+      recovery,
+    })
+    deferred.resolve()
+    await deferred.promise
+    await Promise.resolve()
+    expect(session.data.session_status.ses_recover?.type).toBe("busy")
+  })
+
+  test("runs one trailing recovery after active state or revision changes", async () => {
+    const first = Promise.withResolvers<void>()
+    const second = Promise.withResolvers<void>()
+    const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy" })
+    const initial = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    let calls = 0
+    const sync = () => {
+      calls++
+      return calls === 1 ? first.promise : second.promise
+    }
+    hydrateRecoveredSessions({
+      session: { status: session.status, sync },
+      active: {},
+      sessionIDs: ["ses_recover"],
+      observed: initial,
+      recovery,
+    })
+    hydrateRecoveredSessions({
+      session: { status: session.status, sync },
+      active: { ses_recover: { type: "running" } },
+      sessionIDs: [],
+      observed: initial,
+      recovery,
+    })
+    session.status.set("ses_recover", { type: "busy", phase: "waiting_model" })
+    const changed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    hydrateRecoveredSessions({
+      session: { status: session.status, sync },
+      active: {},
+      sessionIDs: [],
+      observed: changed,
+      recovery,
+    })
+    first.resolve()
+    await first.promise
+    await Promise.resolve()
+    expect(calls).toBe(2)
+    expect(session.data.session_status.ses_recover?.type).toBe("busy")
+    second.resolve()
+    await second.promise
+    await Promise.resolve()
+    expect(session.data.session_status.ses_recover?.type).toBe("idle")
+  })
+
+  test("cleans up a rejected recovery and deduplicates its targets", async () => {
+    const failed = Promise.withResolvers<void>()
+    const session = createServerSession({} as OpencodeClient)
+    const recovery = new Map()
+    session.status.set("ses_recover", { type: "busy" })
+    const observed = new Map([["ses_recover", session.status.revision("ses_recover")]])
+    let calls = 0
+    hydrateRecoveredSessions({
+      session: {
+        status: session.status,
+        sync: () => {
+          calls++
+          return failed.promise
+        },
+      },
+      active: {},
+      sessionIDs: ["ses_recover", "ses_recover"],
+      observed,
+      recovery,
+    })
+    failed.reject(new Error("failed"))
+    await failed.promise.catch(() => undefined)
+    await Promise.resolve()
+    expect(calls).toBe(1)
+    expect(recovery.has("ses_recover")).toBe(false)
+    expect(session.data.session_status.ses_recover?.type).toBe("busy")
   })
 
   test("lets a status event received during the active request win", () => {

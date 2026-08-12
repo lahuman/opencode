@@ -34,6 +34,7 @@ import {
   loadProjectsQuery,
   loadProvidersQuery,
   loadReferencesQuery,
+  refreshPendingRequests,
 } from "./global-sync/bootstrap"
 import { createChildStoreManager } from "./global-sync/child-store"
 import { applyDirectoryEvent, applyGlobalEvent } from "./global-sync/event-reducer"
@@ -196,6 +197,64 @@ export function reconcileActiveSessionStatuses(
   })
 }
 
+const SESSION_RECOVERY_INTERVAL_MS = 10_000
+
+export type SessionRecovery = { active: boolean; revision: number | undefined; rerun: boolean }
+
+export function staleBusySessionIDs(session: Pick<ServerSession, "data">, now: number) {
+  return Object.entries(session.data.session_status).flatMap(([sessionID, status]) => {
+    if (status.type !== "busy") return []
+    const activity = session.data.session_activity[sessionID] ?? status.since ?? now
+    return now - activity >= SESSION_RECOVERY_INTERVAL_MS ? [sessionID] : []
+  })
+}
+
+export function activeCheckAccepted(check: number, applied: number) {
+  return check >= applied
+}
+
+export function hydrateRecoveredSessions(input: {
+  session: Pick<ServerSession, "status" | "sync">
+  active: SessionActiveOutput
+  sessionIDs: readonly string[]
+  observed: ReadonlyMap<string, number>
+  recovery: Map<string, SessionRecovery>
+}) {
+  const start = (sessionID: string, record: SessionRecovery) => {
+    void input.session
+      .sync(sessionID, { force: true })
+      .then(() => {
+        if (input.recovery.get(sessionID) !== record) return
+        if (record.rerun) {
+          const next = { active: record.active, revision: record.revision, rerun: false }
+          input.recovery.set(sessionID, next)
+          start(sessionID, next)
+          return
+        }
+        input.recovery.delete(sessionID)
+        if (record.active || input.session.status.revision(sessionID) !== record.revision) return
+        input.session.status.set(sessionID, { type: "idle" })
+      })
+      .catch(() => {
+        if (input.recovery.get(sessionID) === record) input.recovery.delete(sessionID)
+      })
+  }
+
+  input.recovery.forEach((record, sessionID) => {
+    const active = !!input.active[sessionID]
+    const revision = input.observed.get(sessionID)
+    if (record.active !== active || record.revision !== revision) record.rerun = true
+    record.active = active
+    record.revision = revision
+  })
+  new Set(input.sessionIDs).forEach((sessionID) => {
+    if (input.recovery.has(sessionID)) return
+    const record = { active: !!input.active[sessionID], revision: input.observed.get(sessionID), rerun: false }
+    input.recovery.set(sessionID, record)
+    start(sessionID, record)
+  })
+}
+
 function makeQueryOptionsApi(
   scope: ServerScope,
   serverSDK: () => OpencodeClient,
@@ -271,27 +330,34 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       detailed: statuses,
     }
   }
-  let activeCheck = 0
-  const refreshActiveSessions = async () => {
-    const check = ++activeCheck
+  let issuedActiveCheck = 0
+  let appliedActiveCheck = 0
+  const recovery = new Map<string, SessionRecovery>()
+  let refreshPendingDirectories = (_input: readonly string[]) => {}
+  const refreshActiveSessions = async (recover: readonly string[] = []) => {
+    const check = ++issuedActiveCheck
     const observed = new Map(
       Object.keys(session.data.session_status).map((sessionID) => [sessionID, session.status.revision(sessionID)]),
     )
     const result = await fetchActiveSessions()
     const active = result.active
-    if (check !== activeCheck) return active
+    if (!activeCheckAccepted(check, appliedActiveCheck)) return active
+    appliedActiveCheck = check
 
-    const stale = reconcileActiveSessionStatuses(session, active, observed, result.detailed)
-    for (const sessionID of Object.keys(active)) void session.resolve(sessionID).catch(() => undefined)
-    const hydrated = await Promise.allSettled(stale.map((sessionID) => session.sync(sessionID, { force: true })))
-    if (check !== activeCheck) return active
-
-    hydrated.forEach((result, index) => {
-      const sessionID = stale[index]
-      if (!sessionID || result.status === "rejected") return
-      if (active[sessionID]) return
-      if (session.status.revision(sessionID) !== observed.get(sessionID)) return
-      session.status.set(sessionID, { type: "idle" })
+    const inactive = reconcileActiveSessionStatuses(session, active, observed, result.detailed)
+    const sessionIDs = [...new Set([...inactive, ...recover])]
+    refreshPendingDirectories(
+      sessionIDs.flatMap((sessionID) => {
+        const directory = session.get(sessionID)?.directory
+        return directory ? [directory] : []
+      }),
+    )
+    hydrateRecoveredSessions({
+      session,
+      active,
+      sessionIDs,
+      observed,
+      recovery,
     })
     return active
   }
@@ -331,16 +397,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     watchdog = setInterval(() => {
       const now = Date.now()
       setActivityNow(now)
-      if (serverSDK.connection() !== "connected") return
-      const delayed = Object.entries(session.data.session_status).some(([sessionID, status]) => {
-        if (status.type !== "busy") return false
-        if (session.data.permission[sessionID]?.length || session.data.question[sessionID]?.length) return false
-        const since = session.data.session_activity[sessionID] ?? status.since ?? now
-        return now - since >= 45_000
-      })
-      if (!delayed || now - lastWatchdogCheck < 30_000) return
+      const stale = staleBusySessionIDs(session, now)
+      if (stale.length === 0 || now - lastWatchdogCheck < SESSION_RECOVERY_INTERVAL_MS) return
       lastWatchdogCheck = now
-      void activeSessionsQuery.refetch()
+      void refreshActiveSessions(stale)
     }, 1_000)
   })
   onCleanup(() => {
@@ -470,6 +530,22 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       provider: () => globalStore.provider,
     },
   })
+
+  refreshPendingDirectories = (input) => {
+    ;[...new Set(input.map(directoryKey))].forEach((directory) => {
+      const child = children.children[directory]
+      if (!child) return
+      void refreshPendingRequests({
+        directory,
+        sdk: sdkFor(directory),
+        api: serverSDK.api,
+        store: child[0],
+        setStore: child[1],
+        session,
+        protocol: serverSDK.protocol,
+      }).catch(() => undefined)
+    })
+  }
 
   async function loadSessions(directory: string, options?: { limit?: number }) {
     const key = directoryKey(directory)
@@ -628,7 +704,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     if (eventType === "integration.connection.updated") void refreshProviders()
 
     if (directory === "global") {
-      if (eventType === "server.connected") void activeSessionsQuery.refetch()
+      if (eventType === "server.connected") {
+        void activeSessionsQuery.refetch()
+        refreshPendingDirectories(Object.keys(children.children).filter((directory) => children.active(directory)))
+      }
       applyGlobalEvent({
         event,
         project: globalStore.project,
