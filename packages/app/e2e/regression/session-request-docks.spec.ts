@@ -9,6 +9,17 @@ const projectID = "proj_request_docks"
 const sessionID = "ses_request_docks"
 const title = "Request dock regression"
 
+function waitForGet(page: Page, server: string, path: string) {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      response.ok() &&
+      new URL(response.url()).origin === server &&
+      new URL(response.url()).pathname === path,
+    { timeout: 30_000 },
+  )
+}
+
 test("does not show the approval selector in the composer", async ({ page }) => {
   await mockServer(page, { permissions: [] })
 
@@ -238,6 +249,121 @@ test("resets always confirmation when the permission request changes", async ({ 
   await expect(permission.getByText("git *", { exact: true })).toHaveCount(0)
 })
 
+test("recovers a completed Plan while the event stream is still connecting", { timeout: 90_000 }, async ({ page }) => {
+  const transport = await installSseTransport(page, {
+    server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${
+      process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
+    }`,
+    retry: 20,
+    emitConnected: false,
+  })
+  const status: Record<string, unknown> = { [sessionID]: { type: "busy" } }
+  const questions: unknown[] = []
+  let completed = false
+  const user = {
+    info: {
+      id: "message-plan-user",
+      sessionID,
+      role: "user",
+      time: { created: 1700000001000 },
+      agent: "plan",
+      model: { providerID: "opencode", modelID: "claude-opus-4-6" },
+    },
+    parts: [{ id: "part-plan-user", type: "text", text: "Create the recovery plan" }],
+  }
+  const assistant = {
+    info: {
+      id: "message-plan-assistant",
+      sessionID,
+      role: "assistant",
+      time: { created: 1700000002000, completed: 1700000003000 },
+      agent: "plan",
+      modelID: "claude-opus-4-6",
+      providerID: "opencode",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [
+      {
+        id: "part-plan-exit",
+        type: "tool",
+        tool: "plan_exit",
+        state: {
+          status: "completed",
+          input: { plan: "# Recovered Plan\n\nApply the minimal synchronization fix." },
+          output: "",
+          metadata: { agent: "plan" },
+          time: { created: 1700000002000, completed: 1700000003000 },
+        },
+      },
+    ],
+  }
+
+  await mockServer(page, {
+    questions: () => questions,
+    sessionStatus: status,
+    pageMessages: () => ({ items: completed ? [user, assistant] : [user] }),
+    agents: [
+      {
+        id: "build",
+        name: "Build",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+      {
+        id: "plan",
+        name: "Plan",
+        mode: "primary",
+        hidden: false,
+        request: { settings: {}, headers: {}, body: {} },
+        permissions: [],
+      },
+    ],
+  })
+  const initialMessages = waitForGet(page, transport.server, `/api/session/${sessionID}/message`)
+  const initialQuestions = waitForGet(page, transport.server, "/api/question/request")
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  const first = await transport.waitForConnection()
+  await Promise.all([initialMessages, initialQuestions])
+  expect(first.path).toBe("/api/event")
+  await expectSessionTitle(page, title)
+  await expect(page.locator('[data-slot="text-shimmer-char-base"]', { hasText: "Syncing status" })).toBeVisible()
+
+  const recoveryMessages = waitForGet(page, transport.server, `/api/session/${sessionID}/message`)
+  const recoveryQuestions = waitForGet(page, transport.server, "/api/question/request")
+  completed = true
+  status[sessionID] = { type: "idle" }
+  questions.push({
+    id: "question-plan-recovered",
+    sessionID,
+    questions: [
+      {
+        header: "Plan complete",
+        question: "The plan is ready. What should happen next?",
+        options: [
+          { label: "Build now", description: "Switch to Build and implement the plan" },
+          { label: "Keep planning", description: "Stay in Plan mode" },
+        ],
+      },
+    ],
+    tool: { messageID: "message-plan-assistant", callID: "part-plan-exit" },
+  })
+  await Promise.all([recoveryMessages, recoveryQuestions])
+
+  const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await expect(page.getByText("Recovered Plan", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(question.getByText("The plan is ready. What should happen next?")).toBeVisible()
+  await expect(question.getByRole("radio", { name: /Build now/ })).toBeVisible()
+  await expect(page.locator('[data-slot="session-turn-thinking"]')).toHaveCount(0)
+  await expect(page.locator('[data-slot="text-shimmer-char-base"]', { hasText: "Syncing status" })).toHaveCount(0)
+  const second = await transport.waitForConnection({ after: first.id, timeout: 15_000 })
+  expect(second.id).toBeGreaterThan(first.id)
+  expect(second.path).toBe("/api/event")
+  expect((await transport.connections()).find((item) => item.id === first.id)?.endedBy).toBe("abort")
+})
+
 test("restores the draft caret before typing after a request dock closes", async ({ page }) => {
   const transport = await installSseTransport(page, {
     server: `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`,
@@ -305,6 +431,8 @@ async function mockServer(
     permissions?: unknown[] | (() => unknown[])
     questions?: unknown[] | (() => unknown[])
     agents?: unknown[]
+    pageMessages?: (sessionID: string, limit: number, before?: string) => { items: unknown[]; cursor?: string }
+    sessionStatus?: Record<string, unknown>
   },
 ) {
   await mockOpenCodeServer(page, {
@@ -346,10 +474,11 @@ async function mockServer(
         time: { created: 1700000000000, updated: 1700000000000 },
       },
     ],
-    pageMessages: () => ({ items: [] }),
+    pageMessages: requests.pageMessages ?? (() => ({ items: [] })),
     permissions: requests.permissions,
     questions: requests.questions,
     agents: requests.agents,
+    sessionStatus: requests.sessionStatus,
   })
   await page.addInitScript(() => {
     localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))

@@ -57,11 +57,11 @@ type BrowserTransport = Window & {
 
 export async function installSseTransport<T>(
   page: Page,
-  options: { server: string; retry?: number },
+  options: { server: string; retry?: number; emitConnected?: boolean },
 ): Promise<SseTransport<T>> {
   const server = new URL(options.server).origin
   await page.addInitScript(
-    ({ server, retry }) => {
+    ({ server, retry, emitConnected }) => {
       type Connection = SseConnectionRecord & { controller: ReadableStreamDefaultController<Uint8Array> }
       type ProbeWindow = Window & {
         __visualStabilityProbe?: { startedAt: number; markers: { at: number; label: string }[] }
@@ -193,11 +193,11 @@ export async function installSseTransport<T>(
             record.controller = controller
             connections.push(record)
             if (retry !== undefined) controller.enqueue(encoder.encode(`retry: ${retry}\n\n`))
-            if (url.pathname === "/api/event")
+            if (emitConnected !== false && url.pathname === "/api/event")
               controller.enqueue(
                 encoder.encode(frame({ id: `evt_mock_connected_${id}`, type: "server.connected", data: {} })),
               )
-            if (url.pathname === "/global/event")
+            if (emitConnected !== false && url.pathname === "/global/event")
               controller.enqueue(
                 encoder.encode(
                   frame({
@@ -234,7 +234,7 @@ export async function installSseTransport<T>(
       }
       Object.defineProperty(window, "fetch", { configurable: true, writable: true, value: fetch })
     },
-    { server, retry: options.retry },
+    { server, retry: options.retry, emitConnected: options.emitConnected },
   )
 
   const command = <Result>(input: BrowserCommand<T>) =>
