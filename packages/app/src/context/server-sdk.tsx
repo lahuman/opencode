@@ -159,6 +159,13 @@ function currentDeltaFragment(event: CurrentDelta) {
   return event.type === "session.compaction.delta" ? event.data.text : event.data.delta
 }
 
+const SERVER_CONNECTED_TIMEOUT_MS = 10_000
+
+export function startEventStreamConnectTimeout(attempt: AbortController) {
+  const timer = setTimeout(() => attempt.abort(), SERVER_CONNECTED_TIMEOUT_MS)
+  return () => clearTimeout(timer)
+}
+
 export function resumeStreamAfterPageShow(event: PageTransitionEvent, start: () => unknown) {
   if (!event.persisted) return
   start()
@@ -276,23 +283,31 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         abort.signal.addEventListener("abort", onAbort)
         try {
           const kind = await protocol
-          const events =
-            kind === "v1"
-              ? (await eventSdk.global.event({ signal: attempt.signal })).stream
-              : eventApi.event.subscribe({ signal: attempt.signal })
-          let yielded = Date.now()
-          for await (const event of events) {
-            streamErrorLogged = false
-            const legacy = "payload" in event
-            if (legacy && event.payload.type === "sync") continue
-            const directory = legacy ? (event.directory ?? "global") : (event.location?.directory ?? "global")
-            const payload = legacy ? (event.payload as Event) : adaptServerEvent(event)
-            if (payload.type === "server.connected") setConnection("connected")
-            if (enqueueServerEvent(queue, { directory, payload })) schedule()
+          const cancelConnectTimeout = startEventStreamConnectTimeout(attempt)
+          try {
+            const events =
+              kind === "v1"
+                ? (await eventSdk.global.event({ signal: attempt.signal })).stream
+                : eventApi.event.subscribe({ signal: attempt.signal })
+            let yielded = Date.now()
+            for await (const event of events) {
+              streamErrorLogged = false
+              const legacy = "payload" in event
+              if (legacy && event.payload.type === "sync") continue
+              const directory = legacy ? (event.directory ?? "global") : (event.location?.directory ?? "global")
+              const payload = legacy ? (event.payload as Event) : adaptServerEvent(event)
+              if (payload.type === "server.connected") {
+                cancelConnectTimeout()
+                setConnection("connected")
+              }
+              if (enqueueServerEvent(queue, { directory, payload })) schedule()
 
-            if (Date.now() - yielded < STREAM_YIELD_MS) continue
-            yielded = Date.now()
-            await wait(0)
+              if (Date.now() - yielded < STREAM_YIELD_MS) continue
+              yielded = Date.now()
+              await wait(0)
+            }
+          } finally {
+            cancelConnectTimeout()
           }
         } catch (error) {
           if (!isStreamClosed(error, attempt?.signal) && !streamErrorLogged) {

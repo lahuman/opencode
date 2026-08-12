@@ -1,8 +1,50 @@
-import { describe, expect, test } from "bun:test"
-import { adaptServerEvent, coalesceServerEvents, enqueueServerEvent, resumeStreamAfterPageShow } from "./server-sdk"
+import { describe, expect, test, vi } from "bun:test"
+import {
+  adaptServerEvent,
+  coalesceServerEvents,
+  enqueueServerEvent,
+  resumeStreamAfterPageShow,
+  startEventStreamConnectTimeout,
+} from "./server-sdk"
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 
+describe("event stream connection timeout", () => {
+  test("aborts only the stream attempt after ten seconds", () => {
+    vi.useFakeTimers()
+    try {
+      const root = new AbortController()
+      const attempt = new AbortController()
+      startEventStreamConnectTimeout(attempt)
+
+      vi.advanceTimersByTime(9_999)
+      expect(attempt.signal.aborted).toBe(false)
+      expect(root.signal.aborted).toBe(false)
+
+      vi.advanceTimersByTime(1)
+      expect(attempt.signal.aborted).toBe(true)
+      expect(root.signal.aborted).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test("keeps a connected attempt alive after the deadline", () => {
+    vi.useFakeTimers()
+    try {
+      const attempt = new AbortController()
+      const cancel = startEventStreamConnectTimeout(attempt)
+
+      cancel()
+      cancel()
+      vi.advanceTimersByTime(10_000)
+
+      expect(attempt.signal.aborted).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 describe("resumeStreamAfterPageShow", () => {
   test("restarts a stream only after a back-forward cache restore", () => {
     let starts = 0
