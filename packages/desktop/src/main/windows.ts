@@ -573,6 +573,7 @@ function enterpriseContentSecurityPolicy(profile: EnterpriseProfile) {
     new Set([
       "'self'",
       "data:",
+      "blob:",
       ...["http", "https", "ws", "wss"].flatMap((scheme) => loopbackHosts.map((host) => `${scheme}://${host}:*`)),
       ...profile.allowedOrigins.flatMap((value) => {
         if (!URL.canParse(value)) return []

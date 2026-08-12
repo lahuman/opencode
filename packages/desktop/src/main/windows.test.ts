@@ -110,6 +110,7 @@ test("production windows enforce one session policy and exact packaged document 
     "connect-src": [
       "'self'",
       "data:",
+      "blob:",
       "http://localhost:*",
       "http://127.0.0.1:*",
       "http://[::1]:*",
