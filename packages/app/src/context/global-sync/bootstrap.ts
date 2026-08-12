@@ -346,8 +346,8 @@ export async function refreshPendingRequests(input: {
   session?: ServerSession
   protocol?: Promise<ServerProtocol>
 }) {
-  const permissionGeneration = input.session?.request.capture("permission")
-  const questionGeneration = input.session?.request.capture("question")
+  const permissionTicket = input.session?.request.begin("permission", input.directory)
+  const questionTicket = input.session?.request.begin("question", input.directory)
   const permissionBefore = new Map(
     Object.entries(input.store.permission).map(([sessionID, requests]) => [
       sessionID,
@@ -372,30 +372,32 @@ export async function refreshPendingRequests(input: {
         ? Promise.all(ids.map((sessionID) => input.session!.resolve(sessionID))).then(() => undefined)
         : warmSessions({ ids, store: input.store, setStore: input.setStore, api: input.api.session }))
 
-      if (
-        input.session &&
-        (!permissionGeneration || !input.session.request.current("permission", permissionGeneration))
-      )
-        return
-      batch(() => {
-        const current = input.session?.data.permission ?? input.store.permission
-        const sessionIDs = new Set([...Object.keys(current), ...Object.keys(grouped)])
-        sessionIDs.forEach((sessionID) => {
-          if (!grouped[sessionID] && input.session?.get(sessionID)?.directory !== input.directory) return
-          if (
-            !input.session &&
-            pendingRequestSnapshot(current[sessionID]) !== (permissionBefore.get(sessionID) ?? "[]")
-          )
-            return
-          const value = reconcile(
-            (grouped[sessionID] ?? []).filter((request) => !!request.id).sort((a, b) => cmp(a.id, b.id)),
-            { key: "id" },
-          )
-          if (input.session) input.session.set("permission", sessionID, value)
-          if (!input.session) input.setStore("permission", sessionID, value)
+      const apply = (canApply: (sessionID: string) => boolean) =>
+        batch(() => {
+          const current = input.session?.data.permission ?? input.store.permission
+          const sessionIDs = new Set([...Object.keys(current), ...Object.keys(grouped)])
+          sessionIDs.forEach((sessionID) => {
+            if (input.session && input.session.get(sessionID)?.directory !== input.directory) return
+            if (!canApply(sessionID)) return
+            if (!input.session && !grouped[sessionID]) return
+            const value = reconcile(
+              (grouped[sessionID] ?? []).filter((request) => !!request.id).sort((a, b) => cmp(a.id, b.id)),
+              { key: "id" },
+            )
+            if (input.session) input.session.set("permission", sessionID, value)
+            if (!input.session) input.setStore("permission", sessionID, value)
+          })
         })
-      })
-      input.session?.request.invalidate("permission")
+      if (input.session && permissionTicket) {
+        input.session.request.commit("permission", permissionTicket, apply)
+        return
+      }
+      apply(
+        (sessionID) =>
+          pendingRequestSnapshot(input.store.permission[sessionID]) === (permissionBefore.get(sessionID) ?? "[]"),
+      )
+    }).finally(() => {
+      if (permissionTicket) input.session?.request.end("permission", permissionTicket)
     })
 
   const questions = () =>
@@ -414,25 +416,32 @@ export async function refreshPendingRequests(input: {
         ? Promise.all(ids.map((sessionID) => input.session!.resolve(sessionID))).then(() => undefined)
         : warmSessions({ ids, store: input.store, setStore: input.setStore, api: input.api.session }))
 
-      if (input.session && (!questionGeneration || !input.session.request.current("question", questionGeneration)))
-        return
-
-      batch(() => {
-        const current = input.session?.data.question ?? input.store.question
-        const sessionIDs = new Set([...Object.keys(current), ...Object.keys(grouped)])
-        sessionIDs.forEach((sessionID) => {
-          if (!grouped[sessionID] && input.session?.get(sessionID)?.directory !== input.directory) return
-          if (!input.session && pendingRequestSnapshot(current[sessionID]) !== (questionBefore.get(sessionID) ?? "[]"))
-            return
-          const value = reconcile(
-            (grouped[sessionID] ?? []).filter((request) => !!request.id).sort((a, b) => cmp(a.id, b.id)),
-            { key: "id" },
-          )
-          if (input.session) input.session.set("question", sessionID, value)
-          if (!input.session) input.setStore("question", sessionID, value)
+      const apply = (canApply: (sessionID: string) => boolean) =>
+        batch(() => {
+          const current = input.session?.data.question ?? input.store.question
+          const sessionIDs = new Set([...Object.keys(current), ...Object.keys(grouped)])
+          sessionIDs.forEach((sessionID) => {
+            if (input.session && input.session.get(sessionID)?.directory !== input.directory) return
+            if (!canApply(sessionID)) return
+            if (!input.session && !grouped[sessionID]) return
+            const value = reconcile(
+              (grouped[sessionID] ?? []).filter((request) => !!request.id).sort((a, b) => cmp(a.id, b.id)),
+              { key: "id" },
+            )
+            if (input.session) input.session.set("question", sessionID, value)
+            if (!input.session) input.setStore("question", sessionID, value)
+          })
         })
-      })
-      input.session?.request.invalidate("question")
+      if (input.session && questionTicket) {
+        input.session.request.commit("question", questionTicket, apply)
+        return
+      }
+      apply(
+        (sessionID) =>
+          pendingRequestSnapshot(input.store.question[sessionID]) === (questionBefore.get(sessionID) ?? "[]"),
+      )
+    }).finally(() => {
+      if (questionTicket) input.session?.request.end("question", questionTicket)
     })
 
   const results = await Promise.allSettled([permissions(), questions()])

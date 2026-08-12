@@ -90,6 +90,17 @@ function sessionInfo(id: string): Session {
   }
 }
 
+function permissionRequest(id: string, sessionID: string) {
+  return {
+    id,
+    sessionID,
+    permission: "bash",
+    patterns: ["git status"],
+    always: [],
+    metadata: {},
+    tool: { messageID: `msg_${id}`, callID: `call_${id}` },
+  }
+}
 describe("bootstrapDirectory", () => {
   test("marks a loading directory partial during bootstrap and complete after success", async () => {
     const [store, setStore] = directoryState()
@@ -781,6 +792,91 @@ describe("refreshPendingRequests", () => {
     await refreshing
 
     expect(session.data.question.ses_pending).toEqual([])
+  })
+
+  test("applies concurrent pending request lists from different directories", async () => {
+    const [store, setStore] = directoryState()
+    const first = Promise.withResolvers<{ data: unknown[] }>()
+    const second = Promise.withResolvers<{ data: unknown[] }>()
+    let permissionCalls = 0
+    const client = {
+      permission: { list: () => (++permissionCalls === 1 ? first.promise : second.promise) },
+      question: { list: async () => ({ data: [] }) },
+    } as unknown as OpencodeClient
+    const session = createServerSession(client)
+    session.remember({ ...sessionInfo("ses_a"), directory: "/a" })
+    session.remember({ ...sessionInfo("ses_b"), directory: "/b" })
+
+    const refreshingA = refreshPendingRequests({
+      directory: "/a",
+      sdk: client,
+      api: {} as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+    await waitFor(() => permissionCalls === 1)
+    const refreshingB = refreshPendingRequests({
+      directory: "/b",
+      sdk: client,
+      api: {} as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+    await waitFor(() => permissionCalls === 2)
+
+    first.resolve({ data: [permissionRequest("perm_a", "ses_a")] })
+    await refreshingA
+    second.resolve({ data: [permissionRequest("perm_b", "ses_b"), permissionRequest("perm_wrong", "ses_a")] })
+    await refreshingB
+
+    expect(session.data.permission.ses_a?.map((item) => item.id)).toEqual(["perm_a"])
+    expect(session.data.permission.ses_b?.map((item) => item.id)).toEqual(["perm_b"])
+  })
+
+  test("keeps the newer result when same-directory refreshes complete in request order", async () => {
+    const [store, setStore] = directoryState()
+    const first = Promise.withResolvers<{ data: unknown[] }>()
+    const second = Promise.withResolvers<{ data: unknown[] }>()
+    let permissionCalls = 0
+    const client = {
+      permission: { list: () => (++permissionCalls === 1 ? first.promise : second.promise) },
+      question: { list: async () => ({ data: [] }) },
+    } as unknown as OpencodeClient
+    const session = createServerSession(client)
+    session.remember(sessionInfo("ses_pending"))
+
+    const older = refreshPendingRequests({
+      directory: "/project",
+      sdk: client,
+      api: {} as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+    await waitFor(() => permissionCalls === 1)
+    const newer = refreshPendingRequests({
+      directory: "/project",
+      sdk: client,
+      api: {} as ServerApi,
+      store,
+      setStore,
+      session,
+      protocol: Promise.resolve("v1"),
+    })
+    await waitFor(() => permissionCalls === 2)
+
+    first.resolve({ data: [permissionRequest("perm_old", "ses_pending")] })
+    await older
+    expect(session.data.permission.ses_pending?.map((item) => item.id)).toEqual(["perm_old"])
+    second.resolve({ data: [permissionRequest("perm_new", "ses_pending")] })
+    await newer
+
+    expect(session.data.permission.ses_pending?.map((item) => item.id)).toEqual(["perm_new"])
   })
 
   test("keeps the newer empty result when same-kind refreshes complete out of order", async () => {

@@ -185,6 +185,7 @@ function reconcileFetched<T extends { id: string }>(
 
 type ServerSessionOptions = { retry?: typeof retry; protocol?: Promise<"v1" | "v2"> }
 type PendingRequestKind = "permission" | "question"
+type PendingRequestTicket = { directory: string; issued: number; touched: Set<string> }
 
 export function createServerSession(
   client: OpencodeClient,
@@ -212,12 +213,42 @@ export function createServerSession(
   })
   const requests = new Map<string, Promise<Session>>()
   const statusRevisions = new Map<string, number>()
-  const requestGenerations = new Map<PendingRequestKind, object>([
-    ["permission", {}],
-    ["question", {}],
-  ])
-  const requestGeneration = (kind: PendingRequestKind) => requestGenerations.get(kind)!
-  const invalidateRequest = (kind: PendingRequestKind) => requestGenerations.set(kind, {})
+  const requestStates = {
+    permission: {
+      issued: new Map<string, number>(),
+      applied: new Map<string, number>(),
+      active: new Set<PendingRequestTicket>(),
+    },
+    question: {
+      issued: new Map<string, number>(),
+      applied: new Map<string, number>(),
+      active: new Set<PendingRequestTicket>(),
+    },
+  }
+  const beginRequest = (kind: PendingRequestKind, directory: string) => {
+    const state = requestStates[kind]
+    const issued = (state.issued.get(directory) ?? 0) + 1
+    state.issued.set(directory, issued)
+    const ticket = { directory, issued, touched: new Set<string>() }
+    state.active.add(ticket)
+    return ticket
+  }
+  const commitRequest = (
+    kind: PendingRequestKind,
+    ticket: PendingRequestTicket,
+    apply: (current: (sessionID: string) => boolean) => void,
+  ) => {
+    const state = requestStates[kind]
+    if (!state.active.has(ticket)) return false
+    if (ticket.issued < (state.applied.get(ticket.directory) ?? 0)) return false
+    apply((sessionID) => !ticket.touched.has(sessionID))
+    state.applied.set(ticket.directory, ticket.issued)
+    return true
+  }
+  const endRequest = (kind: PendingRequestKind, ticket: PendingRequestTicket) =>
+    requestStates[kind].active.delete(ticket)
+  const touchRequest = (kind: PendingRequestKind, sessionID: string) =>
+    requestStates[kind].active.forEach((ticket) => ticket.touched.add(sessionID))
   const inflight = new Map<string, Promise<void>>()
   const inflightTodo = new Map<string, Promise<void>>()
   const optimistic = new Map<string, Map<string, OptimisticItem>>()
@@ -491,13 +522,13 @@ export function createServerSession(
 
   const evict = (sessionIDs: string[]) => {
     if (sessionIDs.length === 0) return
-    invalidateRequest("permission")
-    invalidateRequest("question")
     const evicted = new Set(sessionIDs)
     for (const [partID, item] of deltaBases) {
       if (evicted.has(item.sessionID)) deltaBases.delete(partID)
     }
     sessionIDs.forEach((sessionID) => {
+      touchRequest("permission", sessionID)
+      touchRequest("question", sessionID)
       generations.delete(sessionID)
       statusRevisions.delete(sessionID)
       clearOptimistic(sessionID)
@@ -1254,8 +1285,8 @@ export function createServerSession(
         return
       }
       case "permission.asked": {
-        invalidateRequest("permission")
         const permission = event.properties as PermissionRequest
+        touchRequest("permission", permission.sessionID)
         const permissions = data.permission[permission.sessionID]
         if (!permissions) {
           setData("permission", permission.sessionID, [permission])
@@ -1273,8 +1304,8 @@ export function createServerSession(
       }
       case "permission.replied":
       case "permission.rejected": {
-        invalidateRequest("permission")
         const props = event.properties as { sessionID: string; requestID: string }
+        touchRequest("permission", props.sessionID)
         setData(
           "permission",
           props.sessionID,
@@ -1287,8 +1318,8 @@ export function createServerSession(
         return
       }
       case "question.asked": {
-        invalidateRequest("question")
         const question = event.properties as QuestionRequest
+        touchRequest("question", question.sessionID)
         const questions = data.question[question.sessionID]
         if (!questions) {
           setData("question", question.sessionID, [question])
@@ -1306,8 +1337,8 @@ export function createServerSession(
       }
       case "question.replied":
       case "question.rejected": {
-        invalidateRequest("question")
         const props = event.properties as { sessionID: string; requestID: string }
+        touchRequest("question", props.sessionID)
         setData(
           "question",
           props.sessionID,
@@ -1325,9 +1356,9 @@ export function createServerSession(
     data,
     set: setData,
     request: {
-      capture: requestGeneration,
-      current: (kind: PendingRequestKind, generation: object) => requestGeneration(kind) === generation,
-      invalidate: invalidateRequest,
+      begin: beginRequest,
+      commit: commitRequest,
+      end: endRequest,
     },
     status: {
       set: setStatus,
