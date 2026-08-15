@@ -9,6 +9,7 @@ import { showToast } from "@/utils/toast"
 import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLocal } from "@/context/local"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
@@ -68,6 +69,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const platform = usePlatform()
   const local = useLocal()
   const sync = useSync()
   const cacheKey = ScopedKey.from(serverSDK().scope, props.request.id)
@@ -236,6 +238,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     onSuccess: (_, answers) => {
       replied = true
       cache.delete(cacheKey)
+      if (platform.platform !== "desktop") return
       if (
         !isPlanBuildApproval({
           request: props.request,

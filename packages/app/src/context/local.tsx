@@ -71,6 +71,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const sync = useSync()
     const serverSDK = useServerSDK()
     const platform = usePlatform()
+    const desktop = platform.platform === "desktop"
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
     const settings = useSettings()
@@ -108,7 +109,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         variant?: string | null
       }
     }>({
-      current: undefined,
+      current: desktop ? undefined : list()[0]?.name,
       draft: undefined,
       last: undefined,
     })
@@ -130,6 +131,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     createEffect(() => {
       const items = list()
+      if (!desktop) {
+        if (items.some((item) => item.name === store.current)) return
+        setStore("current", items[0]?.name)
+        return
+      }
       if (items.length === 0) {
         if (store.current !== undefined) setStore("current", undefined)
         return
@@ -137,6 +143,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       if (store.current === undefined) return
       if (items.some((item) => item.name === store.current)) return
       setStore("current", undefined)
+    })
+
+    createEffect(() => {
+      if (!desktop) return
+      const items = list()
+      if (!defaults.agent || items.length === 0) return
+      if (items.some((item) => item.name === defaults.agent)) return
+      setDefaults("agent", undefined)
     })
 
     const scope = createMemo<State | undefined>(() => {
@@ -197,11 +211,29 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       list,
       visible: agentsVisible,
       current() {
-        return pickAgent(agentsVisible() ? (scope()?.agent ?? defaults.agent ?? store.current) : "build")
+        return pickAgent(agentsVisible() ? (scope()?.agent ?? (desktop ? defaults.agent : undefined) ?? store.current) : "build")
       },
       set(name: string | undefined) {
         const item = pickAgent(name)
         if (!item) {
+          if (desktop && name !== undefined && list().length === 0) {
+            batch(() => {
+              setStore("current", name)
+              const prev = scope()
+              const next = {
+                agent: name,
+                model: prev?.model,
+                variant: prev?.variant,
+              } satisfies State
+              const session = id()
+              if (session) {
+                setSaved("session", session, next)
+                return
+              }
+              setStore("draft", next)
+            })
+            return
+          }
           setStore("current", undefined)
           return
         }
@@ -229,7 +261,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         })
       },
       setDefault(name: string | undefined) {
-        setDefaults("agent", list().find((item) => item.name === name)?.name)
+        if (!desktop) return
+        const items = list()
+        if (name && items.length > 0 && !items.some((item) => item.name === name)) {
+          setDefaults("agent", undefined)
+          return
+        }
+        setDefaults("agent", name)
       },
       move(direction: 1 | -1) {
         const items = list()
@@ -304,7 +342,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const write = (next: Partial<State>) => {
       const state = {
-        ...(scope() ?? (id() ? { agent: agent.current()?.name } : {})),
+        ...(scope() ?? (desktop && !id() ? {} : { agent: agent.current()?.name })),
         ...next,
       } satisfies State
 

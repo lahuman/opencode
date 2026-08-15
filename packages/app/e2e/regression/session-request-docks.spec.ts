@@ -722,7 +722,7 @@ test("switches the composer to Build from the durable plan approval message", as
   await expect(agent).toContainText("Plan")
 })
 
-test("persists Build as the Kernexa Desktop default after Plan approval", async ({ page }) => {
+test("keeps the Web composer and default unchanged after Plan approval", async ({ page }) => {
   const requestID = "question-plan-default"
   let answered = false
   await seedAgentDefault(page, "plan")
@@ -750,23 +750,12 @@ test("persists Build as the Kernexa Desktop default after Plan approval", async 
   )
   await question.getByRole("button", { name: "Submit" }).click()
   expect((await reply).status()).toBe(204)
-  await expect(agent).toContainText("Build")
-
-  await page.reload()
-  await expect(agent).toContainText("Build")
-  await openNewTask(page)
-  await expect(agent).toContainText("Build")
-  await page.reload()
-  await expect(agent).toContainText("Build")
-
-  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
-  await expect(agent).toContainText("Build")
-  await page.keyboard.press("Control+.")
   await expect(agent).toContainText("Plan")
+
   await page.reload()
   await expect(agent).toContainText("Plan")
   await openNewTask(page)
-  await expect(agent).toContainText("Build")
+  await expect(agent).toContainText("Plan")
 })
 
 test("keeps the Desktop default unchanged when Plan approval fails", async ({ page }) => {
