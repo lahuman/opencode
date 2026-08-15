@@ -92,6 +92,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }),
     )
 
+    const [defaults, setDefaults] = persisted(
+      Persist.serverGlobal(serverSDK().scope, "agent-default"),
+      createStore<{ agent?: string }>({}),
+    )
+
     const [store, setStore] = createStore<{
       current?: string
       draft?: State
@@ -103,7 +108,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         variant?: string | null
       }
     }>({
-      current: list()[0]?.name,
+      current: undefined,
       draft: undefined,
       last: undefined,
     })
@@ -129,8 +134,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         if (store.current !== undefined) setStore("current", undefined)
         return
       }
+      if (store.current === undefined) return
       if (items.some((item) => item.name === store.current)) return
-      setStore("current", items[0]?.name)
+      setStore("current", undefined)
     })
 
     const scope = createMemo<State | undefined>(() => {
@@ -191,7 +197,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       list,
       visible: agentsVisible,
       current() {
-        return pickAgent(agentsVisible() ? (scope()?.agent ?? store.current) : "build")
+        return pickAgent(agentsVisible() ? (scope()?.agent ?? defaults.agent ?? store.current) : "build")
       },
       set(name: string | undefined) {
         const item = pickAgent(name)
@@ -221,6 +227,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           }
           setStore("draft", next)
         })
+      },
+      setDefault(name: string | undefined) {
+        setDefaults("agent", list().find((item) => item.name === name)?.name)
       },
       move(direction: 1 | -1) {
         const items = list()
@@ -295,7 +304,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const write = (next: Partial<State>) => {
       const state = {
-        ...(scope() ?? { agent: agent.current()?.name }),
+        ...(scope() ?? (id() ? { agent: agent.current()?.name } : {})),
         ...next,
       } satisfies State
 

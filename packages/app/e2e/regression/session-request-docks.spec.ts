@@ -9,6 +9,98 @@ const projectID = "proj_request_docks"
 const sessionID = "ses_request_docks"
 const title = "Request dock regression"
 
+const modeAgents = [
+  {
+    id: "plan",
+    name: "plan",
+    mode: "primary",
+    hidden: false,
+    request: { settings: {}, headers: {}, body: {} },
+    permissions: [],
+  },
+  {
+    id: "build",
+    name: "build",
+    mode: "primary",
+    hidden: false,
+    request: { settings: {}, headers: {}, body: {} },
+    permissions: [],
+  },
+]
+
+function planExitQuestion(id: string) {
+  return {
+    id,
+    sessionID,
+    questions: [
+      {
+        header: "Build Agent",
+        question: "The plan is ready. Would you like to switch to Build?",
+        custom: false,
+        options: [
+          { label: "Build now", description: "Switch to Build and send an implementation request" },
+          { label: "Keep planning", description: "Stay in Plan mode and refine the plan" },
+        ],
+      },
+    ],
+    tool: { messageID: "message-plan-assistant", callID: "part-plan-exit" },
+  }
+}
+
+function planExitMessages() {
+  return [
+    {
+      info: {
+        id: "message-plan-user",
+        sessionID,
+        role: "user",
+        time: { created: 1700000001000 },
+        agent: "plan",
+        model: { providerID: "opencode", modelID: "claude-opus-4-6" },
+      },
+      parts: [{ id: "part-plan-user", type: "text", text: "Prepare the implementation plan" }],
+    },
+    {
+      info: {
+        id: "message-plan-assistant",
+        sessionID,
+        role: "assistant",
+        time: { created: 1700000002000 },
+        agent: "plan",
+        modelID: "claude-opus-4-6",
+        providerID: "opencode",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      parts: [
+        {
+          id: "part-plan-exit",
+          type: "tool",
+          tool: "plan_exit",
+          state: {
+            status: "running",
+            input: { plan: "# Approved Plan\n\nApply the Desktop default." },
+            time: { created: 1700000002000 },
+          },
+        },
+      ],
+    },
+  ]
+}
+
+async function seedAgentDefault(page: Page, agent: "plan" | "build") {
+  await page.addInitScript((value) => {
+    if (sessionStorage.getItem("opencode.e2e.agent-default-seeded")) return
+    sessionStorage.setItem("opencode.e2e.agent-default-seeded", "true")
+    localStorage.setItem("opencode.global.dat:agent-default", JSON.stringify({ agent: value }))
+  }, agent)
+}
+
+async function openNewTask(page: Page) {
+  await page.locator('[data-slot="titlebar-v2"]').getByRole("button", { name: "New session" }).click()
+  await expect(page).toHaveURL(/\/new-session\?draftId=/)
+}
+
 function waitForGet(page: Page, server: string, path: string) {
   return page.waitForResponse(
     (response) =>
@@ -627,5 +719,86 @@ test("switches the composer to Build from the durable plan approval message", as
   await page.keyboard.press("Control+.")
   await expect(agent).toContainText("Plan")
   await transport.send(approval)
+  await expect(agent).toContainText("Plan")
+})
+
+test("persists Build as the Kernexa Desktop default after Plan approval", async ({ page }) => {
+  const requestID = "question-plan-default"
+  let answered = false
+  await seedAgentDefault(page, "plan")
+  await mockServer(page, {
+    questions: () => (answered ? [] : [planExitQuestion(requestID)]),
+    agents: modeAgents,
+    pageMessages: () => ({ items: planExitMessages() }),
+  })
+  page.on("request", (request) => {
+    if (request.method() !== "POST") return
+    if (new URL(request.url()).pathname !== `/api/session/${sessionID}/question/${requestID}/reply`) return
+    answered = true
+  })
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expectSessionTitle(page, title)
+  const agent = page.getByRole("button", { name: "Choose agent", includeHidden: true })
+
+  const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await question.getByRole("radio", { name: /Build now/ }).click()
+  const reply = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === `/api/session/${sessionID}/question/${requestID}/reply`,
+  )
+  await question.getByRole("button", { name: "Submit" }).click()
+  expect((await reply).status()).toBe(204)
+  await expect(agent).toContainText("Build")
+
+  await page.reload()
+  await expect(agent).toContainText("Build")
+  await openNewTask(page)
+  await expect(agent).toContainText("Build")
+  await page.reload()
+  await expect(agent).toContainText("Build")
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expect(agent).toContainText("Build")
+  await page.keyboard.press("Control+.")
+  await expect(agent).toContainText("Plan")
+  await page.reload()
+  await expect(agent).toContainText("Plan")
+  await openNewTask(page)
+  await expect(agent).toContainText("Build")
+})
+
+test("keeps the Desktop default unchanged when Plan approval fails", async ({ page }) => {
+  const requestID = "question-plan-failed"
+  await seedAgentDefault(page, "plan")
+  await mockServer(page, {
+    questions: [planExitQuestion(requestID)],
+    agents: modeAgents,
+    pageMessages: () => ({ items: planExitMessages() }),
+  })
+  await page.route(`**/api/session/${sessionID}/question/${requestID}/reply`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*" },
+      body: JSON.stringify({ message: "reply failed" }),
+    }),
+  )
+
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expectSessionTitle(page, title)
+  const agent = page.getByRole("button", { name: "Choose agent", includeHidden: true })
+
+  const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
+  await question.getByRole("radio", { name: /Build now/ }).click()
+  const reply = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === `/api/session/${sessionID}/question/${requestID}/reply`,
+  )
+  await question.getByRole("button", { name: "Submit" }).click()
+  expect((await reply).status()).toBe(500)
+  await expect(page.getByText("Request failed")).toBeVisible()
+
+  await openNewTask(page)
   await expect(agent).toContainText("Plan")
 })

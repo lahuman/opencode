@@ -7,12 +7,15 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
 import { showToast } from "@/utils/toast"
 import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
+import { useLocal } from "@/context/local"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useServerSDK } from "@/context/server-sdk"
+import { useSync } from "@/context/sync"
 import { ScopedKey } from "@/utils/server-scope"
+import { isPlanBuildApproval } from "./plan-build-approval"
 
 const cache = new Map<string, { tab: number; answers: QuestionAnswer[]; custom: string[]; customOn: boolean[] }>()
 
@@ -65,6 +68,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const language = useLanguage()
+  const local = useLocal()
+  const sync = useSync()
   const cacheKey = ScopedKey.from(serverSDK().scope, props.request.id)
 
   const questions = createMemo(() => props.request.questions)
@@ -228,9 +233,19 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     onMutate: () => {
       props.onSubmit()
     },
-    onSuccess: () => {
+    onSuccess: (_, answers) => {
       replied = true
       cache.delete(cacheKey)
+      if (
+        !isPlanBuildApproval({
+          request: props.request,
+          answers,
+          parts: props.request.tool ? (sync().data.part[props.request.tool.messageID] ?? []) : [],
+        })
+      )
+        return
+      local.agent.set("build")
+      local.agent.setDefault("build")
     },
     onError: fail,
   }))
