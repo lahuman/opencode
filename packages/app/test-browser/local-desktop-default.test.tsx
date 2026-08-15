@@ -395,7 +395,12 @@ test("persists a successful dock approval across a Desktop provider restart", as
   )
 
   try {
-    await waitFor(() => reads().includes("agent-default") && remounted?.agent.current()?.name === "build")
+    await waitFor(() => reads().includes("agent-default"))
+    remounted!.agent.set("plan")
+    await waitFor(() => remounted?.agent.current()?.name === "plan")
+    expect(remounted?.agent.current()?.name).toBe("plan")
+    remounted!.session.reset()
+    await waitFor(() => remounted?.agent.current()?.name === "build")
     expect(remounted?.agent.current()?.name).toBe("build")
   } finally {
     disposeRestarted()
