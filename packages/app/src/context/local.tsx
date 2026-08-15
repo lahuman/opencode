@@ -93,10 +93,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }),
     )
 
-    const [defaults, setDefaults] = persisted(
-      Persist.serverGlobal(serverSDK().scope, "agent-default"),
-      createStore<{ agent?: string }>({}),
-    )
+    const defaultStore = createStore<{ agent?: string }>({})
+    const defaultPersisted = desktop
+      ? persisted(
+          Persist.serverGlobal(serverSDK().scope, "agent-default"),
+          defaultStore,
+        )
+      : undefined
+    const defaults = defaultPersisted?.[0] ?? defaultStore[0]
+    const setDefaults = defaultPersisted?.[1] ?? defaultStore[1]
 
     const [store, setStore] = createStore<{
       current?: string

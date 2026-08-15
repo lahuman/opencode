@@ -4,6 +4,7 @@ import { createComponent, createContext, createEffect, createRoot, createSignal,
 import { render } from "solid-js/web"
 
 const [agents, setAgents] = createSignal<Array<{ name: string; mode: string; hidden: boolean }>>([])
+const [platform, setPlatform] = createSignal<"desktop" | "web">("desktop")
 const [writes, setWrites] = createSignal<Array<{ key: string; value: string }>>([])
 
 const storage: AsyncStorage = {
@@ -22,7 +23,7 @@ mock.module("@solidjs/router", () => ({
   useParams: () => ({ id: "session-delayed-agents" }),
 }))
 mock.module("@/context/platform", () => ({
-  usePlatform: () => ({ platform: "desktop", storage: () => storage }),
+  usePlatform: () => (platform() === "desktop" ? { platform: "desktop", storage: () => storage } : { platform: "web" }),
 }))
 mock.module("@/context/sdk", () => ({
   useSDK: () => () => ({ directory: "/repo", event: { on: () => () => {} } }),
@@ -148,4 +149,38 @@ test("persists Build intent before the Desktop agent catalog hydrates", async ()
       root,
     )
   })
+})
+test("does not touch the Desktop default storage on Web", () => {
+  const key = "opencode.global.dat:agent-default"
+  const sentinel = "{malformed"
+  const getItem = localStorage.getItem.bind(localStorage)
+  const removeItem = localStorage.removeItem.bind(localStorage)
+  localStorage.setItem(key, sentinel)
+  let reads = 0
+  let removals = 0
+  localStorage.getItem = (name) => {
+    if (name === key) reads++
+    return getItem(name)
+  }
+  localStorage.removeItem = (name) => {
+    if (name === key) removals++
+    removeItem(name)
+  }
+  const root = document.createElement("div")
+  document.body.append(root)
+  setPlatform("web")
+  const dispose = render(() => createComponent(LocalProvider, { children: null }), root)
+
+  try {
+    expect(getItem(key)).toBe(sentinel)
+    expect(reads).toBe(0)
+    expect(removals).toBe(0)
+  } finally {
+    dispose()
+    root.remove()
+    localStorage.getItem = getItem
+    localStorage.removeItem = removeItem
+    localStorage.removeItem(key)
+    setPlatform("desktop")
+  }
 })
