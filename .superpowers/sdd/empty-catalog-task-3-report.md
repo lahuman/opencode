@@ -92,7 +92,7 @@ Result: exit 1, 117 pass, 1 fail, and 351 assertions. Every Task 3 test and the 
 
 The same suite excluding only that named pre-existing failure:
 
-    bun.cmd test ./src/enterprise.test.ts ./scripts/enterprise-build.test.ts ./electron.vite.config.test.ts ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./src/main/enterprise-providers.test.ts ./src/main/enterprise-provider-runtime.test.ts -t "^(?!keeps the generated Kernexa guide and manifest version aligned$).*"
+    bun.cmd test ./src/enterprise.test.ts ./scripts/enterprise-build.test.ts ./electron.vite.config.test.ts ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./src/main/enterprise-providers.test.ts ./src/main/enterprise-provider-runtime.test.ts -t "^(?!keeps the generated SFMI guide and manifest version aligned$).*"
 
 Result: exit 0, 117 pass, 1 filtered out, 0 fail, and 350 assertions.
 
@@ -113,6 +113,6 @@ The scoped tracked review package is .superpowers/sdd/empty-catalog-task-3-revie
 
 ## Concerns
 
-- The exact seven-file suite retains the Task 2 checkout inconsistency: scripts/enterprise-manifest.test.ts expects guideVersion "kernexa-1", while the unchanged ignored packaged manifest contains "pilot-1". This task's required empty configuration also explicitly uses pilot-1. No out-of-scope resource or test was changed to mask the failure.
+- The exact seven-file suite retains the Task 2 checkout inconsistency: scripts/enterprise-manifest.test.ts expects guideVersion "sfmi-1", while the unchanged ignored packaged manifest contains "pilot-1". This task's required empty configuration also explicitly uses pilot-1. No out-of-scope resource or test was changed to mask the failure.
 - The build emits the existing non-fatal Vite/Rollup warnings listed above.
 - No Task 3 behavior concern remains: existing catalogs win over the empty packaged profile, new users start empty, the first created model becomes the default, healthy empty credentials remain healthy, and orphan credential rejection remains enforced.

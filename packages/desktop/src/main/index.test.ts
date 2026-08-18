@@ -56,8 +56,8 @@ test("desktop identity covers enterprise and every ordinary channel", async () =
   const { result } = await runMain("identity")
 
   expect(result).toEqual({
-    enterpriseProd: { appId: "com.company.kernexa", name: "Kernexa" },
-    enterpriseDev: { appId: "com.company.kernexa", name: "Kernexa" },
+    enterpriseProd: { appId: "com.company.sfmi", name: "SFMI" },
+    enterpriseDev: { appId: "com.company.sfmi", name: "SFMI" },
     dev: { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" },
     beta: { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" },
     prod: { appId: "ai.opencode.desktop", name: "OpenCode" },
@@ -75,9 +75,9 @@ test("real enterprise main entrypoint applies isolated identity without claiming
     ipcRegistered: true,
     shellOpenExternalURLs: ["https://llm.corp.example/docs"],
     identity: {
-      appId: "com.company.kernexa",
-      name: "Kernexa",
-      userData: join(tmpdir(), "opencode-main-index-app-data", "com.company.kernexa"),
+      appId: "com.company.sfmi",
+      name: "SFMI",
+      userData: join(tmpdir(), "opencode-main-index-app-data", "com.company.sfmi"),
     },
     protocolClients: [],
   })

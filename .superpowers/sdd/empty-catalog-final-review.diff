@@ -4,7 +4,7 @@
 077115271eacd420ca02286ebb404fd64a9cf9b8
 
 ## Status
- M docs/enterprise/windows-portable-kernexa-release.md
+ M docs/enterprise/windows-portable-sfmi-release.md
  M packages/desktop/.env.enterprise.example
  M packages/desktop/electron.vite.config.test.ts
  M packages/desktop/scripts/enterprise-build.test.ts
@@ -25,7 +25,7 @@
 ?? docs/superpowers/specs/2026-07-20-empty-enterprise-catalog-design.md
 
 ## Tracked diff stat
- .../enterprise/windows-portable-kernexa-release.md | 17 ++++--
+ .../enterprise/windows-portable-sfmi-release.md | 17 ++++--
  packages/desktop/.env.enterprise.example           | 10 ++--
  packages/desktop/electron.vite.config.test.ts      | 27 ++++++++-
  packages/desktop/scripts/enterprise-build.test.ts  | 66 +++++++++++++++++++-
@@ -45,10 +45,10 @@
  17 files changed, 511 insertions(+), 33 deletions(-)
 
 ## Tracked diff
-diff --git a/docs/enterprise/windows-portable-kernexa-release.md b/docs/enterprise/windows-portable-kernexa-release.md
+diff --git a/docs/enterprise/windows-portable-sfmi-release.md b/docs/enterprise/windows-portable-sfmi-release.md
 index 9b217d43d..23e1dc112 100644
---- a/docs/enterprise/windows-portable-kernexa-release.md
-+++ b/docs/enterprise/windows-portable-kernexa-release.md
+--- a/docs/enterprise/windows-portable-sfmi-release.md
++++ b/docs/enterprise/windows-portable-sfmi-release.md
 @@ -174,31 +174,40 @@ function Read-VerifiedPortableReleaseMetadata {
    param([string] $Path)
  
@@ -109,7 +109,7 @@ index 621e3fd7a..ae2a5882a 100644
 +OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
  OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
 -OPENCODE_ENTERPRISE_GUIDE_VERSION=dev-1
-+OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
  OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 diff --git a/packages/desktop/electron.vite.config.test.ts b/packages/desktop/electron.vite.config.test.ts
 index 5065dbda6..52711221a 100644
@@ -122,7 +122,7 @@ index 5065dbda6..52711221a 100644
    ]),
    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
  }
  
@@ -142,7 +142,7 @@ index 5065dbda6..52711221a 100644
          },
          renderer: {
            "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
-           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("sfmi-1"),
            "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
          },
        },
@@ -194,7 +194,7 @@ index fb18af93f..82a306df0 100644
    OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
  }
@@ -208,7 +208,7 @@ index fb18af93f..82a306df0 100644
    ]),
 -  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
  }
@@ -284,7 +284,7 @@ index fb18af93f..82a306df0 100644
      ],
      defaultModelID: "code",
      defaultsVersion: "pilot-1",
-     guideVersion: "kernexa-1",
+     guideVersion: "sfmi-1",
      catalogVersion: "catalog-1",
 diff --git a/packages/desktop/scripts/enterprise-build.ts b/packages/desktop/scripts/enterprise-build.ts
 index 32da36c9b..6784cf459 100644
@@ -408,7 +408,7 @@ index a2c1ad0b7..bddbafa1a 100644
    ]),
    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
  }
@@ -475,7 +475,7 @@ index a2c1ad0b7..bddbafa1a 100644
 +async function releaseInput(profile: ReturnType<typeof validateEnterpriseBuild>) {
 +  const root = await mkdtemp(path.join(tmpdir(), "enterprise-release-pair-"))
 +  roots.push(root)
-+  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
++  const archive = path.join(root, "sfmi-1.17.18-win-x64.zip")
 +  const sbom = archive.replace(/\.zip$/, ".sbom.cdx.json")
 +  const licenses = archive.replace(/\.zip$/, ".third-party-licenses.txt")
 +  await Promise.all([Bun.write(archive, "portable archive"), Bun.write(sbom, "sbom"), Bun.write(licenses, "licenses")])
@@ -622,10 +622,10 @@ index 799c1607b..4827335cd 100644
 +      schemaVersion: 3,
 +      appVersion: "1.0.0",
 +      gitCommit: "0123456789abcdef",
-+      artifact: "kernexa-1.0.0-win-x64.zip",
++      artifact: "sfmi-1.0.0-win-x64.zip",
 +      sha256: "a".repeat(64),
 +      defaultsVersion: "defaults-1",
-+      guideVersion: "kernexa-1",
++      guideVersion: "sfmi-1",
 +      defaultModelID: "code",
 +      modelIDs: ["code", "reasoning"],
 +      modelCatalogSHA256: "b".repeat(64),
@@ -633,9 +633,9 @@ index 799c1607b..4827335cd 100644
 +      builtAt: "2026-07-15T00:00:00.000Z",
 +      authenticode: "NotSigned",
 +      windowsAcceptance: [],
-+      sbom: { file: "kernexa-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
++      sbom: { file: "sfmi-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
 +      thirdPartyLicenses: {
-+        file: "kernexa-1.0.0-win-x64.third-party-licenses.txt",
++        file: "sfmi-1.0.0-win-x64.third-party-licenses.txt",
 +        sha256: "d".repeat(64),
 +      },
 +    }
@@ -745,7 +745,7 @@ index 036f29381..19c936996 100644
      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-     OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+     OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
    })
@@ -830,14 +830,14 @@ index 036f29381..19c936996 100644
        ]),
        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
 @@ -53,21 +122,20 @@ describe("enterprise profile", () => {
    test("rejects invalid multi-model catalogs", () => {
      const env = {
        OPENCODE_ENTERPRISE: "1",
        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
      }
  
@@ -1266,7 +1266,7 @@ index 000000000..b0530eed8
 +OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
 +OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
 +OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
-+OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 +OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 
 ## Untracked file: packages/desktop/resources/enterprise/enterprise-manifest.json
@@ -1280,7 +1280,7 @@ index 000000000..8513c98cd
 +  "schemaVersion": 2,
 +  "appVersion": "1.18.2",
 +  "defaultsVersion": "dev-1",
-+  "guideVersion": "kernexa-1",
++  "guideVersion": "sfmi-1",
 +  "catalogVersion": "dev-1",
 +  "defaultModelID": "",
 +  "modelIDs": [],
@@ -1305,7 +1305,7 @@ index 000000000..24021e9c3
 +
 +> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 +
-+**Goal:** Allow a Kernexa Enterprise desktop package to start new users with zero providers and models while preserving every existing Windows user-global catalog.
++**Goal:** Allow a SFMI Enterprise desktop package to start new users with zero providers and models while preserving every existing Windows user-global catalog.
 +
 +**Architecture:** Treat `OPENCODE_ENTERPRISE_MODELS=[]` plus a blank or omitted default model ID as one valid packaged-profile state. Keep the existing profile and manifest fields stable by representing “no default” as `""`, conditionally validate the model/default pair, and retain catalog read-before-seed behavior so only a missing catalog is initialized empty.
 +
@@ -1349,7 +1349,7 @@ index 000000000..24021e9c3
 +    OPENCODE_ENTERPRISE_MODELS: "[]",
 +    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
 +    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
-+    OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
++    OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
 +    OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
 +  })
 +
@@ -1453,7 +1453,7 @@ index 000000000..24021e9c3
 +  models: [],
 +  defaultModelID: "",
 +  defaultsVersion: "dev-1",
-+  guideVersion: "kernexa-1",
++  guideVersion: "sfmi-1",
 +  catalogVersion: "dev-1",
 +  allowedOrigins: [],
 +}
@@ -1584,7 +1584,7 @@ index 000000000..24021e9c3
 +OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
 +OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
 +OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
-+OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 +OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 +```
 +
@@ -1630,7 +1630,7 @@ index 000000000..72e2855a2
 +
 +## Goal
 +
-+Allow a Kernexa Enterprise desktop build to package zero initial providers and models. New users start in the existing empty-composer experience and register providers and models through Settings. An existing Windows user-global provider catalog remains authoritative and is never cleared merely because the packaged catalog is empty.
++Allow a SFMI Enterprise desktop build to package zero initial providers and models. New users start in the existing empty-composer experience and register providers and models through Settings. An existing Windows user-global provider catalog remains authoritative and is never cleared merely because the packaged catalog is empty.
 +
 +## Environment Contract
 +
@@ -1642,7 +1642,7 @@ index 000000000..72e2855a2
 +OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
 +OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
 +OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
-+OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
++OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 +OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 +```
 +

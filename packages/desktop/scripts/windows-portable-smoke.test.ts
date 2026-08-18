@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const scriptPath = new URL("./windows-portable-smoke.ps1", import.meta.url)
 const generatorPath = new URL("./enterprise-release.ts", import.meta.url)
-const runbookPath = new URL("../../../docs/enterprise/windows-portable-kernexa-release.md", import.meta.url)
+const runbookPath = new URL("../../../docs/enterprise/windows-portable-sfmi-release.md", import.meta.url)
 
 function powerShellParserInvocation(scriptPath: string) {
   return `[void][scriptblock]::Create((Get-Content -Raw -LiteralPath '${scriptPath.replaceAll("'", "''")}'))`
@@ -236,10 +236,10 @@ test.if(process.platform === "win32")(
       schemaVersion: 3,
       appVersion: "1.0.0",
       gitCommit: "0123456789abcdef",
-      artifact: "kernexa-1.0.0-win-x64.zip",
+      artifact: "sfmi-1.0.0-win-x64.zip",
       sha256: "a".repeat(64),
       defaultsVersion: "defaults-1",
-      guideVersion: "kernexa-1",
+      guideVersion: "sfmi-1",
       defaultModelID: "code",
       modelIDs: ["code", "reasoning"],
       modelCatalogSHA256: "b".repeat(64),
@@ -247,9 +247,9 @@ test.if(process.platform === "win32")(
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",
       windowsAcceptance: [],
-      sbom: { file: "kernexa-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
+      sbom: { file: "sfmi-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
       thirdPartyLicenses: {
-        file: "kernexa-1.0.0-win-x64.third-party-licenses.txt",
+        file: "sfmi-1.0.0-win-x64.third-party-licenses.txt",
         sha256: "d".repeat(64),
       },
     }
@@ -417,10 +417,10 @@ test("runbook checksum consumers match the generator's exact LF-terminated bytes
   const generator = await Bun.file(generatorPath).text()
   const runbook = await Bun.file(runbookPath).text()
 
-  expect(runbook).toContain("# Kernexa: Windows Portable ZIP Release")
-  expect(runbook).toContain("kernexa-<version>-win-x64.zip")
-  expect(runbook).toContain('Filter "Kernexa.exe"')
-  expect(runbook).toContain("%LOCALAPPDATA%\\com.company.kernexa")
+  expect(runbook).toContain("# SFMI: Windows Portable ZIP Release")
+  expect(runbook).toContain("sfmi-<version>-win-x64.zip")
+  expect(runbook).toContain('Filter "SFMI.exe"')
+  expect(runbook).toContain("%LOCALAPPDATA%\\com.company.sfmi")
   expect(runbook).toContain("%LOCALAPPDATA%\\com.company.opencode.pilot")
   expect(generator).toContain("Bun.write(`${input.archive}.sha256`, `${sha256}  ${artifact}\\n`)")
   expect(runbook).not.toMatch(/\$\w*[Cc]hecksumRecord\s*=\s*\(Get-Content[^\r\n]+\)\.Trim\(\)/)
@@ -550,7 +550,7 @@ test.if(process.platform === "win32")(
       schemaVersion: 3,
       appVersion: "1.0.0",
       gitCommit: "commit",
-      artifact: "kernexa-win-x64.zip",
+      artifact: "sfmi-win-x64.zip",
       sha256: "hash",
       defaultsVersion: "defaults",
       guideVersion: "guide",
@@ -561,9 +561,9 @@ test.if(process.platform === "win32")(
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",
       windowsAcceptance: [],
-      sbom: { file: "kernexa-win-x64.sbom.cdx.json", sha256: "a".repeat(64) },
+      sbom: { file: "sfmi-win-x64.sbom.cdx.json", sha256: "a".repeat(64) },
       thirdPartyLicenses: {
-        file: "kernexa-win-x64.third-party-licenses.txt",
+        file: "sfmi-win-x64.third-party-licenses.txt",
         sha256: "b".repeat(64),
       },
     }
@@ -616,15 +616,15 @@ test.if(process.platform === "win32")(
 
     try {
       await Bun.write(harness, `${checksum}\n$null = Read-PortableChecksum -Path $args[0] -Archive $args[1]`)
-      const archive = join(temp, "Kernexa.zip")
+      const archive = join(temp, "SFMI.zip")
       for (const [name, fixture, expected] of [
-        ["valid", `${hash}  Kernexa.zip\n`, 0],
-        ["missing-line-end", `${hash}  Kernexa.zip`, 1],
-        ["crlf-line-end", `${hash}  Kernexa.zip\r\n`, 1],
-        ["uppercase", `${hash.toUpperCase()}  Kernexa.zip\n`, 1],
+        ["valid", `${hash}  SFMI.zip\n`, 0],
+        ["missing-line-end", `${hash}  SFMI.zip`, 1],
+        ["crlf-line-end", `${hash}  SFMI.zip\r\n`, 1],
+        ["uppercase", `${hash.toUpperCase()}  SFMI.zip\n`, 1],
         ["wrong-name", `${hash}  other.zip\n`, 1],
-        ["extra-record", `${hash}  Kernexa.zip\n${hash}  Kernexa.zip\n`, 1],
-        ["extra-line-end", `${hash}  Kernexa.zip\n\n`, 1],
+        ["extra-record", `${hash}  SFMI.zip\n${hash}  SFMI.zip\n`, 1],
+        ["extra-line-end", `${hash}  SFMI.zip\n\n`, 1],
       ] as const) {
         const checksumPath = join(temp, `${name}.sha256`)
         await Bun.write(checksumPath, fixture)

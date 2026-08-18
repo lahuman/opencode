@@ -11,7 +11,7 @@ Object.assign(process.env, {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 })
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })
@@ -51,6 +51,7 @@ mock.module("@opencode-ai/app", () => ({
   ACCEPTED_FILE_EXTENSIONS: [],
   AppBaseProviders: (props: { children?: unknown }) => props.children,
   AppInterface: (props: { children?: unknown }) => props.children,
+  createDraftStore: () => ({}),
   loadLocaleDict: async () => undefined,
   normalizeLocale: (value: string) => value,
   PlatformProvider: (props: { value: CapturedPlatform; children?: unknown }) => {
@@ -62,6 +63,7 @@ mock.module("@opencode-ai/app", () => ({
     builtin: () => true,
   },
   useCommand: () => ({ trigger() {} }),
+  useLanguage: () => ({ t: (key: string) => key }),
   useWslServers: () => ({ data: undefined }),
 }))
 mock.module("@opencode-ai/ui/logo", () => ({ Splash: () => document.createElement("span") }))
@@ -106,7 +108,7 @@ const api = {
     setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
     replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
     clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-    readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+    readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
   },
   getPinchZoomEnabled: async () => false,
   getWindowFullscreen: async () => false,

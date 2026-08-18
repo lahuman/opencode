@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Kernexa Enterprise users manage a Windows-user-global catalog of OpenAI-compatible providers and models, including provider-scoped secrets and a selectable default model.
+**Goal:** Let SFMI Enterprise users manage a Windows-user-global catalog of OpenAI-compatible providers and models, including provider-scoped secrets and a selectable default model.
 
 **Architecture:** Electron main owns a schema-versioned non-secret catalog and a DPAPI-encrypted provider credential store. Catalog mutations run through one transactional runtime that restarts the sidecar with the candidate catalog and credentials, rolling both stores back on failure; the sidecar materializes and enforces only the Electron-owned catalog after project config merging.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Apply only to Kernexa Enterprise; ordinary OpenCode behavior must remain unchanged.
+- Apply only to SFMI Enterprise; ordinary OpenCode behavior must remain unchanged.
 - Support only `@ai-sdk/openai-compatible` providers.
 - Accept absolute HTTP(S) Base URLs without credentials, query, or fragment; continue blocking redirects.
 - Catalog data is Windows-user-global and shared by all projects.

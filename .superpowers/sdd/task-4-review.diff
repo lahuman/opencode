@@ -420,7 +420,7 @@ index 06a7a559d..6ba26962d 100644
  test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
    await page.goto(fixture("error-enterprise"))
  
-   const guide = page.getByRole("button", { name: "Kernexa AI 가이드 열기" })
+   const guide = page.getByRole("button", { name: "SFMI AI 가이드 열기" })
    await expect(guide).toBeVisible()
    await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
    await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
@@ -905,7 +905,7 @@ index 80e6fd564..3cb8282f7 100644
 +        return this.providerCatalog()
        },
        async readGuide() {
-         return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
+         return { version: "sfmi-1", markdown: GUIDE_MARKDOWN }
        },
        async readiness() {
          return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }

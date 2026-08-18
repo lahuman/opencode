@@ -1,15 +1,15 @@
-# Kernexa Enterprise Help Design
+# SFMI Enterprise Help Design
 
 ## Decision Summary
 
-The enterprise desktop edition will replace the generic English Tabs promotion with Korean Kernexa onboarding content. Public OpenCode editions retain the existing Tabs promotion unchanged.
+The enterprise desktop edition will replace the generic English Tabs promotion with Korean SFMI onboarding content. Public OpenCode editions retain the existing Tabs promotion unchanged.
 
-The enterprise help guide will use the Kernexa brand consistently:
+The enterprise help guide will use the SFMI brand consistently:
 
-- Help label and command: `Kernexa AI 가이드`
-- Dialog title: `Kernexa AI 가이드`
-- Version label: `버전 kernexa-1`
-- Guide version identifier: `kernexa-1`
+- Help label and command: `SFMI AI 가이드`
+- Dialog title: `SFMI AI 가이드`
+- Version label: `버전 sfmi-1`
+- Guide version identifier: `sfmi-1`
 
 ## Scope
 
@@ -29,9 +29,9 @@ Ordinary OpenCode web and desktop editions continue to show the existing English
 
 ### Compact card
 
-- Accessible label: `Kernexa 시작 안내. 코드 분석부터 검증까지 AI 코딩 작업 흐름을 확인합니다.`
-- Dismiss label: `Kernexa 시작 안내 닫기`
-- Title: `Kernexa 시작하기`
+- Accessible label: `SFMI 시작 안내. 코드 분석부터 검증까지 AI 코딩 작업 흐름을 확인합니다.`
+- Dismiss label: `SFMI 시작 안내 닫기`
+- Title: `SFMI 시작하기`
 - Description: `코드 분석부터 구현과 검증까지 한곳에서 진행하세요.`
 
 The compact card keeps the existing size and positioning. It reuses a bundled local product image instead of relying on a network resource. The public edition continues to use the existing Tabs video.
@@ -40,7 +40,7 @@ The compact card keeps the existing size and positioning. It reuses a bundled lo
 
 - Header: `시작 안내`
 - Close label: `닫기`
-- Title: `Kernexa AI Coding Workspace`
+- Title: `SFMI AI Coding Workspace`
 
 The drawer explains the three product pillars in Korean:
 
@@ -48,13 +48,13 @@ The drawer explains the three product pillars in Korean:
 2. **구현**: 필요한 변경에 집중하고 문제 원인을 체계적으로 해결합니다.
 3. **검증**: 테스트, 타입 검사, 빌드와 변경 내역을 확인한 뒤 결과를 마무리합니다.
 
-It also explains that Kernexa is designed for controlled closed-network environments, uses only configured internal AI services, and provides the detailed operating policy through `Kernexa AI 가이드` in the Help menu.
+It also explains that SFMI is designed for controlled closed-network environments, uses only configured internal AI services, and provides the detailed operating policy through `SFMI AI 가이드` in the Help menu.
 
 Existing bundled Home and Tabs screenshots may be reused where they support the explanation. No new image or video asset is required for this change.
 
 ## Guide Branding and Version
 
-Every active enterprise surface that currently presents `Company AI Guide` will present `Kernexa AI 가이드`, including:
+Every active enterprise surface that currently presents `Company AI Guide` will present `SFMI AI 가이드`, including:
 
 - Floating help button accessible name
 - Command palette entry
@@ -63,9 +63,9 @@ Every active enterprise surface that currently presents `Company AI Guide` will 
 - Error-page recovery button
 - Enterprise browser tests and desktop menu tests
 
-The dialog will render `버전 {guide.version}`. Active enterprise configurations change the guide version identifier from `pilot-1` to `kernexa-1`. Other version identifiers such as defaults or catalog versions are not renamed unless they describe the guide itself.
+The dialog will render `버전 {guide.version}`. Active enterprise configurations change the guide version identifier from `pilot-1` to `sfmi-1`. Other version identifiers such as defaults or catalog versions are not renamed unless they describe the guide itself.
 
-The bundled Markdown guide heading will be `Kernexa AI 사용 가이드`. Its policy body remains substantively unchanged. Because the guide resource and version change, the generated enterprise manifest must be refreshed so its guide hash and `guideVersion` remain internally consistent while preserving the configured model-catalog identity.
+The bundled Markdown guide heading will be `SFMI AI 사용 가이드`. Its policy body remains substantively unchanged. Because the guide resource and version change, the generated enterprise manifest must be refreshed so its guide hash and `guideVersion` remain internally consistent while preserving the configured model-catalog identity.
 
 ## Component Design
 
@@ -73,7 +73,7 @@ The bundled Markdown guide heading will be `Kernexa AI 사용 가이드`. Its po
 
 `TabsInfoPopup` will branch its visible and accessible copy on `platform.enterprise`:
 
-- Enterprise branch: Korean Kernexa onboarding content and local static imagery
+- Enterprise branch: Korean SFMI onboarding content and local static imagery
 - Public branch: existing English Tabs card, video, and drawer content
 
 The existing dismissal state, drawer state, focus behavior, layout, and persistence contract remain unchanged.
@@ -84,7 +84,7 @@ The existing command ID `company.guide.open` and IPC contracts remain unchanged 
 
 ### Configuration and manifest
 
-All active enterprise build examples and executable fixtures will use `OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1`. The ignored, build-generated enterprise manifest will be refreshed from the updated guide resource and version without changing unrelated model, defaults, or catalog identity. Historical dated specifications and plans remain historical and are not rewritten.
+All active enterprise build examples and executable fixtures will use `OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1`. The ignored, build-generated enterprise manifest will be refreshed from the updated guide resource and version without changing unrelated model, defaults, or catalog identity. Historical dated specifications and plans remain historical and are not rewritten.
 
 ## Error Handling and Offline Behavior
 
@@ -94,11 +94,11 @@ No new network access is introduced. The onboarding content and media are bundle
 
 Tests will verify:
 
-- Enterprise onboarding source contains the approved Korean Kernexa copy.
+- Enterprise onboarding source contains the approved Korean SFMI copy.
 - Public onboarding retains `Introducing Tabs` and its existing English content.
-- Enterprise help menu, command, dialog, error action, and accessibility labels use `Kernexa AI 가이드`.
-- The dialog renders the Korean version label and the `kernexa-1` guide version.
-- Active enterprise configuration and generated manifest agree on `kernexa-1`.
+- Enterprise help menu, command, dialog, error action, and accessibility labels use `SFMI AI 가이드`.
+- The dialog renders the Korean version label and the `sfmi-1` guide version.
+- Active enterprise configuration and generated manifest agree on `sfmi-1`.
 - The regenerated manifest validates the updated guide resource hash.
 - Ordinary OpenCode help behavior remains unchanged.
 
@@ -106,10 +106,10 @@ Type checking will run from `packages/app` and `packages/desktop`. Relevant unit
 
 ## Acceptance Criteria
 
-- Kernexa users no longer see English `Introducing Tabs` text in the temporary onboarding card or drawer.
+- SFMI users no longer see English `Introducing Tabs` text in the temporary onboarding card or drawer.
 - The enterprise onboarding content is entirely Korean apart from the product descriptor `AI Coding Workspace` and intentional command/skill identifiers.
 - Public OpenCode still receives the original Tabs onboarding experience.
 - No active enterprise UI displays `Company AI Guide`, `Version`, or the guide version `pilot-1`.
-- Active enterprise UI displays `Kernexa AI 가이드` and `버전 kernexa-1`.
+- Active enterprise UI displays `SFMI AI 가이드` and `버전 sfmi-1`.
 - The bundled guide, manifest, and build configuration use the same guide version and resource hash.
 - No external asset or internet dependency is added.

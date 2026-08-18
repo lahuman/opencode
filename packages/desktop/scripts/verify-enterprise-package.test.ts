@@ -11,7 +11,7 @@ import { writeEnterpriseArchive } from "./package-enterprise-win"
 
 const roots: string[] = []
 const required = [
-  "Kernexa.exe",
+  "SFMI.exe",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -63,7 +63,7 @@ test("accepts a complete portable enterprise tree", async () => {
   const root = await portableFixture()
 
   await expect(verifyEnterprisePackage(root)).resolves.toEqual({
-    executable: "Kernexa.exe",
+    executable: "SFMI.exe",
     defaults: true,
     guide: true,
     models: true,
@@ -78,7 +78,7 @@ test("accepts a complete portable enterprise tree", async () => {
 test("writes a timestamp-free archive accepted by the portable verifier", async () => {
   const root = await portableFixture()
   const output = await temporaryDirectory("enterprise-portable-output-")
-  const archive = path.join(output, "kernexa-1.17.18-win-x64.zip")
+  const archive = path.join(output, "sfmi-1.17.18-win-x64.zip")
 
   await writeEnterpriseArchive({ archive, root })
 
@@ -106,8 +106,8 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
 test("rejects a required payload symlinked outside the package root", async () => {
   const root = await portableFixture()
   const outside = await temporaryDirectory("enterprise-portable-outside-")
-  const executable = path.join(root, "Kernexa.exe")
-  const target = path.join(outside, "Kernexa.exe")
+  const executable = path.join(root, "SFMI.exe")
+  const target = path.join(outside, "SFMI.exe")
   await Bun.write(target, "portable executable")
   await rm(executable)
   await symlink(target, executable, "file")
@@ -205,7 +205,7 @@ test("rejects an empty app archive", async () => {
 
 test("rejects an empty portable executable", async () => {
   const root = await portableFixture()
-  await Bun.write(path.join(root, "Kernexa.exe"), "")
+  await Bun.write(path.join(root, "SFMI.exe"), "")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package executable")
 })
@@ -328,7 +328,7 @@ test("rejects a local header name that differs from its central directory name",
 
 test("rejects a local header general-purpose flag mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
     view.setUint16(offset + 6, view.getUint16(offset + 6, true) ^ 0x800, true)
   })
 
@@ -337,7 +337,7 @@ test("rejects a local header general-purpose flag mismatch", async () => {
 
 test("rejects a local header compression method mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
     view.setUint16(offset + 8, view.getUint16(offset + 8, true) === 0 ? 8 : 0, true)
   })
 
@@ -346,7 +346,7 @@ test("rejects a local header compression method mismatch", async () => {
 
 test("rejects a local header DOS timestamp mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "Kernexa.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
     view.setUint16(offset + 10, view.getUint16(offset + 10, true) ^ 1, true)
     view.setUint16(offset + 12, view.getUint16(offset + 12, true) ^ 1, true)
   })
@@ -402,15 +402,15 @@ test("rejects an unexplained gap before the central directory", async () => {
 
 test.each([
   "resources\\app.asar",
-  "resources/../Kernexa.exe",
-  "/Kernexa.exe",
+  "resources/../SFMI.exe",
+  "/SFMI.exe",
   "C:..\\outside",
   "C:../outside",
   "C:/outside",
   "\\\\server\\share\\outside",
   "\\\\?\\C:\\outside",
-  "Kernexa Setup.exe",
-  "Uninstall Kernexa.exe",
+  "SFMI Setup.exe",
+  "Uninstall SFMI.exe",
   "Setup.EXE",
 ])("rejects unsafe archive entry %s", async (entry) => {
   const archive = await archiveFixture([...required, entry])
@@ -624,7 +624,7 @@ test("rejects required archive contents that differ from the verified unpacked p
 })
 
 test.each([
-  ["an empty executable", "Kernexa.exe", "", "Portable package executable"],
+  ["an empty executable", "SFMI.exe", "", "Portable package executable"],
   [
     "a different guide",
     "resources/enterprise/company-guide.md",
@@ -654,7 +654,7 @@ async function writePortableFixture(root: string) {
     ),
   ])
   await Promise.all([
-    Bun.write(path.join(root, "Kernexa.exe"), "portable executable"),
+    Bun.write(path.join(root, "SFMI.exe"), "portable executable"),
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
     Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), enterpriseDefaults),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
@@ -695,7 +695,7 @@ async function archiveFixture(
       { msDosCompatible: true, ...options[entry] },
     )
   }
-  const archive = path.join(root, "kernexa-1.17.18-win-x64.zip")
+  const archive = path.join(root, "sfmi-1.17.18-win-x64.zip")
   await Bun.write(archive, await writer.close())
   return archive
 }
@@ -927,7 +927,7 @@ async function rewriteArchiveExtraFieldType(archive: string, name: string, sourc
 }
 
 const portableContents: Record<string, string> = {
-  "Kernexa.exe": "portable executable",
+  "SFMI.exe": "portable executable",
   "resources/app.asar": "application archive",
   "resources/enterprise/opencode.jsonc": enterpriseDefaults,
   "resources/enterprise/company-guide.md": enterpriseGuide,
@@ -954,7 +954,7 @@ function enterpriseManifest() {
       schemaVersion: 3,
       appVersion: "1.17.18",
       defaultsVersion: "pilot-1",
-      guideVersion: "kernexa-1",
+      guideVersion: "sfmi-1",
       catalogVersion: "pilot-1",
       defaultModelID: "company-code",
       modelIDs: identity.modelIDs,

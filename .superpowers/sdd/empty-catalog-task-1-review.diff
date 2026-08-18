@@ -30,7 +30,7 @@ index 5065dbda6..52711221a 100644
    ]),
    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
  }
  
@@ -50,7 +50,7 @@ index 5065dbda6..52711221a 100644
          },
          renderer: {
            "import.meta.env.OPENCODE_ENTERPRISE_DEFAULTS_VERSION": JSON.stringify("pilot-1"),
-           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("kernexa-1"),
+           "import.meta.env.OPENCODE_ENTERPRISE_GUIDE_VERSION": JSON.stringify("sfmi-1"),
            "import.meta.env.OPENCODE_ENTERPRISE_CATALOG_VERSION": JSON.stringify("catalog-1"),
          },
        },
@@ -102,7 +102,7 @@ index fb18af93f..82a306df0 100644
    OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
  }
@@ -116,7 +116,7 @@ index fb18af93f..82a306df0 100644
    ]),
 -  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
  }
@@ -192,7 +192,7 @@ index fb18af93f..82a306df0 100644
      ],
      defaultModelID: "code",
      defaultsVersion: "pilot-1",
-     guideVersion: "kernexa-1",
+     guideVersion: "sfmi-1",
      catalogVersion: "catalog-1",
 diff --git a/packages/desktop/scripts/enterprise-build.ts b/packages/desktop/scripts/enterprise-build.ts
 index 32da36c9b..6784cf459 100644
@@ -323,7 +323,7 @@ index 036f29381..19c936996 100644
      OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
      OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-     OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+     OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
      OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
      OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
    })
@@ -408,14 +408,14 @@ index 036f29381..19c936996 100644
        ]),
        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
 @@ -53,21 +122,20 @@ describe("enterprise profile", () => {
    test("rejects invalid multi-model catalogs", () => {
      const env = {
        OPENCODE_ENTERPRISE: "1",
        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-       OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+       OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
      }
  

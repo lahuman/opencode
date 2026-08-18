@@ -160,13 +160,13 @@ function getConfig() {
 
 function getEnterpriseConfig() {
   validateEnterpriseBuild(process.env)
-  const appId = "com.company.kernexa"
+  const appId = "com.company.sfmi"
   const base = getBase(appId)
   return {
     ...base,
     appId,
-    productName: "Kernexa",
-    artifactName: "kernexa-${version}-${os}-${arch}.${ext}",
+    productName: "SFMI",
+    artifactName: "sfmi-${version}-${os}-${arch}.${ext}",
     protocols: undefined,
     publish: undefined,
     nsis: undefined,

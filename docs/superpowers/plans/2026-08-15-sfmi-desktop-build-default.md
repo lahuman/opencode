@@ -1,18 +1,18 @@
-# Kernexa Desktop Build Default Implementation Plan
+# SFMI Desktop Build Default Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a successful Kernexa Desktop `Build now` approval switch the current task to Build and persist Build as the default for every subsequently created Desktop task across projects and app restarts.
+**Goal:** Make a successful SFMI Desktop `Build now` approval switch the current task to Build and persist Build as the default for every subsequently created Desktop task across projects and app restarts.
 
 **Architecture:** Keep the change inside `packages/app`. A small pure classifier recognizes only Plan-exit Build approvals, `LocalProvider` owns a Desktop-global agent preference through the existing persistence layer, and the question mutation updates current and global state only after a successful reply. Existing session state remains higher priority than the global default.
 
 **Tech Stack:** TypeScript, SolidJS, TanStack Solid Query, existing `Persist` storage abstraction, Bun test, Playwright.
 
-**Design:** `docs/superpowers/specs/2026-08-15-kernexa-desktop-build-default-design.md`
+**Design:** `docs/superpowers/specs/2026-08-15-sfmi-desktop-build-default-design.md`
 
 ## Global Constraints
 
-- Kernexa Desktop behavior is the priority; do not change TUI or other clients.
+- SFMI Desktop behavior is the priority; do not change TUI or other clients.
 - A successful `Build now` reply changes both the current task and the Desktop-global new-task default.
 - Existing per-task agent selections take precedence over the global default.
 - Failed replies, `Keep planning`, dismissal, custom answers, ordinary agent selection, and unrelated questions must not change the global default.
@@ -187,7 +187,7 @@ git commit -m "fix(app): classify plan build approvals"
 
 ---
 
-### Task 2: Persist Build as the Kernexa Desktop default
+### Task 2: Persist Build as the SFMI Desktop default
 
 **Files:**
 - Modify: `packages/app/src/context/local.tsx:85-109,190-223`
@@ -297,7 +297,7 @@ async function openNewTask(page: Page) {
 Add these tests after the existing durable approval regression:
 
 ```ts
-test("persists Build as the Kernexa Desktop default after Plan approval", async ({ page }) => {
+test("persists Build as the SFMI Desktop default after Plan approval", async ({ page }) => {
   const requestID = "question-plan-default"
   let answered = false
   await seedAgentDefault(page, "plan")

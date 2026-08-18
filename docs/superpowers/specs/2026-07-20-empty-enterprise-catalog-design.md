@@ -2,7 +2,7 @@
 
 ## Goal
 
-Allow a Kernexa Enterprise desktop build to package zero initial providers and models. New users start in the existing empty-composer experience and register providers and models through Settings. An existing Windows user-global provider catalog remains authoritative and is never cleared merely because the packaged catalog is empty.
+Allow a SFMI Enterprise desktop build to package zero initial providers and models. New users start in the existing empty-composer experience and register providers and models through Settings. An existing Windows user-global provider catalog remains authoritative and is never cleared merely because the packaged catalog is empty.
 
 ## Environment Contract
 
@@ -14,7 +14,7 @@ OPENCODE_ENTERPRISE_MODELS=[]
 OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
 OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
 OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
-OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
+OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 ```
 

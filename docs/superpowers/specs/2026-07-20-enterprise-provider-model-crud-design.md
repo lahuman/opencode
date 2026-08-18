@@ -2,11 +2,11 @@
 
 ## Goal
 
-Allow Kernexa Enterprise users to create, inspect, update, and delete user-global OpenAI-compatible providers and models from the settings UI. Packaged Company LLM entries become editable seed data rather than immutable policy, and users may register any validated HTTP(S) endpoint.
+Allow SFMI Enterprise users to create, inspect, update, and delete user-global OpenAI-compatible providers and models from the settings UI. Packaged Company LLM entries become editable seed data rather than immutable policy, and users may register any validated HTTP(S) endpoint.
 
 ## Decisions
 
-- Apply the feature only to Kernexa Enterprise.
+- Apply the feature only to SFMI Enterprise.
 - Support OpenAI-compatible APIs through `@ai-sdk/openai-compatible` only.
 - Permit arbitrary absolute HTTP(S) provider URLs while rejecting embedded credentials, queries, and fragments and continuing to reject provider redirects.
 - Store the catalog per Windows user and share it across all projects.

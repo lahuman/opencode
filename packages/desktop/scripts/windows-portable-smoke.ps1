@@ -445,8 +445,8 @@ function Expand-PortableArchive {
 
   New-Item -ItemType Directory -Path $Destination | Out-Null
   Expand-Archive -LiteralPath $Archive -DestinationPath $Destination
-  $executables = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "Kernexa.exe")
-  if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one Kernexa.exe" }
+  $executables = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "SFMI.exe")
+  if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one SFMI.exe" }
   if ($executables[0].Length -eq 0) { throw "Portable executable is empty" }
   foreach ($resource in @(
     "resources/app.asar",
@@ -569,7 +569,7 @@ $existingAcceptance = [object[]]$metadata.windowsAcceptance
 
 $allowedAddresses = Get-AllowedAddresses -TargetHost $AllowedHost
 $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-smoke-$([Guid]::NewGuid().ToString('N'))"
-$appData = Join-Path $env:LOCALAPPDATA "com.company.kernexa"
+$appData = Join-Path $env:LOCALAPPDATA "com.company.sfmi"
 $projectSentinel = Join-Path $SentinelProject "keep.txt"
 $appDataSentinel = Join-Path $appData "portable-smoke-sentinel.txt"
 

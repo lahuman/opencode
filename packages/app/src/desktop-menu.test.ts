@@ -14,7 +14,7 @@ describe("desktop menu", () => {
   test("enterprise help menu contains only local guide and log export", () => {
     const help = desktopMenuForEdition("enterprise").find((menu) => menu.id === "help")
     expect(help?.items?.filter((item) => item.type === "item").map((item) => item.labelKey ?? item.label)).toEqual([
-      "Kernexa AI 가이드",
+      "SFMI AI 가이드",
       "desktop.menu.exportLogs",
     ])
     expect(help?.items?.some((item) => item.type === "item" && "href" in item && item.href)).toBe(false)

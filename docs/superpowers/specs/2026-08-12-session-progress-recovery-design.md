@@ -2,7 +2,7 @@
 
 ## Context
 
-Kernexa can finish a model run in the sidecar while the App remains on `Syncing status` and does not show the final response. The attached Plan-mode Gemma4 log demonstrates this split: both provider turns returned and the prompt loop logged `exiting loop`, but the UI remained busy.
+SFMI can finish a model run in the sidecar while the App remains on `Syncing status` and does not show the final response. The attached Plan-mode Gemma4 log demonstrates this split: both provider turns returned and the prompt loop logged `exiting loop`, but the UI remained busy.
 
 The App currently depends on the global event stream for message parts and the terminal session status. Its connection starts as `connecting` and becomes `connected` only after receiving `server.connected`. An open stream that never yields that event can remain `connecting` indefinitely. The stale-session watchdog does not run unless the stream is already connected, so it cannot repair the state that most needs repair.
 

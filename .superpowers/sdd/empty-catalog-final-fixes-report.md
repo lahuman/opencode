@@ -13,7 +13,7 @@ Final-fix tracked files:
 - `packages/desktop/scripts/enterprise-release.test.ts`
 - `packages/desktop/scripts/windows-portable-smoke.ps1`
 - `packages/desktop/scripts/windows-portable-smoke.test.ts`
-- `docs/enterprise/windows-portable-kernexa-release.md`
+- `docs/enterprise/windows-portable-sfmi-release.md`
 - `packages/desktop/.env.enterprise.example`
 
 Ignored local/build files aligned or regenerated:
@@ -48,13 +48,13 @@ Result: exit 0, 37 pass, 0 fail, 223 assertions. This includes the valid empty p
 
 Both `packages/desktop/.env.enterprise.example` and ignored `packages/desktop/.env` now contain:
 
-    OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
+    OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 
 Required empty-profile build from `packages/desktop`:
 
     $env:OPENCODE_CHANNEL='dev'; bun.cmd run build
 
-Result: exit 0. The regenerated ignored manifest contains `guideVersion: "kernexa-1"`, `defaultModelID: ""`, `modelIDs: []`, `allowedOrigins: []`, and `modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"`. The generated `models.json` remains `{}`.
+Result: exit 0. The regenerated ignored manifest contains `guideVersion: "sfmi-1"`, `defaultModelID: ""`, `modelIDs: []`, `allowedOrigins: []`, and `modelCatalogSHA256: "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"`. The generated `models.json` remains `{}`.
 
 ## Acceptance Verification
 
@@ -62,7 +62,7 @@ Exact previously red seven-file suite, unfiltered, from `packages/desktop`:
 
     bun.cmd test ./src/enterprise.test.ts ./scripts/enterprise-build.test.ts ./electron.vite.config.test.ts ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./src/main/enterprise-providers.test.ts ./src/main/enterprise-provider-runtime.test.ts
 
-Result: exit 0, 118 pass, 0 fail, 353 assertions. The generated Kernexa guide/manifest alignment and guide-content hash guard passed unchanged.
+Result: exit 0, 118 pass, 0 fail, 353 assertions. The generated SFMI guide/manifest alignment and guide-content hash guard passed unchanged.
 
 Desktop typecheck:
 
@@ -82,8 +82,8 @@ An additional combined run included the entire unrelated `scripts/verify-enterpr
 
 ## Final Minor Drift Alignment
 
-The empty-catalog design and implementation plan now use the user-approved `kernexa-1` guide version everywhere they describe the default empty profile. No production code or guide content changed.
+The empty-catalog design and implementation plan now use the user-approved `sfmi-1` guide version everywhere they describe the default empty profile. No production code or guide content changed.
 
 The ignored local environment is exactly eight lines: `LOCAL_TEST=1` followed by the seven empty Enterprise profile lines. The tracked `.env.enterprise.example` is exactly those seven profile lines and omits `LOCAL_TEST`.
 
-Read-only verification from the repository root compared both files line-for-line with explicit expected arrays, rejected any remaining `pilot-1` in the design/plan, counted the approved references, and then ran diff hygiene. Result: exit 0; local env 8 exact lines, tracked example 7 exact lines, 4 `kernexa-1` design/plan references, no `pilot-1`, and `git diff --check` clean.
+Read-only verification from the repository root compared both files line-for-line with explicit expected arrays, rejected any remaining `pilot-1` in the design/plan, counted the approved references, and then ran diff hygiene. Result: exit 0; local env 8 exact lines, tracked example 7 exact lines, 4 `sfmi-1` design/plan references, no `pilot-1`, and `git diff --check` clean.

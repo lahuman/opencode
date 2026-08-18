@@ -32,7 +32,7 @@ export function createCompanyGuideCommand(input: {
   if (!input.enterprise) return
   return {
     id: "company.guide.open",
-    title: "Kernexa AI 가이드",
+    title: "SFMI AI 가이드",
     category: input.category,
     onSelect: async (_source, origin) => {
       const guide = await input.enterprise?.readGuide().catch(() => undefined)
@@ -63,7 +63,7 @@ export function DialogCompanyGuide(props: CompanyGuide) {
       class="h-full min-h-0 overflow-hidden"
       title={
         <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span class="text-16-medium text-text-strong">Kernexa AI 가이드</span>
+          <span class="text-16-medium text-text-strong">SFMI AI 가이드</span>
           <span class="max-w-full break-words text-11-regular text-text-weak">버전 {props.version}</span>
         </div>
       }
@@ -74,7 +74,7 @@ export function DialogCompanyGuide(props: CompanyGuide) {
         class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 pb-5"
         tabIndex={0}
         role="region"
-        aria-label="Kernexa AI 가이드 내용"
+        aria-label="SFMI AI 가이드 내용"
         autofocus
       >
         <Markdown text={props.markdown} class="min-w-0 text-14-regular [overflow-wrap:anywhere]" />

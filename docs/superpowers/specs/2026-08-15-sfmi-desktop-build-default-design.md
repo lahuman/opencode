@@ -1,14 +1,14 @@
-# Kernexa Desktop Build Default Design
+# SFMI Desktop Build Default Design
 
 ## Context
 
-Kernexa Desktop presents a `Build now` question when a Plan agent finishes a plan. Replying to that question resumes server execution with a synthetic Build user message, but the question reply itself does not update the Desktop composer's selected agent. The composer currently relies on later `message.updated` or `message.part.updated` events to call `local.agent.set("build")`. If those events are missed or the session is restored through REST, the persisted session selection can remain Plan and the next prompt can enter Plan again.
+SFMI Desktop presents a `Build now` question when a Plan agent finishes a plan. Replying to that question resumes server execution with a synthetic Build user message, but the question reply itself does not update the Desktop composer's selected agent. The composer currently relies on later `message.updated` or `message.part.updated` events to call `local.agent.set("build")`. If those events are missed or the session is restored through REST, the persisted session selection can remain Plan and the next prompt can enter Plan again.
 
 The Desktop also has no persisted global agent preference. `LocalProvider` keeps an in-memory `current` agent and persists model-selection state by session inside one workspace. A new draft mounts a new provider, so it falls back to the server-provided agent order. App restart also loses the in-memory choice.
 
 ## Goal
 
-When a user successfully submits `Build now` from Kernexa Desktop:
+When a user successfully submits `Build now` from SFMI Desktop:
 
 - switch the current task's composer to Build immediately;
 - persist Build as the default agent for new tasks in every project and workspace in this Desktop installation;
@@ -40,7 +40,7 @@ The fix therefore belongs at the successful Desktop approval boundary and in the
 
 ### Update the server global configuration
 
-The legacy server exposes `default_agent`, but this is rejected. Desktop creates sessions and prompts with an explicit local agent, V2 does not consistently hydrate the legacy global configuration into Desktop state, and changing server configuration would affect clients outside the requested Kernexa Desktop scope.
+The legacy server exposes `default_agent`, but this is rejected. Desktop creates sessions and prompts with an explicit local agent, V2 does not consistently hydrate the legacy global configuration into Desktop state, and changing server configuration would affect clients outside the requested SFMI Desktop scope.
 
 ### Keep only an in-memory default
 
@@ -56,7 +56,7 @@ The change stays in `packages/app` and has two focused responsibilities.
 
 ### Global default ownership
 
-`LocalProvider` owns a small persisted preference containing only the default agent name. It uses `Persist.serverGlobal(serverSDK().scope, "agent-default")`. For Kernexa's local sidecar scope this resolves to the Desktop-global store, which is backed by the existing Electron persistence adapter. It is intentionally separate from the workspace-scoped `model-selection` payload.
+`LocalProvider` owns a small persisted preference containing only the default agent name. It uses `Persist.serverGlobal(serverSDK().scope, "agent-default")`. For SFMI's local sidecar scope this resolves to the Desktop-global store, which is backed by the existing Electron persistence adapter. It is intentionally separate from the workspace-scoped `model-selection` payload.
 
 The agent selection precedence is:
 
@@ -120,7 +120,7 @@ Run the focused App tests from `packages/app`, followed by the package typecheck
 
 ## Acceptance Criteria
 
-- A successful Kernexa Desktop `Build now` submission immediately displays Build in the current composer.
+- A successful SFMI Desktop `Build now` submission immediately displays Build in the current composer.
 - The next prompt cannot re-enter Plan merely because a live transition event was missed.
 - New tasks across Desktop projects and workspaces default to Build.
 - The new-task default survives Desktop restart.

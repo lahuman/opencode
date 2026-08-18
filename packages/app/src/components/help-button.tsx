@@ -10,7 +10,7 @@ import introducingTabsVideo from "@/assets/help/introducing-tabs.mp4"
 import { Persist, persisted } from "@/utils/persist"
 import homeImage from "@/assets/help/home.png"
 import tabsImage from "@/assets/help/tabs.png"
-import { KERNEXA_ONBOARDING, onboardingContent } from "./help-content"
+import { SFMI_ONBOARDING, onboardingContent } from "./help-content"
 
 // TODO: wire to changelog / seen-state when available
 const showPopover = () => true
@@ -153,9 +153,9 @@ export function TabsInfoPopup() {
                 </>
               }
             >
-              <p>{KERNEXA_ONBOARDING.drawer.intro}</p>
+              <p>{SFMI_ONBOARDING.drawer.intro}</p>
               <img src={homeImage} alt="" class="aspect-video w-full rounded-[6px] object-cover" />
-              <For each={KERNEXA_ONBOARDING.drawer.sections}>
+              <For each={SFMI_ONBOARDING.drawer.sections}>
                 {(section) => (
                   <section class="flex flex-col gap-1">
                     <h3 class="font-[610]">{section.title}</h3>
@@ -164,8 +164,8 @@ export function TabsInfoPopup() {
                 )}
               </For>
               <img src={tabsImage} alt="" class="aspect-video w-full rounded-[6px] object-cover" />
-              <p>{KERNEXA_ONBOARDING.drawer.offline}</p>
-              <p>{KERNEXA_ONBOARDING.drawer.guide}</p>
+              <p>{SFMI_ONBOARDING.drawer.offline}</p>
+              <p>{SFMI_ONBOARDING.drawer.guide}</p>
             </Show>
           </div>
         </div>

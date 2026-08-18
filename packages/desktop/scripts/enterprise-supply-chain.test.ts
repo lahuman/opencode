@@ -13,7 +13,7 @@ afterEach(async () => {
 test("writes deterministic CycloneDX and third-party license artifacts from the locked dependency set", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "enterprise-supply-chain-"))
   roots.push(root)
-  const archive = path.join(root, "kernexa-1.0.0-win-x64.zip")
+  const archive = path.join(root, "sfmi-1.0.0-win-x64.zip")
   const modules = path.join(root, "node_modules")
   await mkdir(path.join(modules, "alpha"), { recursive: true })
   await mkdir(path.join(root, "ripgrep"), { recursive: true })
@@ -46,7 +46,7 @@ test("writes deterministic CycloneDX and third-party license artifacts from the 
     bomFormat: "CycloneDX",
     specVersion: "1.6",
     version: 1,
-    metadata: { timestamp: "2026-07-16T00:00:00.000Z", component: { name: "kernexa", version: "1.0.0" } },
+    metadata: { timestamp: "2026-07-16T00:00:00.000Z", component: { name: "sfmi", version: "1.0.0" } },
   })
   expect(sbom.components.map((component: { name: string; version: string }) => [component.name, component.version])).toEqual([
     ["alpha", "1.2.3"],
@@ -63,7 +63,7 @@ test("writes deterministic CycloneDX and third-party license artifacts from the 
     ],
   })
   const licenses = await Bun.file(result.licenses).text()
-  expect(licenses).toStartWith("Kernexa third-party licenses\n")
+  expect(licenses).toStartWith("SFMI third-party licenses\n")
   expect(licenses).toContain("alpha@1.2.3\nDeclared license: MIT\nAlpha license text")
   expect(licenses).toContain("beta@2.0.0\nDeclared license: NOASSERTION")
   expect(licenses).toContain("ripgrep@15.1.0\nOfficial source: https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/")

@@ -592,7 +592,7 @@ index 06a7a559d..b3418450f 100644
  test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
    await page.goto(fixture("error-enterprise"))
  
-   const guide = page.getByRole("button", { name: "Kernexa AI 가이드 열기" })
+   const guide = page.getByRole("button", { name: "SFMI AI 가이드 열기" })
    await expect(guide).toBeVisible()
    await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
    await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
@@ -1244,7 +1244,7 @@ index 80e6fd564..372d1ee3f 100644
 +        return this.providerCatalog()
        },
        async readGuide() {
-         return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
+         return { version: "sfmi-1", markdown: GUIDE_MARKDOWN }
        },
        async readiness() {
          return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }
@@ -1544,7 +1544,7 @@ index c304531d6..90366d318 100644
 -        setCredentials: async () => ({ restartRequired: false }),
 -        clearCredentials: async () => ({ restartRequired: false }),
 +        ...providerAPI,
-         readGuide: async () => ({ version: "kernexa-1", markdown: "# Kernexa AI 사용 가이드" }),
+         readGuide: async () => ({ version: "sfmi-1", markdown: "# SFMI AI 사용 가이드" }),
          readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
          stateBackups: async () => [],
          restoreStateBackup: async () => ({ restartRequired: false }),
@@ -1556,8 +1556,8 @@ index c304531d6..90366d318 100644
        open: (guide) => opened.push(guide),
 @@ -39,24 +49,21 @@ describe("company guide command", () => {
      expect(command?.id).toBe("company.guide.open")
-     expect(command?.title).toBe("Kernexa AI 가이드")
-     expect(opened).toEqual([{ version: "kernexa-1", markdown: "# Kernexa AI 사용 가이드" }])
+     expect(command?.title).toBe("SFMI AI 가이드")
+     expect(opened).toEqual([{ version: "sfmi-1", markdown: "# SFMI AI 사용 가이드" }])
    })
  
    test("reports read failures without opening a dialog", async () => {
@@ -5449,7 +5449,7 @@ index 1ce166b2c..98f417b26 100644
 +            setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +            replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +            clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-             readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+             readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
            },
          }
        : {}),
@@ -5866,9 +5866,9 @@ index 9babbb1fd..7cab154e8 100644
      child.exited,
      new Response(child.stdout).text(),
 @@ -71,29 +78,111 @@ test("real enterprise main entrypoint applies isolated identity without claiming
-       appId: "com.company.kernexa",
-       name: "Kernexa",
-       userData: join(tmpdir(), "opencode-main-index-app-data", "com.company.kernexa"),
+       appId: "com.company.sfmi",
+       name: "SFMI",
+       userData: join(tmpdir(), "opencode-main-index-app-data", "com.company.sfmi"),
      },
      protocolClients: [],
    })
@@ -7213,7 +7213,7 @@ index da1c8f5a0..3c031ead7 100644
    OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
    OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-   OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+   OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
    OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
    OPENCODE_PORT: "4096",
  })
@@ -7239,7 +7239,7 @@ index da1c8f5a0..3c031ead7 100644
  process.env.LOCALAPPDATA = appData
 +const userData = join(
 +  appData,
-+  enterprise ? "com.company.kernexa" : mode === "ordinary-unpackaged" ? "ai.opencode.desktop.dev" : "ai.opencode.desktop",
++  enterprise ? "com.company.sfmi" : mode === "ordinary-unpackaged" ? "ai.opencode.desktop.dev" : "ai.opencode.desktop",
 +)
 +rmSync(userData, {
 +  recursive: true,
@@ -7443,7 +7443,7 @@ index 5705586f7..21f2e8faa 100644
 +    setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +    replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +    clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-     readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+     readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
 -    setCredentials: async () => ({ restartRequired: true as const }),
    },
    getPinchZoomEnabled: async () => false,
@@ -7484,7 +7484,7 @@ index 813e42909..52e5f4da3 100644
 +    setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +    replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
 +    clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-     readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+     readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
    },
    getPinchZoomEnabled: async () => false,
    onPinchZoomEnabledChanged() {},

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 
 import { generateEnterpriseManifest, prepareEnterpriseManifest } from "./enterprise-manifest"
 
-test("keeps the generated Kernexa guide and manifest version aligned", async () => {
+test("keeps the generated SFMI guide and manifest version aligned", async () => {
   const root = resolve(import.meta.dir, "..")
   const guide = Bun.file(join(root, "resources/enterprise/company-guide.md"))
   const manifest = await Bun.file(join(root, "resources/enterprise/enterprise-manifest.json")).json<{
@@ -13,8 +13,8 @@ test("keeps the generated Kernexa guide and manifest version aligned", async () 
     resources: Record<string, string>
   }>()
 
-  expect(manifest.guideVersion).toBe("kernexa-1")
-  expect(await guide.text()).toStartWith("# Kernexa AI 사용 가이드\n")
+  expect(manifest.guideVersion).toBe("sfmi-1")
+  expect(await guide.text()).toStartWith("# SFMI AI 사용 가이드\n")
   expect(manifest.resources["company-guide.md"]).toBe(
     new Bun.CryptoHasher("sha256").update(await guide.arrayBuffer()).digest("hex"),
   )

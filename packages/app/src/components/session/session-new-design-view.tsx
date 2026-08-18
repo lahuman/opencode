@@ -11,7 +11,7 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
       <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
         <div class={NEW_SESSION_CONTENT_WIDTH}>
           {platform.enterprise ? (
-            <KernexaWordmark class="h-auto w-full text-v2-background-bg-inverse" />
+            <SFMIWordmark class="h-auto w-full text-v2-background-bg-inverse" />
           ) : (
             <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />
           )}
@@ -22,13 +22,13 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
   )
 }
 
-function KernexaWordmark(props: Pick<ComponentProps<"svg">, "class">) {
+function SFMIWordmark(props: Pick<ComponentProps<"svg">, "class">) {
   const mask = createUniqueId()
   const maskGradient = createUniqueId()
 
   return (
     <svg
-      data-component="kernexa-wordmark-v2"
+      data-component="sfmi-wordmark-v2"
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 720 129"
       fill="none"

@@ -59,7 +59,7 @@ Result both times: exit 1, `134 pass`, `3 fail`, `166 expect() calls`. Every Tas
 The same four-file suite, filtering only those three unrelated failures, passed cleanly:
 
 ```powershell
-bun.cmd test ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./scripts/enterprise-release.test.ts ./scripts/verify-enterprise-package.test.ts -t "^(?!keeps the generated Kernexa guide and manifest version aligned$)(?!rejects a required payload symlinked outside the package root$)(?!rejects an extra payload symlink in the unpacked tree$).*"
+bun.cmd test ./src/main/enterprise-preflight.test.ts ./scripts/enterprise-manifest.test.ts ./scripts/enterprise-release.test.ts ./scripts/verify-enterprise-package.test.ts -t "^(?!keeps the generated SFMI guide and manifest version aligned$)(?!rejects a required payload symlinked outside the package root$)(?!rejects an extra payload symlink in the unpacked tree$).*"
 ```
 
 Result: exit 0, `134 pass`, `3 filtered out`, `0 fail`, `165 expect() calls`.
@@ -91,6 +91,6 @@ Result: exit 0 with no output.
 
 ## Concerns
 
-- The checked-in `resources/enterprise/enterprise-manifest.json` has `guideVersion: "pilot-1"`, while the unchanged `keeps the generated Kernexa guide and manifest version aligned` test expects `kernexa-1`. Neither resource is modified in the worktree, so this is an existing checkout inconsistency outside Task 2.
+- The checked-in `resources/enterprise/enterprise-manifest.json` has `guideVersion: "pilot-1"`, while the unchanged `keeps the generated SFMI guide and manifest version aligned` test expects `sfmi-1`. Neither resource is modified in the worktree, so this is an existing checkout inconsistency outside Task 2.
 - `rejects a required payload symlinked outside the package root` and `rejects an extra payload symlink in the unpacked tree` fail during test setup with Windows `EPERM` from `symlink(...)`. Retrying outside the sandbox produced the same result. Their implementation assertions are not reached.
 - No out-of-scope resource or package-integrity test file was changed to mask these failures.

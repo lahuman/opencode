@@ -47,7 +47,7 @@ const DIAGNOSTIC_FAILURE = {
   failure: { kind: "connection", message: "Install the Company TLS CA certificate and try again." },
 } as const
 const GUIDE_MARKDOWN = [
-  "# Kernexa AI 사용 가이드",
+  "# SFMI AI 사용 가이드",
   "",
   "Use only company-approved data and systems.",
   "",
@@ -382,7 +382,7 @@ function createHarness(scenario?: string | null) {
     windowID: "company-llm-enterprise-fixture",
     storage,
     fetch,
-    openLink(url) {
+    openExternal(url) {
       setObservations("externalLinks", observations.externalLinks.length, url)
     },
     async restart() {
@@ -392,8 +392,6 @@ function createHarness(scenario?: string | null) {
         inputValue("Secret value"),
       ])
     },
-    back() {},
-    forward() {},
     async notify() {},
     async openDirectoryPickerDialog() {
       return null
@@ -529,7 +527,7 @@ function createHarness(scenario?: string | null) {
         return this.providerCatalog()
       },
       async readGuide() {
-        return { version: "kernexa-1", markdown: GUIDE_MARKDOWN }
+        return { version: "sfmi-1", markdown: GUIDE_MARKDOWN }
       },
       async readiness() {
         return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }
@@ -931,7 +929,7 @@ function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
   return (
     <DialogTree harness={props.harness}>
       <Show when={props.v2} fallback={<SettingsProviders />}>
-        <SettingsProvidersV2 />
+        <SettingsProvidersV2 directory={() => undefined} />
       </Show>
     </DialogTree>
   )

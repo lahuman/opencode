@@ -65,7 +65,7 @@ export async function writeEnterpriseSupplyChain(input: {
         version: 1,
         metadata: {
           timestamp: input.builtAt.toISOString(),
-          component: { type: "application", name: "kernexa", version: input.appVersion },
+          component: { type: "application", name: "sfmi", version: input.appVersion },
         },
         components: [
           ...notices.map((dependency) => {
@@ -96,7 +96,7 @@ export async function writeEnterpriseSupplyChain(input: {
   )
   await Bun.write(
     licenses,
-    `Kernexa third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
+    `SFMI third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
       .map(
         (dependency) =>
           `${dependency.name}@${dependency.version}\nDeclared license: ${dependency.license}\n${dependency.text || "License text unavailable in the local dependency installation."}`,

@@ -9,7 +9,7 @@ Object.assign(process.env, {
       : "",
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: mode === "enterprise" ? "company-code" : "",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: mode === "enterprise" ? "pilot-1" : "",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: mode === "enterprise" ? "kernexa-1" : "",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: mode === "enterprise" ? "sfmi-1" : "",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: mode === "enterprise" ? "catalog-1" : "",
 })
 
@@ -31,7 +31,7 @@ const api = {
     setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
     replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
     clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-    readGuide: async () => ({ version: "kernexa-1", markdown: "" }),
+    readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
   },
   getPinchZoomEnabled: async () => false,
   onPinchZoomEnabledChanged() {},

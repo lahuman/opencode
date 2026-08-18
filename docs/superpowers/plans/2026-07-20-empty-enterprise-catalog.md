@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Allow a Kernexa Enterprise desktop package to start new users with zero providers and models while preserving every existing Windows user-global catalog.
+**Goal:** Allow a SFMI Enterprise desktop package to start new users with zero providers and models while preserving every existing Windows user-global catalog.
 
 **Architecture:** Treat `OPENCODE_ENTERPRISE_MODELS=[]` plus a blank or omitted default model ID as one valid packaged-profile state. Keep the existing profile and manifest fields stable by representing “no default” as `""`, conditionally validate the model/default pair, and retain catalog read-before-seed behavior so only a missing catalog is initialized empty.
 
@@ -46,7 +46,7 @@ test("accepts an explicit empty Enterprise catalog", () => {
     OPENCODE_ENTERPRISE_MODELS: "[]",
     OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "dev-1",
-    OPENCODE_ENTERPRISE_GUIDE_VERSION: "kernexa-1",
+    OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
     OPENCODE_ENTERPRISE_CATALOG_VERSION: "dev-1",
   })
 
@@ -150,7 +150,7 @@ const emptyProfile = {
   models: [],
   defaultModelID: "",
   defaultsVersion: "dev-1",
-  guideVersion: "kernexa-1",
+  guideVersion: "sfmi-1",
   catalogVersion: "dev-1",
   allowedOrigins: [],
 }
@@ -281,7 +281,7 @@ OPENCODE_ENTERPRISE_MODELS=[]
 OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID=
 OPENCODE_ENTERPRISE_ALLOWED_ORIGINS=
 OPENCODE_ENTERPRISE_DEFAULTS_VERSION=dev-1
-OPENCODE_ENTERPRISE_GUIDE_VERSION=kernexa-1
+OPENCODE_ENTERPRISE_GUIDE_VERSION=sfmi-1
 OPENCODE_ENTERPRISE_CATALOG_VERSION=dev-1
 ```
 

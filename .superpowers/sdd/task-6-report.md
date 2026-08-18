@@ -128,7 +128,7 @@ Working directory: repository root.
 git diff --check origin/dev...HEAD
 ```
 
-- Exit 2 because `docs/superpowers/plans/2026-07-19-kernexa-brand.md:192` has a new blank line at EOF in committed branch history.
+- Exit 2 because `docs/superpowers/plans/2026-07-19-sfmi-brand.md:192` has a new blank line at EOF in committed branch history.
 - That file is clean in the working tree and unrelated to Tasks 1-6, so it was not edited.
 
 ```powershell
@@ -177,6 +177,6 @@ rg -n "enterprise-api-key|enterprise-header-value|project-api-key|project-header
 ## Remaining risks
 
 - The prescribed App browser suite remains red only for the two isolated, previously reported `solid-virtual` assertions. All Enterprise browser targets in that suite pass, and focused Enterprise Playwright passes 19/19.
-- The prescribed branch-relative whitespace check remains red only for the unrelated committed Kernexa plan EOF blank line; the Task 1-6 working-tree diff check passes.
+- The prescribed branch-relative whitespace check remains red only for the unrelated committed SFMI plan EOF blank line; the Task 1-6 working-tree diff check passes.
 - On this Windows environment, an explicit `OPENCODE_CHANNEL=dev` was required for build channel resolution because Bun's child shell could not invoke Git. The actual prebuild and all three application bundle builds passed once the channel was supplied.
 - No commit or push was created.
