@@ -7,8 +7,8 @@ import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
+import { resolveDefaultModel } from "@/hooks/provider-catalog"
 import {
-  parseModelSelection,
   promptModelRecoveryNotice,
   resolveModelCandidate,
   resolveModelRecovery,
@@ -31,7 +31,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const configured = () => {
-    const model = parseModelSelection(sync().data.config.model)
+    const model = resolveDefaultModel(providers.defaultModel(), sync().data.config.model)
     if (!model) return
     if (valid(model)) return model
   }

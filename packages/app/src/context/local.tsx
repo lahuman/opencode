@@ -6,6 +6,7 @@ import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
+import { resolveDefaultModel } from "@/hooks/provider-catalog"
 import { Persist, persisted } from "@/utils/persist"
 import { hasCustomAgent, hasPlanMode, resolveAgent } from "./local-agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
@@ -16,7 +17,6 @@ import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
 import {
   modelRecoveryNoticeOwner,
-  parseModelSelection,
   promptModelRecoveryNotice,
   resolveModelCandidate,
   resolveModelRecovery,
@@ -183,7 +183,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     })
 
     const configuredModel = () => {
-      const model = parseModelSelection(sync().data.config.model)
+      const model = resolveDefaultModel(providers.defaultModel(), sync().data.config.model)
       if (!model) return
       if (validModel(model)) return model
     }
