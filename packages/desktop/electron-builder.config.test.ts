@@ -109,7 +109,7 @@ test("loads a portable unsigned enterprise ZIP configuration", () => {
   expect(result.summary).toMatchObject({
     appId: "com.company.sfmi",
     productName: "CHAI",
-    artifactName: "sfmi-${version}-${os}-${arch}.${ext}",
+    artifactName: "chai-${version}-${os}-${arch}.${ext}",
     winTarget: ["zip"],
     ordinarySignFunction: false,
     standardCSC: true,

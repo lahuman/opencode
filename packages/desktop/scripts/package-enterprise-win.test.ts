@@ -104,14 +104,14 @@ test("runs validation, build, package, verification, git, and release in order",
     writeArchive(input) {
       steps.push("write-zip")
       expect(input).toEqual({
-        archive: path.resolve(import.meta.dir, "../dist/sfmi-1.17.18-win-x64.zip"),
+        archive: path.resolve(import.meta.dir, "../dist/chai-1.17.18-win-x64.zip"),
         root: path.resolve(import.meta.dir, "../dist/win-unpacked"),
       })
       return Promise.resolve()
     },
     verifyArchive(archive, root) {
       steps.push("verify-zip")
-      expect(archive).toBe(path.resolve(import.meta.dir, "../dist/sfmi-1.17.18-win-x64.zip"))
+      expect(archive).toBe(path.resolve(import.meta.dir, "../dist/chai-1.17.18-win-x64.zip"))
       expect(root).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked"))
       return Promise.resolve([])
     },
@@ -130,7 +130,7 @@ test("runs validation, build, package, verification, git, and release in order",
     release(input) {
       steps.push("release")
       expect(input).toMatchObject({
-        archive: path.resolve(import.meta.dir, "../dist/sfmi-1.17.18-win-x64.zip"),
+        archive: path.resolve(import.meta.dir, "../dist/chai-1.17.18-win-x64.zip"),
         version: "1.17.18",
         gitCommit: "0123456789abcdef",
       })

@@ -166,7 +166,7 @@ function getEnterpriseConfig() {
     ...base,
     appId,
     productName: "CHAI",
-    artifactName: "sfmi-${version}-${os}-${arch}.${ext}",
+    artifactName: "chai-${version}-${os}-${arch}.${ext}",
     protocols: undefined,
     publish: undefined,
     nsis: undefined,

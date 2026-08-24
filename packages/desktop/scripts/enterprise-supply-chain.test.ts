@@ -13,7 +13,7 @@ afterEach(async () => {
 test("writes deterministic CycloneDX and third-party license artifacts from the locked dependency set", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "enterprise-supply-chain-"))
   roots.push(root)
-  const archive = path.join(root, "sfmi-1.0.0-win-x64.zip")
+  const archive = path.join(root, "chai-1.0.0-win-x64.zip")
   const modules = path.join(root, "node_modules")
   await mkdir(path.join(modules, "alpha"), { recursive: true })
   await mkdir(path.join(root, "ripgrep"), { recursive: true })

@@ -78,7 +78,7 @@ test("accepts a complete portable enterprise tree", async () => {
 test("writes a timestamp-free archive accepted by the portable verifier", async () => {
   const root = await portableFixture()
   const output = await temporaryDirectory("enterprise-portable-output-")
-  const archive = path.join(output, "sfmi-1.17.18-win-x64.zip")
+  const archive = path.join(output, "chai-1.17.18-win-x64.zip")
 
   await writeEnterpriseArchive({ archive, root })
 
@@ -695,7 +695,7 @@ async function archiveFixture(
       { msDosCompatible: true, ...options[entry] },
     )
   }
-  const archive = path.join(root, "sfmi-1.17.18-win-x64.zip")
+  const archive = path.join(root, "chai-1.17.18-win-x64.zip")
   await Bun.write(archive, await writer.close())
   return archive
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const scriptPath = new URL("./windows-portable-smoke.ps1", import.meta.url)
 const generatorPath = new URL("./enterprise-release.ts", import.meta.url)
-const runbookPath = new URL("../../../docs/enterprise/windows-portable-sfmi-release.md", import.meta.url)
+const runbookPath = new URL("../../../docs/enterprise/windows-portable-chai-release.md", import.meta.url)
 
 function powerShellParserInvocation(scriptPath: string) {
   return `[void][scriptblock]::Create((Get-Content -Raw -LiteralPath '${scriptPath.replaceAll("'", "''")}'))`
@@ -236,7 +236,7 @@ test.if(process.platform === "win32")(
       schemaVersion: 3,
       appVersion: "1.0.0",
       gitCommit: "0123456789abcdef",
-      artifact: "sfmi-1.0.0-win-x64.zip",
+      artifact: "chai-1.0.0-win-x64.zip",
       sha256: "a".repeat(64),
       defaultsVersion: "defaults-1",
       guideVersion: "chai-1",
@@ -247,9 +247,9 @@ test.if(process.platform === "win32")(
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",
       windowsAcceptance: [],
-      sbom: { file: "sfmi-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
+      sbom: { file: "chai-1.0.0-win-x64.sbom.cdx.json", sha256: "c".repeat(64) },
       thirdPartyLicenses: {
-        file: "sfmi-1.0.0-win-x64.third-party-licenses.txt",
+        file: "chai-1.0.0-win-x64.third-party-licenses.txt",
         sha256: "d".repeat(64),
       },
     }
@@ -418,7 +418,7 @@ test("runbook checksum consumers match the generator's exact LF-terminated bytes
   const runbook = await Bun.file(runbookPath).text()
 
   expect(runbook).toContain("# CHAI: Windows Portable ZIP Release")
-  expect(runbook).toContain("sfmi-<version>-win-x64.zip")
+  expect(runbook).toContain("chai-<version>-win-x64.zip")
   expect(runbook).toContain('Filter "CHAI.exe"')
   expect(runbook).toContain("%LOCALAPPDATA%\\com.company.sfmi")
   expect(runbook).toContain("%LOCALAPPDATA%\\com.company.opencode.pilot")
@@ -550,7 +550,7 @@ test.if(process.platform === "win32")(
       schemaVersion: 3,
       appVersion: "1.0.0",
       gitCommit: "commit",
-      artifact: "sfmi-win-x64.zip",
+      artifact: "chai-win-x64.zip",
       sha256: "hash",
       defaultsVersion: "defaults",
       guideVersion: "guide",
@@ -561,9 +561,9 @@ test.if(process.platform === "win32")(
       builtAt: "2026-07-15T00:00:00.000Z",
       authenticode: "NotSigned",
       windowsAcceptance: [],
-      sbom: { file: "sfmi-win-x64.sbom.cdx.json", sha256: "a".repeat(64) },
+      sbom: { file: "chai-win-x64.sbom.cdx.json", sha256: "a".repeat(64) },
       thirdPartyLicenses: {
-        file: "sfmi-win-x64.third-party-licenses.txt",
+        file: "chai-win-x64.third-party-licenses.txt",
         sha256: "b".repeat(64),
       },
     }

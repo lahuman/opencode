@@ -58,7 +58,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
 
   const version =
     input.version ?? (await Bun.file(path.join(options.cwd, "package.json")).json<{ version: string }>()).version
-  const archive = path.join(options.cwd, "dist", `sfmi-${version}-win-x64.zip`)
+  const archive = path.join(options.cwd, "dist", `chai-${version}-win-x64.zip`)
   const root = path.join(options.cwd, "dist", "win-unpacked")
   await (input.verifyPackage ?? verifyEnterprisePackage)(root)
   await (input.writeArchive ?? writeEnterpriseArchive)({ archive, root })
