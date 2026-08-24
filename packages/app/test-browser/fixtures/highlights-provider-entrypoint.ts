@@ -38,7 +38,7 @@ async function mountHighlights(enterprise: boolean) {
             setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
             replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
             clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-            readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
+            readGuide: async () => ({ version: "chai-1", markdown: "" }),
           },
         }
       : {}),

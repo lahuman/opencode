@@ -13,7 +13,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_PORT: "4096",
 })

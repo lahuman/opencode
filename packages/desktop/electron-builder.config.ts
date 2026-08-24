@@ -165,7 +165,7 @@ function getEnterpriseConfig() {
   return {
     ...base,
     appId,
-    productName: "SFMI",
+    productName: "CHAI",
     artifactName: "sfmi-${version}-${os}-${arch}.${ext}",
     protocols: undefined,
     publish: undefined,

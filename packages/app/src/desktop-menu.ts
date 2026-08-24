@@ -284,7 +284,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     id: "help",
     labelKey: "desktop.menu.help",
     items: [
-      { type: "item", edition: "enterprise", label: "SFMI AI 가이드", command: "company.guide.open" },
+      { type: "item", edition: "enterprise", label: "CHAI AI 가이드", command: "company.guide.open" },
       {
         type: "item",
         edition: "public",

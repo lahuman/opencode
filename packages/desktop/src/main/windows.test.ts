@@ -35,9 +35,9 @@ test("production windows enforce one session policy and exact packaged document 
 
   expect(result.productionWindow).toEqual({
     mode: "packaged",
-    title: "SFMI",
+    title: "CHAI",
     loadedURL: "oc://renderer/index.html",
-    secondTitle: "SFMI",
+    secondTitle: "CHAI",
     secondLoadedURL: "oc://renderer/index.html",
     sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },
@@ -261,9 +261,9 @@ test.each([
 
   expect(result.productionWindow).toEqual({
     mode,
-    title: "SFMI",
+    title: "CHAI",
     loadedURL,
-    secondTitle: "SFMI",
+    secondTitle: "CHAI",
     secondLoadedURL: loadedURL,
     sessionRequestRegistrations: 1,
     registrations: { request: true, windowOpen: true, navigation: true, redirect: true },

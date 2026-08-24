@@ -15,7 +15,7 @@ function enabledProfile() {
     OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
     OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
     OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-    OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+    OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
     OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
     OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
   })
@@ -100,7 +100,7 @@ describe("enterprise profile", () => {
       ]),
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
     })
@@ -113,7 +113,7 @@ describe("enterprise profile", () => {
       ],
       defaultModelID: "code",
       defaultsVersion: "pilot-1",
-      guideVersion: "sfmi-1",
+      guideVersion: "chai-1",
       catalogVersion: "catalog-1",
       allowedOrigins: ["https://code.corp.example", "https://reasoning.corp.example", "https://llm-dr.corp.example"],
     })
@@ -124,7 +124,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE: "1",
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
     }
 
@@ -160,7 +160,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
     })
 
@@ -184,7 +184,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-        OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
     ).toThrow("OPENCODE_ENTERPRISE_BASE_URL")
@@ -198,7 +198,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
     }
 
-    expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1" })).toThrow(
+    expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1" })).toThrow(
       "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
     )
     expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1" })).toThrow(
@@ -214,7 +214,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-        OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
         OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "file:///C:/tmp",
       }),
@@ -229,7 +229,7 @@ describe("enterprise profile", () => {
         OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
         OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
         OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-        OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+        OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
         OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       }),
     ).toThrow("must not contain credentials")
@@ -244,7 +244,7 @@ describe("enterprise profile", () => {
       ]),
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm-dr.corp.example",
     })
@@ -263,7 +263,7 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
       OPENCODE_ENTERPRISE_GUIDE_PATH: "C:/app/enterprise/company-guide.md",
       OPENCODE_RIPGREP_PATH: "C:/app/enterprise/ripgrep/rg.exe",
-      OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
       OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
         "https://llm.corp.example,https://fast.corp.example,https://llm-dr.corp.example",

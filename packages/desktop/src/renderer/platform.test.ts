@@ -81,7 +81,7 @@ test("real renderer entrypoint creates the policy-enforcing desktop platform", a
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
   expect(JSON.parse(stdout)).toEqual({
-    documentTitle: "SFMI",
+    documentTitle: "CHAI",
     openLinkCalls: ["https://llm.corp.example/docs"],
     fetchCalls: [{ url: "https://llm.corp.example/v1/models", method: "POST" }],
     failures: ["Enterprise offline policy blocked https://cdn.example", "Enterprise offline policy blocked null"],

@@ -445,8 +445,8 @@ function Expand-PortableArchive {
 
   New-Item -ItemType Directory -Path $Destination | Out-Null
   Expand-Archive -LiteralPath $Archive -DestinationPath $Destination
-  $executables = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "SFMI.exe")
-  if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one SFMI.exe" }
+  $executables = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -Filter "CHAI.exe")
+  if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one CHAI.exe" }
   if ($executables[0].Length -eq 0) { throw "Portable executable is empty" }
   foreach ($resource in @(
     "resources/app.asar",

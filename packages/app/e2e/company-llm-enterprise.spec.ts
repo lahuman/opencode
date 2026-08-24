@@ -29,7 +29,7 @@ async function invokeFixtureControl(page: Page, name: string) {
 async function openCompanyGuideFromMenu(page: Page) {
   await page.getByRole("button", { name: "OpenCode menu" }).click()
   await page.getByRole("menuitem", { name: "Help" }).hover()
-  await page.getByRole("menuitem", { name: "SFMI AI 가이드" }).click()
+  await page.getByRole("menuitem", { name: "CHAI AI 가이드" }).click()
 }
 
 test("mounted ServerProvider excludes persisted remotes before health polling", async ({ page }) => {
@@ -101,6 +101,7 @@ test("New Session stays editable while Enterprise providers load, then disables 
   page,
 }) => {
   await page.goto(fixture("composer-enterprise-empty"))
+  await expect(page.locator('[data-component="chai-wordmark-v2"]')).toBeVisible()
 
   const loadingEditor = page.getByRole("textbox", { name: "Prompt" })
   await expect(loadingEditor).toHaveAttribute("contenteditable", "true")
@@ -454,14 +455,14 @@ test("settings success toast creates its icon inside the Solid render owner", as
 test("enterprise fatal error offers the local company guide without public reporting UI", async ({ page }) => {
   await page.goto(fixture("error-enterprise"))
 
-  const guide = page.getByRole("button", { name: "SFMI AI 가이드 열기" })
+  const guide = page.getByRole("button", { name: "CHAI AI 가이드 열기" })
   await expect(guide).toBeVisible()
   await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
   await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
   await expect(page.getByText("on Discord", { exact: true })).toHaveCount(0)
 
   await guide.click()
-  await expect(page.getByRole("dialog")).toContainText("SFMI AI 가이드")
+  await expect(page.getByRole("dialog")).toContainText("CHAI AI 가이드")
   expect(await output<string[]>(page, "external-links")).toEqual([])
 })
 
@@ -472,13 +473,13 @@ test("public fatal error preserves the localized Discord reporting action", asyn
   const discord = page.getByRole("button", { name: "on Discord" })
   await expect(discord).toBeVisible()
   await expect(discord.locator('use[href="#opencode-icon-discord"]')).toHaveCount(1)
-  await expect(page.getByText("SFMI AI 가이드", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("CHAI AI 가이드", { exact: true })).toHaveCount(0)
 
   await discord.click()
   await expect.poll(() => output<string[]>(page, "external-links")).toEqual(["https://opencode.ai/desktop-feedback"])
 })
 
-test("SFMI AI 가이드 restores the Windows menu trigger after both close paths", async ({ page }) => {
+test("CHAI AI 가이드 restores the Windows menu trigger after both close paths", async ({ page }) => {
   await page.goto(fixture("guide"))
   const trigger = page.getByRole("button", { name: "OpenCode menu" })
 
@@ -494,20 +495,20 @@ test("SFMI AI 가이드 restores the Windows menu trigger after both close paths
 })
 
 responsiveViewports.forEach((viewport) => {
-  test(`SFMI AI 가이드 dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
+  test(`CHAI AI 가이드 dialog fits the ${viewport.name} viewport`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(fixture("guide"))
     await openCompanyGuideFromMenu(page)
 
     const dialog = page.getByRole("dialog")
-    const body = dialog.getByRole("region", { name: "SFMI AI 가이드 내용" })
+    const body = dialog.getByRole("region", { name: "CHAI AI 가이드 내용" })
     await expect(dialog).toBeVisible()
     await expect(dialog).toHaveAttribute("aria-labelledby", /.+/)
     await expect(body).toHaveAttribute("tabindex", "0")
     await expect(body).toBeFocused()
-    await expect(dialog.getByText("SFMI AI 가이드", { exact: true })).toBeVisible()
-    await expect(dialog.getByText("버전 sfmi-1", { exact: true })).toBeVisible()
-    await expect(dialog.getByRole("heading", { name: "SFMI AI 사용 가이드", level: 1 })).toBeVisible()
+    await expect(dialog.getByText("CHAI AI 가이드", { exact: true })).toBeVisible()
+    await expect(dialog.getByText("버전 chai-1", { exact: true })).toBeVisible()
+    await expect(dialog.getByRole("heading", { name: "CHAI AI 사용 가이드", level: 1 })).toBeVisible()
     await expect(dialog.locator("a")).toHaveCount(0)
     expect(await output<string[]>(page, "external-links")).toEqual([])
 

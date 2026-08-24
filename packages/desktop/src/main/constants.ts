@@ -9,7 +9,7 @@ export { ENTERPRISE_ENABLED }
 export { desktopRuntimeFeatures }
 
 export function desktopIdentity(input: { channel: Channel; enterprise: boolean }) {
-  if (input.enterprise) return { appId: "com.company.sfmi", name: "SFMI" }
+  if (input.enterprise) return { appId: "com.company.sfmi", name: "CHAI" }
   if (input.channel === "dev") return { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" }
   if (input.channel === "beta") return { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" }
   return { appId: "ai.opencode.desktop", name: "OpenCode" }

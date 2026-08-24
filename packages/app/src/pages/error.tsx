@@ -443,10 +443,10 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              aria-label="SFMI AI 가이드 열기"
+              aria-label="CHAI AI 가이드 열기"
               onClick={(event) => openCompanyGuide(event.currentTarget)}
             >
-              <div>SFMI AI 가이드</div>
+              <div>CHAI AI 가이드</div>
               <Icon name="help" class="text-text-interactive-base" />
             </button>
           </Show>

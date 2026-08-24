@@ -1,6 +1,6 @@
-# SFMI: Windows Portable ZIP Release
+# CHAI: Windows Portable ZIP Release
 
-This runbook is the only supported operator path from a reviewed source revision to Windows acceptance for the SFMI portable release. It produces an unsigned Windows x64 ZIP and its integrity artifacts; it does not install the application, register a protocol, migrate data from the former Pilot application, or remove user data.
+This runbook is the only supported operator path from a reviewed source revision to Windows acceptance for the CHAI portable release. It produces an unsigned Windows x64 ZIP and its integrity artifacts; it does not install the application, register a protocol, migrate data from the former Pilot application, or remove user data.
 
 ## Release boundary
 
@@ -68,7 +68,7 @@ $env:OPENCODE_ENTERPRISE_MODELS = '[{"id":"company-code","name":"Company Code","
 $env:OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID = "company-code"
 $env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = ""
 $env:OPENCODE_ENTERPRISE_DEFAULTS_VERSION = "pilot-1"
-$env:OPENCODE_ENTERPRISE_GUIDE_VERSION = "sfmi-1"
+$env:OPENCODE_ENTERPRISE_GUIDE_VERSION = "chai-1"
 $env:OPENCODE_ENTERPRISE_CATALOG_VERSION = "pilot-1"
 
 Set-Location packages\desktop
@@ -468,7 +468,7 @@ Assert-ExpectedWindowsAcceptance -Record $metadata.windowsAcceptance[1] -Expecte
 $signatureRoot = Join-Path ([System.IO.Path]::GetTempPath()) "opencode-portable-signature-$([Guid]::NewGuid().ToString('N'))"
 try {
   Expand-Archive -LiteralPath $archive.FullName -DestinationPath $signatureRoot
-  $executables = @(Get-ChildItem -LiteralPath $signatureRoot -Recurse -File -Filter "SFMI.exe")
+  $executables = @(Get-ChildItem -LiteralPath $signatureRoot -Recurse -File -Filter "CHAI.exe")
   if ($executables.Count -ne 1) { throw "Portable archive must contain exactly one executable" }
   $signature = Get-AuthenticodeSignature -FilePath $executables[0].FullName
   $signature | Select-Object Path, Status, StatusMessage |
@@ -583,7 +583,7 @@ Stop the release flow at the first failed build, verifier, checksum, metadata, p
 
 Do not distribute a partial set, edit a checksum or release JSON to force a match, manually add acceptance records, or rerun smoke against a different ZIP under the same metadata. A smoke failure leaves the previous acceptance records intact; investigate from a new clean extraction and create a fresh release set if the ZIP changes.
 
-To roll back SFMI, distribute the last accepted complete ZIP/checksum/metadata set through the trusted internal channel, verify its hash and metadata compatibility before extraction, and replace only the extracted SFMI application folder. Do not delete `%LOCALAPPDATA%\com.company.sfmi`, `%LOCALAPPDATA%\com.company.opencode.pilot`, or project directories during rollback. SFMI settings and DPAPI-protected credentials must remain available after replacement and after deleting an extracted folder; former Pilot data remains independent and untouched.
+To roll back CHAI, distribute the last accepted complete ZIP/checksum/metadata set through the trusted internal channel, verify its hash and metadata compatibility before extraction, and replace only the extracted CHAI application folder. Do not delete `%LOCALAPPDATA%\com.company.sfmi`, `%LOCALAPPDATA%\com.company.opencode.pilot`, or project directories during rollback. CHAI settings and DPAPI-protected credentials must remain available after replacement and after deleting an extracted folder; former Pilot data remains independent and untouched.
 
 ## Candidate tag and review
 

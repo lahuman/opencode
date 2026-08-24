@@ -11,7 +11,7 @@ import { writeEnterpriseArchive } from "./package-enterprise-win"
 
 const roots: string[] = []
 const required = [
-  "SFMI.exe",
+  "CHAI.exe",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -63,7 +63,7 @@ test("accepts a complete portable enterprise tree", async () => {
   const root = await portableFixture()
 
   await expect(verifyEnterprisePackage(root)).resolves.toEqual({
-    executable: "SFMI.exe",
+    executable: "CHAI.exe",
     defaults: true,
     guide: true,
     models: true,
@@ -106,8 +106,8 @@ test.each(required)("rejects a package directory at %s", async (relative) => {
 test("rejects a required payload symlinked outside the package root", async () => {
   const root = await portableFixture()
   const outside = await temporaryDirectory("enterprise-portable-outside-")
-  const executable = path.join(root, "SFMI.exe")
-  const target = path.join(outside, "SFMI.exe")
+  const executable = path.join(root, "CHAI.exe")
+  const target = path.join(outside, "CHAI.exe")
   await Bun.write(target, "portable executable")
   await rm(executable)
   await symlink(target, executable, "file")
@@ -205,7 +205,7 @@ test("rejects an empty app archive", async () => {
 
 test("rejects an empty portable executable", async () => {
   const root = await portableFixture()
-  await Bun.write(path.join(root, "SFMI.exe"), "")
+  await Bun.write(path.join(root, "CHAI.exe"), "")
 
   await expect(verifyEnterprisePackage(root)).rejects.toThrow("Portable package executable")
 })
@@ -328,7 +328,7 @@ test("rejects a local header name that differs from its central directory name",
 
 test("rejects a local header general-purpose flag mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "CHAI.exe", (view, offset) => {
     view.setUint16(offset + 6, view.getUint16(offset + 6, true) ^ 0x800, true)
   })
 
@@ -337,7 +337,7 @@ test("rejects a local header general-purpose flag mismatch", async () => {
 
 test("rejects a local header compression method mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "CHAI.exe", (view, offset) => {
     view.setUint16(offset + 8, view.getUint16(offset + 8, true) === 0 ? 8 : 0, true)
   })
 
@@ -346,7 +346,7 @@ test("rejects a local header compression method mismatch", async () => {
 
 test("rejects a local header DOS timestamp mismatch", async () => {
   const archive = await archiveFixture(required)
-  await rewriteLocalHeader(archive, "SFMI.exe", (view, offset) => {
+  await rewriteLocalHeader(archive, "CHAI.exe", (view, offset) => {
     view.setUint16(offset + 10, view.getUint16(offset + 10, true) ^ 1, true)
     view.setUint16(offset + 12, view.getUint16(offset + 12, true) ^ 1, true)
   })
@@ -402,15 +402,15 @@ test("rejects an unexplained gap before the central directory", async () => {
 
 test.each([
   "resources\\app.asar",
-  "resources/../SFMI.exe",
-  "/SFMI.exe",
+  "resources/../CHAI.exe",
+  "/CHAI.exe",
   "C:..\\outside",
   "C:../outside",
   "C:/outside",
   "\\\\server\\share\\outside",
   "\\\\?\\C:\\outside",
-  "SFMI Setup.exe",
-  "Uninstall SFMI.exe",
+  "CHAI Setup.exe",
+  "Uninstall CHAI.exe",
   "Setup.EXE",
 ])("rejects unsafe archive entry %s", async (entry) => {
   const archive = await archiveFixture([...required, entry])
@@ -624,7 +624,7 @@ test("rejects required archive contents that differ from the verified unpacked p
 })
 
 test.each([
-  ["an empty executable", "SFMI.exe", "", "Portable package executable"],
+  ["an empty executable", "CHAI.exe", "", "Portable package executable"],
   [
     "a different guide",
     "resources/enterprise/company-guide.md",
@@ -654,7 +654,7 @@ async function writePortableFixture(root: string) {
     ),
   ])
   await Promise.all([
-    Bun.write(path.join(root, "SFMI.exe"), "portable executable"),
+    Bun.write(path.join(root, "CHAI.exe"), "portable executable"),
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
     Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), enterpriseDefaults),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
@@ -927,7 +927,7 @@ async function rewriteArchiveExtraFieldType(archive: string, name: string, sourc
 }
 
 const portableContents: Record<string, string> = {
-  "SFMI.exe": "portable executable",
+  "CHAI.exe": "portable executable",
   "resources/app.asar": "application archive",
   "resources/enterprise/opencode.jsonc": enterpriseDefaults,
   "resources/enterprise/company-guide.md": enterpriseGuide,
@@ -954,7 +954,7 @@ function enterpriseManifest() {
       schemaVersion: 3,
       appVersion: "1.17.18",
       defaultsVersion: "pilot-1",
-      guideVersion: "sfmi-1",
+      guideVersion: "chai-1",
       catalogVersion: "pilot-1",
       defaultModelID: "company-code",
       modelIDs: identity.modelIDs,

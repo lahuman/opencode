@@ -239,7 +239,7 @@ test.if(process.platform === "win32")(
       artifact: "sfmi-1.0.0-win-x64.zip",
       sha256: "a".repeat(64),
       defaultsVersion: "defaults-1",
-      guideVersion: "sfmi-1",
+      guideVersion: "chai-1",
       defaultModelID: "code",
       modelIDs: ["code", "reasoning"],
       modelCatalogSHA256: "b".repeat(64),
@@ -417,9 +417,9 @@ test("runbook checksum consumers match the generator's exact LF-terminated bytes
   const generator = await Bun.file(generatorPath).text()
   const runbook = await Bun.file(runbookPath).text()
 
-  expect(runbook).toContain("# SFMI: Windows Portable ZIP Release")
+  expect(runbook).toContain("# CHAI: Windows Portable ZIP Release")
   expect(runbook).toContain("sfmi-<version>-win-x64.zip")
-  expect(runbook).toContain('Filter "SFMI.exe"')
+  expect(runbook).toContain('Filter "CHAI.exe"')
   expect(runbook).toContain("%LOCALAPPDATA%\\com.company.sfmi")
   expect(runbook).toContain("%LOCALAPPDATA%\\com.company.opencode.pilot")
   expect(generator).toContain("Bun.write(`${input.archive}.sha256`, `${sha256}  ${artifact}\\n`)")
@@ -616,15 +616,15 @@ test.if(process.platform === "win32")(
 
     try {
       await Bun.write(harness, `${checksum}\n$null = Read-PortableChecksum -Path $args[0] -Archive $args[1]`)
-      const archive = join(temp, "SFMI.zip")
+      const archive = join(temp, "CHAI.zip")
       for (const [name, fixture, expected] of [
-        ["valid", `${hash}  SFMI.zip\n`, 0],
-        ["missing-line-end", `${hash}  SFMI.zip`, 1],
-        ["crlf-line-end", `${hash}  SFMI.zip\r\n`, 1],
-        ["uppercase", `${hash.toUpperCase()}  SFMI.zip\n`, 1],
+        ["valid", `${hash}  CHAI.zip\n`, 0],
+        ["missing-line-end", `${hash}  CHAI.zip`, 1],
+        ["crlf-line-end", `${hash}  CHAI.zip\r\n`, 1],
+        ["uppercase", `${hash.toUpperCase()}  CHAI.zip\n`, 1],
         ["wrong-name", `${hash}  other.zip\n`, 1],
-        ["extra-record", `${hash}  SFMI.zip\n${hash}  SFMI.zip\n`, 1],
-        ["extra-line-end", `${hash}  SFMI.zip\n\n`, 1],
+        ["extra-record", `${hash}  CHAI.zip\n${hash}  CHAI.zip\n`, 1],
+        ["extra-line-end", `${hash}  CHAI.zip\n\n`, 1],
       ] as const) {
         const checksumPath = join(temp, `${name}.sha256`)
         await Bun.write(checksumPath, fixture)

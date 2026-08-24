@@ -31,7 +31,7 @@ describe("company guide command", () => {
     const command = createCompanyGuideCommand({
       enterprise: {
         ...providerAPI,
-        readGuide: async () => ({ version: "sfmi-1", markdown: "# SFMI AI 사용 가이드" }),
+        readGuide: async () => ({ version: "chai-1", markdown: "# CHAI AI 사용 가이드" }),
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
         stateBackups: async () => [],
         restoreStateBackup: async () => ({ restartRequired: false }),
@@ -47,8 +47,8 @@ describe("company guide command", () => {
     await command?.onSelect?.()
 
     expect(command?.id).toBe("company.guide.open")
-    expect(command?.title).toBe("SFMI AI 가이드")
-    expect(opened).toEqual([{ version: "sfmi-1", markdown: "# SFMI AI 사용 가이드" }])
+    expect(command?.title).toBe("CHAI AI 가이드")
+    expect(opened).toEqual([{ version: "chai-1", markdown: "# CHAI AI 사용 가이드" }])
   })
 
   test("reports read failures without opening a dialog", async () => {

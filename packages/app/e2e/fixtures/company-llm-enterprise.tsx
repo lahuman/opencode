@@ -47,7 +47,7 @@ const DIAGNOSTIC_FAILURE = {
   failure: { kind: "connection", message: "Install the Company TLS CA certificate and try again." },
 } as const
 const GUIDE_MARKDOWN = [
-  "# SFMI AI 사용 가이드",
+  "# CHAI AI 사용 가이드",
   "",
   "Use only company-approved data and systems.",
   "",
@@ -527,7 +527,7 @@ function createHarness(scenario?: string | null) {
         return this.providerCatalog()
       },
       async readGuide() {
-        return { version: "sfmi-1", markdown: GUIDE_MARKDOWN }
+        return { version: "chai-1", markdown: GUIDE_MARKDOWN }
       },
       async readiness() {
         return { schemaVersion: 1 as const, generatedAt: "now", overall: "warn" as const, checks: [] }

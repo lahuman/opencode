@@ -9,7 +9,7 @@ const enterprise = {
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 }
 
@@ -108,7 +108,7 @@ test("loads a portable unsigned enterprise ZIP configuration", () => {
   expect(result.exitCode).toBe(0)
   expect(result.summary).toMatchObject({
     appId: "com.company.sfmi",
-    productName: "SFMI",
+    productName: "CHAI",
     artifactName: "sfmi-${version}-${os}-${arch}.${ext}",
     winTarget: ["zip"],
     ordinarySignFunction: false,

@@ -10,7 +10,7 @@ const valid = {
   OPENCODE_ENTERPRISE_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_MODEL_NAME: "Company Code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
@@ -117,7 +117,7 @@ test("runs validation, build, package, verification, git, and release in order",
     },
     authenticode(executable) {
       steps.push("authenticode")
-      expect(executable).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked/SFMI.exe"))
+      expect(executable).toBe(path.resolve(import.meta.dir, "../dist/win-unpacked/CHAI.exe"))
       return Promise.resolve("NotSigned")
     },
     supplyChain({ archive }) {

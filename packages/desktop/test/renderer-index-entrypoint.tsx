@@ -11,7 +11,7 @@ Object.assign(process.env, {
   ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
 })
 Object.defineProperty(navigator, "userAgent", { value: "Linux", configurable: true })
@@ -108,7 +108,7 @@ const api = {
     setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
     replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
     clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-    readGuide: async () => ({ version: "sfmi-1", markdown: "" }),
+    readGuide: async () => ({ version: "chai-1", markdown: "" }),
   },
   getPinchZoomEnabled: async () => false,
   getWindowFullscreen: async () => false,

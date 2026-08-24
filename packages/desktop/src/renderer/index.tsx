@@ -30,7 +30,7 @@ import { useTheme } from "@opencode-ai/ui/theme/context"
 import { ENTERPRISE_ENABLED, ENTERPRISE_PROFILE, enterpriseTelemetryEnabled } from "../enterprise"
 import { createPlatform, type DesktopWindowState } from "./platform"
 
-if (ENTERPRISE_ENABLED) document.title = "SFMI"
+if (ENTERPRISE_ENABLED) document.title = "CHAI"
 
 const root = document.getElementById("root")
 if (import.meta.env.DEV && !(root instanceof HTMLElement)) {

@@ -96,7 +96,7 @@ export async function writeEnterpriseSupplyChain(input: {
   )
   await Bun.write(
     licenses,
-    `SFMI third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
+    `CHAI third-party licenses\nGenerated: ${input.builtAt.toISOString()}\n\n${notices
       .map(
         (dependency) =>
           `${dependency.name}@${dependency.version}\nDeclared license: ${dependency.license}\n${dependency.text || "License text unavailable in the local dependency installation."}`,

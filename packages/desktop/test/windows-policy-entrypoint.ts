@@ -12,7 +12,7 @@ Object.assign(process.env, {
   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-  OPENCODE_ENTERPRISE_GUIDE_VERSION: "sfmi-1",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
   OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
     "https://telemetry.corp.example:8443/private?token=csp-origin-secret,https://*.wildcard.example/private",
@@ -176,7 +176,7 @@ mock.module("electron", () => ({
   app: {
     dock: undefined,
     exit() {},
-    getName: () => "SFMI",
+    getName: () => "CHAI",
     getPath: () => tmpdir(),
     isPackaged: mode === "packaged" || mode === "packaged-renderer-env" || publicProtocol,
     quit() {},

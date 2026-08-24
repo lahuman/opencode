@@ -68,7 +68,7 @@ export async function runEnterpriseWindowsPackage(input: EnterprisePackageInput)
     throw new Error("Enterprise package source changed during the build")
   }
   const gitCommit = packagedCommit ?? reviewedCommit ?? (await (input.gitCommit ?? (() => resolveGitCommit(options.cwd, env)))())
-  const authenticode = await (input.authenticode?.(path.join(root, "SFMI.exe"), env) ??
+  const authenticode = await (input.authenticode?.(path.join(root, "CHAI.exe"), env) ??
     Promise.resolve("NotSigned" as const))
   const builtAt = new Date()
   const supplyChain = await (input.supplyChain ?? writeEnterpriseSupplyChain)({ archive, appVersion: version, builtAt })

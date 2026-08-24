@@ -11,7 +11,7 @@ export function resolveDesktopUserDataPath(input: {
 }) {
   if (input.enterprise && input.platform === "win32") {
     if (!input.localAppData) {
-      throw new Error("LOCALAPPDATA is required for SFMI on Windows")
+      throw new Error("LOCALAPPDATA is required for CHAI on Windows")
     }
     return win32.join(input.localAppData, ENTERPRISE_WINDOWS_USER_DATA_ID)
   }

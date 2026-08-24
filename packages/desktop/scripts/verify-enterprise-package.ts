@@ -17,7 +17,7 @@ export type EnterprisePackageSummary = {
 }
 
 const requiredEntries = [
-  "SFMI.exe",
+  "CHAI.exe",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -248,7 +248,7 @@ function validateEnterprisePackageFiles(files: EnterprisePackageFiles) {
   } catch {
     throw new Error("Portable package enterprise manifest is invalid")
   }
-  if (files["SFMI.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
+  if (files["CHAI.exe"].byteLength === 0) throw new Error("Portable package executable is empty")
   if (files["resources/enterprise/ripgrep/rg.exe"].byteLength === 0) {
     throw new Error("Portable package ripgrep executable is empty")
   }
@@ -268,7 +268,7 @@ function parseJSON(input: Uint8Array, error: string): unknown {
 
 function requiredFiles<T>(read: (entry: RequiredEntry) => T): Record<RequiredEntry, T> {
   return {
-    "SFMI.exe": read("SFMI.exe"),
+    "CHAI.exe": read("CHAI.exe"),
     "resources/app.asar": read("resources/app.asar"),
     "resources/enterprise/opencode.jsonc": read("resources/enterprise/opencode.jsonc"),
     "resources/enterprise/company-guide.md": read("resources/enterprise/company-guide.md"),

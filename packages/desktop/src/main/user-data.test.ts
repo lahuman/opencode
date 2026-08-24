@@ -25,7 +25,7 @@ test("fails closed when enterprise Windows LOCALAPPDATA is unavailable", () => {
         throw new Error("Electron appData must not be read")
       },
     }),
-  ).toThrow("LOCALAPPDATA is required for SFMI on Windows")
+  ).toThrow("LOCALAPPDATA is required for CHAI on Windows")
 })
 
 test("keeps ordinary Windows state under Electron appData", () => {

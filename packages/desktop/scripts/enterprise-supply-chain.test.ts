@@ -63,7 +63,7 @@ test("writes deterministic CycloneDX and third-party license artifacts from the 
     ],
   })
   const licenses = await Bun.file(result.licenses).text()
-  expect(licenses).toStartWith("SFMI third-party licenses\n")
+  expect(licenses).toStartWith("CHAI third-party licenses\n")
   expect(licenses).toContain("alpha@1.2.3\nDeclared license: MIT\nAlpha license text")
   expect(licenses).toContain("beta@2.0.0\nDeclared license: NOASSERTION")
   expect(licenses).toContain("ripgrep@15.1.0\nOfficial source: https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/")
