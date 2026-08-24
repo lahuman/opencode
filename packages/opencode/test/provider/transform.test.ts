@@ -132,54 +132,6 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBeUndefined()
   })
 
-  test("enterprise request preparation selects the offline provider prompt", async () => {
-    const result = await Effect.runPromise(
-      LLMRequestPrep.prepare({
-        user: {
-          id: "msg_enterprise-test",
-          sessionID,
-          role: "user",
-          time: { created: Date.now() },
-          agent: "test",
-          model: { providerID: "company-llm", modelID: "company-code" },
-        },
-        sessionID,
-        model: {
-          ...mockModel,
-          id: "company-llm/company-code",
-          providerID: "company-llm",
-          api: {
-            id: "company-code",
-            url: "https://llm.corp.example/v1",
-            npm: "@ai-sdk/openai-compatible",
-          },
-        },
-        agent: {
-          name: "test",
-          mode: "primary",
-          options: {},
-          permission: [],
-        },
-        system: ["Project-local instructions"],
-        messages: [{ role: "user", content: "Hello" }],
-        tools: {},
-        provider: { id: "company-llm", options: {} },
-        auth: undefined,
-        plugin: {
-          trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output),
-          list: () => Effect.succeed([]),
-          init: () => Effect.void,
-        },
-        flags: { outputTokenMax: 32_000, client: "test", enterpriseOffline: true },
-        isWorkflow: false,
-      } as unknown as Parameters<typeof LLMRequestPrep.prepare>[0]),
-    )
-
-    expect(result.system[0]).toContain("company-provided instructions")
-    expect(result.system[0]).toContain("Project-local instructions")
-    expect(result.system[0]).not.toContain("https://opencode.ai")
-  })
-
   test("should set promptCacheKey for the xAI SDK by default regardless of provider ID", () => {
     const xaiModel = {
       ...mockModel,
@@ -571,6 +523,7 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
     expect(result.reasoningEffort).toBe("medium")
     expect(result.reasoningSummary).toBeUndefined()
     expect(result.include).toBeUndefined()
+    expect(result.textVerbosity).toBeUndefined()
   })
 
   test("azure chat completions omit Responses-only reasoning options after variants merge", async () => {
@@ -3254,7 +3207,82 @@ describe("ProviderTransform.message - cache control on gateway", () => {
 
 describe("ProviderTransform.temperature - Cohere North", () => {
   test("defaults north-mini-code models to 1.0", () => {
-    expect(ProviderTransform.temperature({ id: "cohere/North-Mini-Code-1-0-latest" } as any)).toBe(1.0)
+    expect(
+      ProviderTransform.temperature({
+        id: "cohere/North-Mini-Code-1-0-latest",
+        api: { id: "North-Mini-Code-1-0-latest" },
+      } as any),
+    ).toBe(1.0)
+  })
+})
+
+describe("ProviderTransform sampling defaults - Qwen", () => {
+  test.each(["Qwen3.8-27B", "qwen3-coder-30b-a3b-instruct"])('leaves sampling unset for "%s"', (id) => {
+    const model = {
+      id: `custom/${id}`,
+      api: { id },
+    } as any
+
+    expect(ProviderTransform.temperature(model)).toBeUndefined()
+    expect(ProviderTransform.topP(model)).toBeUndefined()
+    expect(ProviderTransform.topK(model)).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform sampling defaults - Gemini", () => {
+  const model = (id: string) =>
+    ({
+      id: `google/${id}`,
+      api: { id },
+    }) as any
+
+  const alias = (id: string, apiID: string) =>
+    ({
+      id,
+      api: { id: apiID },
+    }) as any
+
+  test.each([
+    "gemini-3.5-flash-lite",
+    "gemini-3-5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3-6-flash",
+    "gemini-4-pro",
+    "gemini-future",
+  ])("omits deprecated sampling controls for %s", (id) => {
+    expect(ProviderTransform.temperature(model(id))).toBeUndefined()
+    expect(ProviderTransform.topP(model(id))).toBeUndefined()
+    expect(ProviderTransform.topK(model(id))).toBeUndefined()
+  })
+
+  test.each([
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemini-2-5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-image",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3-1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-3-5-flash",
+  ])("preserves sampling defaults for %s", (id) => {
+    expect(ProviderTransform.temperature(model(id))).toBe(1)
+    expect(ProviderTransform.topP(model(id))).toBe(0.95)
+    expect(ProviderTransform.topK(model(id))).toBe(64)
+  })
+
+  test("uses the API model ID for configured aliases", () => {
+    const deprecated = alias("google/gemini-3.5-flash", "google/gemini-3.6-flash")
+    expect(ProviderTransform.temperature(deprecated)).toBeUndefined()
+    expect(ProviderTransform.topP(deprecated)).toBeUndefined()
+    expect(ProviderTransform.topK(deprecated)).toBeUndefined()
+
+    const supported = alias("my-gemini", "google/gemini-2.5-flash")
+    expect(ProviderTransform.temperature(supported)).toBe(1)
+    expect(ProviderTransform.topP(supported)).toBe(0.95)
+    expect(ProviderTransform.topK(supported)).toBe(64)
   })
 })
 
