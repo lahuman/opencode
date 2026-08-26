@@ -112,10 +112,10 @@ function init() {
         return (
           <LayerContext.Provider value={dialogLayer}>
             <Kobalte
-              modal
+              modal={stack().at(-1)?.id === id}
               open={!closing()}
               onOpenChange={(open: boolean) => {
-                if (open) return
+                if (open || stack().at(-1)?.id !== id) return
                 close(id)
               }}
             >
