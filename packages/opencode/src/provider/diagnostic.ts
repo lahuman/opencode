@@ -198,7 +198,6 @@ export async function probe(
       const result = await generateText({
         model,
         prompt: "Reply with OK.",
-        maxOutputTokens: 8,
         maxRetries: 0,
         abortSignal: stageSignal(signal),
       })
@@ -209,7 +208,6 @@ export async function probe(
       const stream = streamText({
         model,
         prompt: "Reply with OK.",
-        maxOutputTokens: 8,
         maxRetries: 0,
         abortSignal: stageSignal(signal),
         onError({ error }) {
