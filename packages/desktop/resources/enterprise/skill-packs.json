@@ -13,7 +13,7 @@
         "analyze-codebase"
       ],
       "license": "skill-packs/analyze-codebase/LICENSE",
-      "treeSHA256": "a242c0677c610c711b3b02f5e6d2bf93b7996fae8ff52849eec93eb30d07ec97"
+      "treeSHA256": "b8ed87433a2684bd57e1b6b3a09f6745c23d9a0779f9e62c14bd972ef9aa2334"
     },
     {
       "id": "debug-problems",
@@ -27,7 +27,7 @@
         "debug-problems"
       ],
       "license": "skill-packs/debug-problems/LICENSE",
-      "treeSHA256": "ea1eb4be13cf610dd5723041c8149acc3e08c721e2489750aa32790ffd2d6cfc"
+      "treeSHA256": "5d0cbbd35105eb29495217ba6f9c538ec45e9eb5608917ee2afb3e511adc458b"
     },
     {
       "id": "verify-changes",
@@ -41,7 +41,7 @@
         "verify-changes"
       ],
       "license": "skill-packs/verify-changes/LICENSE",
-      "treeSHA256": "7c05ebccedd7d24c49364920b4e93db705f5b4cef31acb2ad7decebfd92f25cf"
+      "treeSHA256": "8442a40966e70e8a54661a0491ef4a66886aa718a48e9fa277312954285f517f"
     }
   ]
 }

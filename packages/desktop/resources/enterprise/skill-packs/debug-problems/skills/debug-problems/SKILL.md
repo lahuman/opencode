@@ -5,6 +5,8 @@ description: 버그, 테스트 실패, 빌드 오류 또는 예상치 못한 동
 
 # Debug Problems
 
+이 스킬을 사용할 때 사용자에게 전달하는 설명과 최종 응답은 한국어로 작성합니다.
+
 Find the root cause before proposing a fix. A plausible edit is not evidence that the problem is understood.
 
 ## 1. Reproduce

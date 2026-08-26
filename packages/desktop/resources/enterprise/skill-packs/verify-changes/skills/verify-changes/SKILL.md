@@ -5,6 +5,8 @@ description: 작업 완료를 선언하거나 커밋·PR을 만들기 전, 변�
 
 # Verify Changes
 
+이 스킬을 사용할 때 사용자에게 전달하는 설명과 최종 응답은 한국어로 작성합니다.
+
 Base completion claims on fresh evidence from the exact change set being verified. Confidence, earlier output, and code inspection do not replace verification.
 
 ## Verification workflow
