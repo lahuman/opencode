@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
@@ -9,12 +9,16 @@ import { WebFetchTool } from "../../src/tool/webfetch"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { Tool } from "@/tool/tool"
 import { testEffect } from "../lib/effect"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 
-const it = testEffect(
-  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node]), [
+const layer = (flags: Parameters<typeof RuntimeFlags.layer>[0] = {}) =>
+  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, RuntimeFlags.node]), [
     [httpClient, FetchHttpClient.layer as Layer.Layer<HttpClient.HttpClient>],
-  ]),
-)
+    [RuntimeFlags.node, RuntimeFlags.layer(flags)],
+  ])
+
+const it = testEffect(layer())
+const enterprise = testEffect(layer({ enterpriseOffline: true }))
 
 const ctx = {
   sessionID: SessionID.make("ses_test"),
@@ -44,6 +48,73 @@ const exec = Effect.fn("WebFetchToolTest.exec")(function* (args: Tool.InferParam
 })
 
 describe("tool.webfetch", () => {
+  it.instance("does not preflight outside enterprise mode", () =>
+    Effect.gen(function* () {
+      const methods: string[] = []
+      yield* withFetch(
+        (request) => {
+          methods.push(request.method)
+          return new Response("hello", { status: 200, headers: { "content-type": "text/plain" } })
+        },
+        (url) => exec({ url: url.toString(), format: "text" }),
+      )
+      expect(methods).toEqual(["GET"])
+    }),
+  )
+
+  enterprise.instance("preflights before fetching in enterprise mode", () =>
+    Effect.gen(function* () {
+      const methods: string[] = []
+      const result = yield* withFetch(
+        (request) => {
+          methods.push(request.method)
+          if (request.method === "HEAD") return new Response(undefined, { status: 204 })
+          return new Response("hello", { status: 200, headers: { "content-type": "text/plain" } })
+        },
+        (url) => exec({ url: url.toString(), format: "text" }),
+      )
+      expect(methods).toEqual(["HEAD", "GET"])
+      expect(result.output).toBe("hello")
+    }),
+  )
+
+  enterprise.instance("skips fetching when enterprise preflight is not successful", () =>
+    Effect.gen(function* () {
+      const methods: string[] = []
+      const exit = yield* withFetch(
+        (request) => {
+          methods.push(request.method)
+          return new Response(undefined, { status: 405 })
+        },
+        (url) => Effect.exit(exec({ url: url.toString(), format: "text" })),
+      )
+      expect(methods).toEqual(["HEAD"])
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain("Enterprise URL preflight failed; fetch skipped")
+      }
+    }),
+  )
+
+  enterprise.instance("skips fetching when enterprise preflight times out", () =>
+    Effect.gen(function* () {
+      const methods: string[] = []
+      const exit = yield* withFetch(
+        async (request) => {
+          methods.push(request.method)
+          await Bun.sleep(100)
+          return new Response(undefined, { status: 204 })
+        },
+        (url) => Effect.exit(exec({ url: url.toString(), format: "text", timeout: 0.01 })),
+      )
+      expect(methods).toEqual(["HEAD"])
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(Cause.pretty(exit.cause)).toContain("Enterprise URL preflight failed; fetch skipped")
+      }
+    }),
+  )
+
   it.instance("returns image responses as file attachments", () =>
     Effect.gen(function* () {
       const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])

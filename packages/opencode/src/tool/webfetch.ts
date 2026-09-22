@@ -5,10 +5,13 @@ import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+const ENTERPRISE_PREFLIGHT_TIMEOUT = 3 * 1000 // 3 seconds
+const ENTERPRISE_PREFLIGHT_ERROR = "Enterprise URL preflight failed; fetch skipped"
 
 export const Parameters = Schema.Struct({
   url: Schema.String.annotate({ description: "The URL to fetch content from" }),
@@ -26,6 +29,7 @@ export const WebFetchTool = Tool.define(
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
     const httpOk = HttpClient.filterStatusOk(http)
+    const flags = yield* RuntimeFlags.Service
 
     return {
       description: DESCRIPTION,
@@ -71,6 +75,17 @@ export const WebFetchTool = Tool.define(
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
             Accept: acceptHeader,
             "Accept-Language": "en-US,en;q=0.9",
+          }
+          if (flags.enterpriseOffline) {
+            yield* httpOk
+              .execute(HttpClientRequest.head(params.url).pipe(HttpClientRequest.setHeaders(headers)))
+              .pipe(
+                Effect.timeoutOrElse({
+                  duration: Math.min(timeout, ENTERPRISE_PREFLIGHT_TIMEOUT),
+                  orElse: () => Effect.fail(new Error(ENTERPRISE_PREFLIGHT_ERROR)),
+                }),
+                Effect.mapError(() => new Error(ENTERPRISE_PREFLIGHT_ERROR)),
+              )
           }
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
