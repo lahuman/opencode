@@ -59,8 +59,18 @@ test("mounted management controller rejects before storage, navigation, probes, 
         (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health")
           .length,
     )
-    .toBe(1)
+    .toBeGreaterThan(0)
 
+  // Global initialization and health polling can both probe the local sidecar.
+  // The rejected management operations below must not add any further probes.
+  expect(
+    (await output<Array<{ host: string; path: string }>>(page, "requests"))
+      .filter((request) => request.path === "/global/health")
+      .map((request) => request.host),
+  ).toEqual(expect.arrayContaining(["127.0.0.1:5199"]))
+  expect(
+    (await output<Array<{ host: string }>>(page, "requests")).every((request) => request.host === "127.0.0.1:5199"),
+  ).toBe(true)
   const probes = (await output<Array<{ path: string }>>(page, "requests")).filter(
     (request) => request.path === "/global/health",
   ).length

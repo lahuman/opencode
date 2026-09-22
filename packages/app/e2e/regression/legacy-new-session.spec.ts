@@ -7,6 +7,8 @@ const directory = "C:/OpenCode/LegacyNewSession"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
 test("redirects a draft to the legacy new-session route", async ({ page }) => {
+  // Exercise the legacy layout before its September 14 retirement date.
+  await page.clock.setFixedTime(new Date("2026-09-01T00:00:00Z"))
   await mockOpenCodeServer(page, {
     protocol: "v2",
     directory,

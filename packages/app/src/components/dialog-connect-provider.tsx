@@ -408,6 +408,7 @@ function ProviderConnection(props: {
   const serverSDK = useServerSDK()
   const params = useParams()
   const language = useLanguage()
+  const platform = usePlatform()
   const settings = useSettings()
   const newLayout = settings.general.newLayoutDesigns
   const providers = useProviders(() => props.directory?.())
@@ -582,6 +583,11 @@ function ProviderConnection(props: {
         })
         .then((x) => {
           if (!alive.value) return
+          if (props.provider === "opencode" && platform.platform === "desktop") {
+            const url = new URL(x.data.url)
+            url.searchParams.set("client_id", "opencode-desktop")
+            x.data.url = url.href
+          }
           dispatch({ type: "auth.complete", authorization: x.data })
         })
         .catch((e) => {

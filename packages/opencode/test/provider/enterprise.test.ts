@@ -1,10 +1,11 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, test } from "bun:test"
 import { ProviderEnterprise } from "@/provider/enterprise"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 import { generateText } from "ai"
 
-afterEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 3, providers: {} }))
+beforeEach(() => ProviderEnterprise.setCredentials({ schemaVersion: 3, providers: {} }))
+afterEach(() => ProviderEnterprise.setCredentials(undefined))
 
 test("applies provider credentials to every model without crossing provider boundaries", () => {
   ProviderEnterprise.setCredentials({
