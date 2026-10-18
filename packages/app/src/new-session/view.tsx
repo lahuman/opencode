@@ -65,7 +65,7 @@ export function NewSessionView(props: {
         />
         <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
           <div class={NEW_SESSION_CONTENT_WIDTH}>
-            <NewSessionWordmark enterprise={!!platform.enterprise} />
+            <NewSessionWordmark chai={platform.platform === "desktop" || !!platform.enterprise} />
             <div class="mt-8 flex flex-col gap-8">
               <Composer model={props.composer} />
               <Show when={props.project.empty()}>

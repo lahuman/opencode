@@ -20,6 +20,8 @@ import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/schema/provider"
 import { createStore } from "solid-js/store"
 import { AppBaseProviders, AppInterface } from "@/app"
+import { useLanguage } from "@/runtime/i18n/language"
+import { NewSessionWordmark } from "@/new-session/wordmark"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
 import { DialogConnectProvider } from "@/providers/connect/dialog"
 import { SettingsProviders } from "@/settings/providers/providers"
@@ -788,26 +790,57 @@ function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
   )
 }
 
-function ComposerScenario(props: { harness: Harness; enterprise: boolean }) {
+function ComposerScenario(props: { harness: Harness; enterprise: boolean; web?: boolean; branding?: boolean }) {
   const Router: Component<BaseRouterProps> = (routerProps) => (
     <MemoryRouter history={props.harness.history} root={routerProps.root} base={routerProps.base}>
       {routerProps.children}
     </MemoryRouter>
   )
-  const platform = props.enterprise ? props.harness.platform : { ...props.harness.platform, enterprise: undefined }
+  const platform = props.web
+    ? { ...props.harness.platform, platform: "web" as const, enterprise: undefined }
+    : props.enterprise
+      ? props.harness.platform
+      : { ...props.harness.platform, enterprise: undefined }
   return (
     <PlatformProvider value={platform}>
       <AppBaseProviders locale="en">
-        <AppInterface
-          router={Router}
-          canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
-          servers={[props.harness.sidecar]}
+        <Show
+          when={!props.branding}
+          fallback={
+            <>
+              <NewSessionWordmark chai={!props.web} />
+              <BrandingConsumer />
+            </>
+          }
         >
-          <ComposerControls harness={props.harness} />
-        </AppInterface>
+          <AppInterface
+            router={Router}
+            canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
+            servers={[props.harness.sidecar]}
+          >
+            <ComposerControls harness={props.harness} />
+            <BrandingConsumer />
+          </AppInterface>
+        </Show>
         <Observations harness={props.harness} />
       </AppBaseProviders>
     </PlatformProvider>
+  )
+}
+
+function BrandingConsumer() {
+  const language = useLanguage()
+  return (
+    <div style={{ position: "fixed", bottom: "24px", left: "8px", "z-index": 10000, "font-size": "10px" }}>
+      <output data-testid="app-brand">{language.t("desktop.menu.app")}</output>
+      <output data-testid="brand-description">{language.t("settings.general.row.language.description")}</output>
+      <output data-testid="brand-provider">
+        {language.t("provider.connect.apiKey.description", { provider: "OpenCode Gateway" })}
+      </output>
+      <button type="button" onClick={() => language.setLocale("ko")}>
+        Korean branding
+      </button>
+    </div>
   )
 }
 
@@ -869,6 +902,12 @@ function Fixture() {
       </Match>
       <Match when={scenario === "composer-ordinary-empty"}>
         <ComposerScenario harness={harness} enterprise={false} />
+      </Match>
+      <Match when={scenario === "composer-web-empty"}>
+        <ComposerScenario harness={harness} enterprise={false} web branding />
+      </Match>
+      <Match when={scenario === "branding-desktop"}>
+        <ComposerScenario harness={harness} enterprise={false} branding />
       </Match>
       <Match when={scenario === "guide"}>
         <GuideScenario harness={harness} />

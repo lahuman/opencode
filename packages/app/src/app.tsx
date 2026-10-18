@@ -62,7 +62,11 @@ export function AppBaseProviders(
           props.onThemeApplied?.(mode, scheme)
         }}
       >
-        <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
+        <LanguageProvider
+          desktop={platform.platform === "desktop"}
+          locale={props.locale}
+          onNativeTranslations={props.onNativeTranslations}
+        >
           <UiI18nBridge>
             <ErrorBoundary
               fallback={(error) => {

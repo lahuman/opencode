@@ -76,7 +76,13 @@ export function createServerShellController(server: Accessor<ServerConnection.An
 export function createAppearanceSettingsController() {
   const settings = useSettings()
   const theme = useTheme()
-  const themes = createMemo(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
+  const language = useLanguage()
+  const themes = createMemo(() =>
+    theme.ids().map((id) => ({
+      id,
+      name: id === "oc-2" ? language.t("desktop.menu.app") : theme.name(id),
+    })),
+  )
 
   onMount(() => void theme.loadThemes())
 

@@ -54,6 +54,7 @@ function trimFilter(dir: string, config: Configuration) {
 test.each(channels)("channel identity for $channel", ({ channel, appId }) => {
   const config = load(channel)
   expect(config.appId).toBe(appId)
+  expect(config.productName).toBe(channel === "prod" ? "CHAI" : `CHAI ${channel === "dev" ? "Dev" : "Beta"}`)
   expect(config.extraMetadata?.desktopName).toBe(`${appId}.desktop`)
   expect(config.linux?.executableName).toBe(appId)
   expect(config.linux?.desktop?.entry?.StartupWMClass).toBe(appId)
@@ -68,7 +69,7 @@ test.each(channels)("channel identity for $channel", ({ channel, appId }) => {
 
 test("legacy Linux launcher stays hidden", async () => {
   const desktop = await Bun.file(path.join(import.meta.dirname, "resources/linux/opencode-desktop.desktop")).text()
-  expect(desktop).toContain("Exec=/opt/OpenCode/ai.opencode.desktop %U")
+  expect(desktop).toContain("Exec=/opt/CHAI/ai.opencode.desktop %U")
   expect(desktop).toContain("Icon=ai.opencode.desktop")
   expect(desktop).toContain("StartupWMClass=ai.opencode.desktop")
   expect(desktop).toContain("NoDisplay=true")

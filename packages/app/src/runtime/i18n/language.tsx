@@ -13,6 +13,7 @@ import {
 } from "@opencode/ui/context/i18n"
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
+import { desktopBrandTemplate } from "./desktop-branding"
 import en from "@/runtime/i18n/en"
 import { dict } from "@opencode/ui/i18n/en"
 import {
@@ -235,7 +236,11 @@ export function loadInitialLocale() {
 export const { use: useLanguage, provider: LanguageProvider } = createSimpleContext({
   name: "Language",
   gate: false,
-  init: (props: { locale?: Locale; onNativeTranslations?: (bundle: DesktopNativeBundle) => void }) => {
+  init: (props: {
+    locale?: Locale
+    desktop?: boolean
+    onNativeTranslations?: (bundle: DesktopNativeBundle) => void
+  }) => {
     const initial = props.locale ?? readStoredLocale() ?? detectLocale()
     const [store, setStore, _, ready] = persisted(Persist.global("language"), languageSchema, { locale: initial })
 
@@ -254,10 +259,15 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
     const [dictionary] = createResource(locale, loadDict, {
       initialValue: dicts.get(initial) ?? base,
     })
+    const messages = createMemo(() => {
+      const current = dictionary() ?? base
+      if (!props.desktop) return current
+      return Object.fromEntries(
+        Object.entries(current).map(([key, value]) => [key, desktopBrandTemplate(key, value)]),
+      ) as Dictionary
+    })
 
-    const t = translator(() => dictionary() ?? base, resolveTemplate) as <
-      Key extends Extract<keyof Dictionary, string>,
-    >(
+    const t = translator(messages, resolveTemplate) as <Key extends Extract<keyof Dictionary, string>>(
       key: TranslationKey<Key>,
       params?: Record<string, string | number | boolean>,
     ) => string
@@ -267,7 +277,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       category: UiPluralCategory,
       params?: Record<string, string | number | boolean>,
     ) => {
-      const current = (dictionary.loading ? base : (dictionary() ?? base)) as Record<string, string>
+      const current = (dictionary.loading && !props.desktop ? base : messages()) as Record<string, string>
       const candidate = `${key}.${category}`
       const fallback = `${key}.other`
 
@@ -287,7 +297,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
       key: TranslationKey<Key>,
       params: Record<string, JSX.Element>,
     ) => {
-      const current = (dictionary.loading ? base : (dictionary() ?? base)) as Record<string, string>
+      const current = (dictionary.loading && !props.desktop ? base : messages()) as Record<string, string>
 
       return richTemplateParts(current[key] ?? key, params)
     }

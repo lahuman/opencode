@@ -27,28 +27,12 @@ const providedPlatform = Promise.withResolvers<CapturedPlatform>()
 const openLinkCalls: string[] = []
 const fetchCalls: Array<{ url: string; method: string }> = []
 
-const solid = await import("solid-js")
-// Keep startup suspended after the real index creates and provides its platform.
-const resources = [
-  { value: { id: "renderer-index-window" }, loading: false },
-  { value: 1, loading: false },
-  { value: undefined, loading: true },
-  { value: "sidecar", loading: false },
-  { value: undefined, loading: false },
-]
-let resourceIndex = 0
-mock.module("solid-js", () => ({
-  ...solid,
-  createResource: () => {
-    const resource = resources[resourceIndex++] ?? { value: undefined, loading: false }
-    return [
-      Object.assign(() => resource.value, { error: undefined, latest: resource.value, loading: resource.loading }),
-    ]
-  },
-}))
-
-mock.module("@opencode-ai/app", () => ({
-  ACCEPTED_FILE_EXTENSIONS: [],
+mock.module("@opencode/app/desktop", () => ({
+  CHAIWordmark: () => document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+  currentRoute: () => ({ type: "home" }),
+  preloadRoute: async () => undefined,
+  createNamespaceStorage: () => ({ getItem: () => null }),
+  flushPersisted: () => undefined,
   AppBaseProviders: (props: { children?: unknown }) => props.children,
   AppInterface: (props: { children?: unknown }) => props.children,
   createDraftStore: () => ({}),
@@ -64,10 +48,12 @@ mock.module("@opencode-ai/app", () => ({
   },
   useCommand: () => ({ trigger() {} }),
   useLanguage: () => ({ t: (key: string) => key }),
-  useWslServers: () => ({ data: undefined }),
+  useExtensionServers: () => ({ ready: () => false, list: () => [] }),
+  useCurrentRoute: () => ({ type: "home" }),
+  useTabs: () => ({}),
 }))
-mock.module("@opencode-ai/ui/logo", () => ({ Splash: () => document.createElement("span") }))
-mock.module("@opencode-ai/ui/theme/context", () => ({
+mock.module("@opencode/ui/logo", () => ({ Splash: () => document.createElement("span") }))
+mock.module("@opencode/ui/theme/context", () => ({
   useTheme: () => ({ mode: () => "light", themeId: () => "oc-2" }),
 }))
 mock.module("@sentry/solid", () => ({ init() {} }))
@@ -75,23 +61,7 @@ mock.module("@solidjs/router", () => ({
   createMemoryHistory: () => ({ listen: () => () => undefined, set() {} }),
   MemoryRouter: (props: { children?: unknown }) => props.children,
 }))
-mock.module("../src/renderer/i18n", () => ({ initI18n: async () => undefined, t: (key: string) => key }))
-mock.module("../src/renderer/initialization", () => ({
-  initializationData: (state: { latest?: unknown }) => state.latest,
-  initializationReady: () => true,
-}))
 mock.module("../src/renderer/onboarding", () => ({ DesktopFirstLaunchOnboarding: () => null }))
-mock.module("../src/renderer/webview-zoom", () => ({
-  resetZoom() {},
-  setPinchZoomEnabled: async () => undefined,
-  webviewZoom: () => 1,
-  zoomIn() {},
-  zoomOut() {},
-}))
-mock.module("../src/renderer/wsl/connections", () => ({
-  availableStartupServer: (value?: string | null) => value ?? "sidecar",
-  readyWslConnections: () => [],
-}))
 mock.module("../src/renderer/styles.css", () => ({}))
 
 const api = {
@@ -111,7 +81,10 @@ const api = {
   },
   getPinchZoomEnabled: async () => false,
   getWindowFullscreen: async () => false,
-  getWindowID: async () => "renderer-index-window",
+  getZoomFactor: async () => 1,
+  getWindowID: () => "renderer-index-window",
+  getWindowBootstrap: () => ({ firstLaunchPending: false, packaged: true }),
+  onStoreChanged() {},
   onDeepLink: () => () => undefined,
   onMenuCommand() {},
   onPinchZoomEnabledChanged() {},
@@ -128,7 +101,8 @@ const api = {
   storeLength: async () => 0,
   updater: { subscribe: async () => undefined },
 }
-Object.assign(window, { api })
+mock.module("../src/renderer/api", () => ({ api }))
+Object.assign(window, { electron: { enterprise: enterprise ? api.enterprise : undefined } })
 
 const nativeFetch: typeof fetch = (input, init) => {
   fetchCalls.push({

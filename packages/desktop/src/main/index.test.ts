@@ -35,8 +35,8 @@ test("desktop identity covers enterprise and every ordinary channel", async () =
   expect(result).toEqual({
     enterpriseProd: { appId: "com.company.sfmi", name: "CHAI" },
     enterpriseDev: { appId: "com.company.sfmi", name: "CHAI" },
-    dev: { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" },
-    beta: { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" },
-    prod: { appId: "ai.opencode.desktop", name: "OpenCode" },
+    dev: { appId: "ai.opencode.desktop.dev", name: "CHAI Dev" },
+    beta: { appId: "ai.opencode.desktop.beta", name: "CHAI Beta" },
+    prod: { appId: "ai.opencode.desktop", name: "CHAI" },
   })
 })

@@ -1,4 +1,5 @@
-import { createResource } from "solid-js"
+import { createResource, Show } from "solid-js"
+import { CHAIWordmark } from "@/components/chai-wordmark"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
@@ -80,7 +81,9 @@ export function SettingsAbout(props: { active: boolean }) {
         <p>{language.t("settings.about.license")}</p>
       </div>
 
-      <AnimatedWordmark active={props.active} />
+      <Show when={platform.platform === "desktop"} fallback={<AnimatedWordmark active={props.active} />}>
+        <CHAIWordmark fade={false} muted={false} class="settings-about-wordmark" />
+      </Show>
 
       <div class="settings-about-credits">
         <p>{language.rich("settings.about.writtenByNames", { names: language.list(writerCredits()) })}</p>

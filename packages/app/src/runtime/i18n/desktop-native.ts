@@ -1,3 +1,7 @@
+import { desktopBrandTemplate } from "./desktop-branding"
+
+export { desktopBrandTemplate } from "./desktop-branding"
+
 export const DESKTOP_NATIVE_LOCALES = [
   "en",
   "zh",
@@ -331,7 +335,9 @@ export function createDesktopNativeBundle(
 ): DesktopNativeBundle {
   return {
     locale,
-    messages: Object.fromEntries(DESKTOP_NATIVE_KEYS.map((key) => [key, translate(key)])) as DesktopNativeMessages,
+    messages: Object.fromEntries(
+      DESKTOP_NATIVE_KEYS.map((key) => [key, desktopBrandTemplate(key, translate(key))]),
+    ) as DesktopNativeMessages,
   }
 }
 

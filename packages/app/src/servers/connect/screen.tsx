@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@opencode/ui/button"
 import { TextInput } from "@opencode/ui/text-input"
 import { Wordmark } from "@opencode/ui/wordmark"
+import { CHAIWordmark } from "@/components/chai-wordmark"
 import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCheckServerHealth } from "@/runtime/server/health"
@@ -114,8 +115,10 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
   return (
     <main data-component="connect-server" aria-labelledby="server-connect-title">
       <div class="server-connect-content">
-        <div class="server-connect-brand" role="img" aria-label="OpenCode">
-          <Wordmark />
+        <div class="server-connect-brand" role="img" aria-label={language.t("desktop.menu.app")}>
+          <Show when={platform.platform === "desktop"} fallback={<Wordmark />}>
+            <CHAIWordmark />
+          </Show>
         </div>
         <header>
           <h1 id="server-connect-title">{language.t("server.connect.title")}</h1>

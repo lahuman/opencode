@@ -3,6 +3,7 @@ import {
   DESKTOP_NATIVE_KEYS,
   DESKTOP_NATIVE_LOCALE_TAGS,
   formatDesktopNativeMessage,
+  desktopBrandTemplate,
   type DesktopNativeBundle,
   type DesktopNativeKey,
 } from "@opencode/app/i18n/desktop-native"
@@ -26,7 +27,7 @@ export function setNativeTranslations(next: DesktopNativeBundle) {
 }
 
 export function nativeT(key: DesktopNativeKey, params?: Record<string, string | number>) {
-  return formatDesktopNativeMessage(bundle.messages[key], params)
+  return formatDesktopNativeMessage(desktopBrandTemplate(key, bundle.messages[key]), params)
 }
 
 /** The app locale the renderer last pushed. GUI extension catalogs resolve against it. */
@@ -47,7 +48,7 @@ export function onNativeTranslations(listener: () => void) {
 export function nativeMessage(key: string) {
   const messages: Readonly<Record<string, string>> = bundle.messages
 
-  return Object.hasOwn(messages, key) ? messages[key] : undefined
+  return Object.hasOwn(messages, key) ? desktopBrandTemplate(key, messages[key]) : undefined
 }
 
 export function nativePluralCategory(count: number) {

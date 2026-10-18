@@ -96,7 +96,7 @@ test("real renderer entrypoint creates the policy-enforcing desktop platform", a
   expect(stdout).not.toContain("/Users/private")
 })
 
-test("ordinary renderer entrypoint preserves the document title", async () => {
+test("ordinary desktop renderer uses the CHAI document title", async () => {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -115,5 +115,5 @@ test("ordinary renderer entrypoint preserves the document title", async () => {
 
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
-  expect(JSON.parse(stdout)).toEqual({ documentTitle: "OpenCode" })
+  expect(JSON.parse(stdout)).toEqual({ documentTitle: "CHAI" })
 })

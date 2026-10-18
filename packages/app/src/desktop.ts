@@ -1,4 +1,5 @@
 export { AppBaseProviders, AppInterface, preloadRoute } from "./app"
+export { CHAIWordmark } from "./components/chai-wordmark"
 
 export { useCommand } from "./shell/commands/command"
 

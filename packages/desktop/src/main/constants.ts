@@ -12,9 +12,9 @@ export const VERSION = app.isPackaged ? app.getVersion() : (process.env.OPENCODE
 export function desktopIdentity(input: { channel: Channel; enterprise: boolean }) {
   if (input.enterprise) return { appId: "com.company.sfmi", name: "CHAI" }
   if (input.channel === "dev" || input.channel === "local")
-    return { appId: "ai.opencode.desktop.dev", name: "OpenCode Dev" }
-  if (input.channel === "beta") return { appId: "ai.opencode.desktop.beta", name: "OpenCode Beta" }
-  return { appId: "ai.opencode.desktop", name: "OpenCode" }
+    return { appId: "ai.opencode.desktop.dev", name: "CHAI Dev" }
+  if (input.channel === "beta") return { appId: "ai.opencode.desktop.beta", name: "CHAI Beta" }
+  return { appId: "ai.opencode.desktop", name: "CHAI" }
 }
 
 const identity = desktopIdentity({ channel: app.isPackaged ? CHANNEL : "dev", enterprise: ENTERPRISE_ENABLED })

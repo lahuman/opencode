@@ -1,9 +1,9 @@
 import { Logo } from "@opencode/ui/logo"
 import { Show } from "solid-js"
-import { CHAIWordmark } from "./chai-wordmark"
+import { CHAIWordmark } from "@/components/chai-wordmark"
 import "./wordmark.css"
 
-export function NewSessionWordmark(props: { enterprise?: boolean }) {
+export function NewSessionWordmark(props: { chai?: boolean }) {
   return (
     <div
       data-component="new-session-wordmark"
@@ -12,7 +12,7 @@ export function NewSessionWordmark(props: { enterprise?: boolean }) {
     >
       <div data-slot="wordmark-reveal" class="relative mx-auto w-4/5">
         <Show
-          when={props.enterprise}
+          when={props.chai}
           fallback={
             <>
               <Logo class="block aspect-[720/129] w-full opacity-[0.16]" />

@@ -27,7 +27,7 @@ async function invokeFixtureControl(page: Page, name: string) {
 }
 
 async function openCompanyGuideFromMenu(page: Page) {
-  await page.getByRole("button", { name: "OpenCode menu" }).click()
+  await page.getByRole("button", { name: "CHAI menu" }).click()
   await page.getByRole("menuitem", { name: "Help" }).hover()
   await page.getByRole("menuitem", { name: "CHAI AI 가이드" }).click()
 }
@@ -101,10 +101,31 @@ test("New Session stays editable while Enterprise providers load, then disables 
 
 test("New Session preserves the ordinary composer with an empty provider catalog", async ({ page }) => {
   await page.goto(fixture("composer-ordinary-empty"))
-
   await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveAttribute("contenteditable", "true")
   await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
 })
+
+for (const surface of ["desktop", "web"] as const) {
+  test(`${surface} keeps its product branding in English and Korean`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await page.goto(fixture(surface === "desktop" ? "branding-desktop" : "composer-web-empty"))
+    const brand = surface === "desktop" ? "CHAI" : "OpenCode"
+    await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
+    await expect(page.getByTestId("app-brand")).toHaveText(brand)
+    await expect(page.getByTestId("brand-description")).toHaveText(`Change the display language for ${brand}`)
+    await expect(page.getByTestId("brand-provider")).toHaveText(
+      `Enter your OpenCode Gateway API key to connect your account and use OpenCode Gateway models in ${brand}.`,
+    )
+    await expect(
+      page.locator('[data-component="new-session-wordmark"] [data-component="chai-wordmark-v2"]'),
+    ).toHaveCount(surface === "desktop" ? 1 : 0)
+    await page
+      .locator('[data-component="new-session-wordmark"]')
+      .screenshot({ path: testInfo.outputPath(`${surface}-branding.png`) })
+    await page.getByRole("button", { name: "Korean branding" }).click()
+    await expect(page.getByTestId("brand-description")).toHaveText(`${brand} 표시 언어 변경`)
+  })
+}
 
 test("provider editor defaults credentials by operation", async ({ page }) => {
   await page.goto(fixture("company"))
@@ -444,7 +465,7 @@ test("public fatal error preserves the localized Discord reporting action", asyn
 
 test("CHAI AI 가이드 restores the Windows menu trigger after both close paths", async ({ page }) => {
   await page.goto(fixture("guide"))
-  const trigger = page.getByRole("button", { name: "OpenCode menu" })
+  const trigger = page.getByRole("button", { name: "CHAI menu" })
 
   await openCompanyGuideFromMenu(page)
   await page.keyboard.press("Escape")

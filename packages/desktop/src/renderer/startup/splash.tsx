@@ -1,6 +1,5 @@
 import { Splash } from "@opencode/ui/logo"
-import { Wordmark } from "@opencode/ui/wordmark"
-import type { Platform } from "@opencode/app/desktop"
+import { CHAIWordmark, type Platform } from "@opencode/app/desktop"
 import { onCleanup, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import "./splash.css"
@@ -80,7 +79,7 @@ export function LoadingSplash(props: {
         <div class="relative size-full">
           <div class="absolute inset-x-0 top-[25.375%]">
             <div class="mx-auto w-full max-w-[720px]">
-              <Wordmark
+              <CHAIWordmark
                 outline
                 fade={false}
                 muted={false}

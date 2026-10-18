@@ -15,6 +15,8 @@ describe("desktop native translations", () => {
   test("accepts the exact typed bundle", () => {
     const bundle = createDesktopNativeBundle("en", (key) => DESKTOP_NATIVE_ENGLISH[key])
     expect(parseDesktopNativeBundle(bundle)).toEqual(bundle)
+    expect(bundle.messages["desktop.menu.app"]).toBe("CHAI")
+    expect(bundle.messages["desktop.menu.ariaLabel"]).toBe("CHAI menu")
   })
 
   test("rejects unsupported locales and mismatched key sets", () => {

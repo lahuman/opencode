@@ -179,7 +179,7 @@ const getBase = (appId: string): Configuration => {
       target: ["dmg", "zip"],
     },
     protocols: {
-      name: "OpenCode",
+      name: "CHAI",
       schemes: ["opencode"],
     },
     win: {
@@ -224,7 +224,7 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Dev",
+        productName: "CHAI Dev",
         deb: { fpm: [metainfoFpm(appId)] },
         rpm: { packageName: "opencode-dev", fpm: [metainfoFpm(appId)] },
       }
@@ -234,8 +234,8 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode Beta",
-        protocols: { name: "OpenCode Beta", schemes: ["opencode"] },
+        productName: "CHAI Beta",
+        protocols: { name: "CHAI Beta", schemes: ["opencode"] },
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/beta/desktop/opencode/",
@@ -250,8 +250,8 @@ export function getConfig() {
       return {
         ...base,
         appId,
-        productName: "OpenCode",
-        protocols: { name: "OpenCode", schemes: ["opencode"] },
+        productName: "CHAI",
+        protocols: { name: "CHAI", schemes: ["opencode"] },
         publish: {
           provider: "generic",
           url: "https://opencode.ai/update/api/latest/desktop/opencode/",

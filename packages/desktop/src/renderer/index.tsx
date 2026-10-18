@@ -11,6 +11,7 @@ import { requireRendererRoot } from "./startup/root"
 import { desktopVersion, initializeSentry } from "./startup/sentry"
 
 const root = requireRendererRoot()
+document.title = "CHAI"
 
 const version = desktopVersion()
 

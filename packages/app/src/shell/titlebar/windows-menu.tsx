@@ -127,9 +127,7 @@ export function WindowsAppMenu(props: {
       <Menu.Portal>
         <Menu.Content class="desktop-app-menu">
           <Menu.Group>
-            <Menu.GroupLabel class="desktop-app-menu-heading">
-              {props.platform.enterprise ? "CHAI" : "OpenCode"}
-            </Menu.GroupLabel>
+            <Menu.GroupLabel class="desktop-app-menu-heading">{language.t("desktop.menu.app")}</Menu.GroupLabel>
             <For
               each={desktopMenuForEdition(props.platform.enterprise ? "enterprise" : "public").filter((menu) =>
                 desktopMenuVisible(menu, "windows"),
