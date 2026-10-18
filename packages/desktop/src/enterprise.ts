@@ -67,13 +67,15 @@ export function createEnterpriseRendererNetwork(
   profile: EnterpriseProfile,
   input: { openLink: (url: string) => void; fetch: typeof fetch },
 ) {
+  // Call browser fetch without making the options object its receiver.
+  const fetch = input.fetch
   const fetcher: typeof fetch = (request, init) => {
     const url = request instanceof Request ? request.url : request
     if (!enterpriseURLAllowed(profile, url)) {
       return Promise.reject(new Error(`Enterprise offline policy blocked ${enterpriseURLOrigin(url)}`))
     }
-    if (request instanceof Request) return input.fetch(request)
-    return input.fetch(request, init)
+    if (request instanceof Request) return fetch(request)
+    return fetch(request, init)
   }
   return {
     openLink: createEnterpriseURLHandler(profile, input.openLink),

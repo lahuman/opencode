@@ -422,10 +422,11 @@ describe("enterprise renderer network boundary", () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
     const network = createEnterpriseRendererNetwork(enabledProfile(), {
       openLink: () => undefined,
-      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+      fetch: function (this: void, input: RequestInfo | URL, init?: RequestInit) {
+        expect(this).toBeUndefined()
         calls.push({ input, init })
         return Promise.resolve(new Response(null, { status: 204 }))
-      }) as typeof fetch,
+      } as typeof fetch,
     })
     const url = new URL("https://llm.corp.example/v1/models")
     const request = new Request("http://127.0.0.1:4096/global/health")
