@@ -18,6 +18,8 @@ export type EnterprisePackageSummary = {
 
 const requiredEntries = [
   "CHAI.exe",
+  "resources/opencode-cli.exe",
+  "resources/opencode-cli.version",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",

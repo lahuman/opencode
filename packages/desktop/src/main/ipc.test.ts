@@ -30,7 +30,7 @@ describe("enterprise guide IPC", () => {
     expect(Object.keys(guide)).toEqual(["version", "markdown"])
   })
 
-  test("registerIpcHandlers registers and dispatches the enterprise guide read handler", async () => {
+  test("registers the native enterprise channel and validates the sender and payload before dispatch", async () => {
     const child = Bun.spawn([process.execPath, "run", `${import.meta.dir}/../../test/ipc-entrypoint.ts`], {
       stdout: "pipe",
       stderr: "pipe",
@@ -40,34 +40,33 @@ describe("enterprise guide IPC", () => {
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ])
-
     expect(stderr).toBe("")
     expect(exitCode).toBe(0)
-    expect(stdout.trim()).toBe(
-      JSON.stringify({
-        registered: true,
-        providerCatalog: {
-          schemaVersion: 1,
-          default: { providerID: "company", modelID: "company-code" },
-          providers: [
-            {
-              id: "company",
-              name: "Company",
-              baseURL: "https://llm.corp.example/v1",
-              models: [{ id: "company-code", name: "Company Code" }],
-              credentials: { configured: true, headerNames: ["Authorization"] },
-            },
-          ],
-        },
-        guide: { version: "2026.08", markdown: "# Registered guide\n" },
-        credentialBypassErrors: [
-          "Enterprise provider credentials are invalid",
-          "Enterprise provider credentials are invalid",
+    expect(stdout).not.toContain("private-ipc-secret")
+    expect(JSON.parse(stdout)).toEqual({
+      providerCatalog: {
+        schemaVersion: 1,
+        default: { providerID: "company", modelID: "company-code" },
+        providers: [
+          {
+            id: "company",
+            name: "Company",
+            baseURL: "https://llm.corp.example/v1",
+            models: [{ id: "company-code", name: "Company Code" }],
+            credentials: { configured: true, headerNames: ["Authorization"] },
+          },
         ],
-        relaunchCalls: 1,
-        shellOpenExternalURLs: ["https://llm.corp.example/docs"],
-      }),
-    )
+      },
+      guide: { version: "2026.08", markdown: "# Registered guide\n" },
+      failures: [
+        "Untrusted enterprise request",
+        "Untrusted enterprise request",
+        "Untrusted enterprise request",
+        "Unknown enterprise operation",
+        "Invalid enterprise request",
+        "Invalid enterprise request",
+      ],
+    })
   })
 
   test("rejects read failures without exposing the resolved guide path", async () => {

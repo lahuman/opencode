@@ -1,8 +1,6 @@
 import "@/index.css"
-import { type BaseRouterProps, MemoryRouter, Route, createMemoryHistory, useLocation } from "@solidjs/router"
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/solid-query"
-import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
-import { MarkedProvider } from "@opencode-ai/ui/context/marked"
+import { type BaseRouterProps, MemoryRouter, Route, createMemoryHistory } from "@solidjs/router"
+import { useDialog } from "@opencode/ui/context/dialog"
 import {
   type Component,
   createSignal,
@@ -11,31 +9,33 @@ import {
   Match,
   onMount,
   type ParentProps,
-  Show,
   Switch,
   untrack,
 } from "solid-js"
 import { render } from "solid-js/web"
+import { ServerConnection, ServersProvider, useServers } from "@/runtime/server/registry"
+import { ServerProvider, useServer } from "@/runtime/server/current"
+import { DialogServer } from "@/servers/connect/dialog"
+import { Model } from "@opencode/schema/model"
+import { Provider } from "@opencode/schema/provider"
 import { createStore } from "solid-js/store"
 import { AppBaseProviders, AppInterface } from "@/app"
 import { DialogCompanyProvider, useCompanyProviderSettingsState } from "@/components/dialog-company-provider"
-import { DialogConnectProvider } from "@/components/dialog-connect-provider"
-import { useServerManagementController } from "@/components/dialog-select-server"
-import { SettingsProviders } from "@/components/settings-providers"
-import { SettingsProvidersV2 } from "@/components/settings-v2/providers"
-import { WindowsAppMenu } from "@/components/windows-app-menu"
-import { CommandProvider, useCommand } from "@/context/command"
-import { DesktopCommands } from "@/desktop-commands"
-import { GlobalProvider } from "@/context/global"
-import { LanguageProvider } from "@/context/language"
-import { type EnterpriseProviderCatalogView, type Platform, PlatformProvider, usePlatform } from "@/context/platform"
-import { ServerConnection, ServerProvider, useServer } from "@/context/server"
-import { ServerSDKProvider } from "@/context/server-sdk"
-import { ServerSyncProvider } from "@/context/server-sync"
-import { SettingsProvider, useSettings } from "@/context/settings"
-import { TabsProvider, useTabs } from "@/context/tabs"
-import { setV2Toast, ToastRegion } from "@/utils/toast"
-import { useServerHealth } from "@/utils/server-health"
+import { DialogConnectProvider } from "@/providers/connect/dialog"
+import { SettingsProviders } from "@/settings/providers/providers"
+import { WindowsAppMenu } from "@/shell/titlebar/windows-menu"
+import { CommandProvider, useCommand } from "@/shell/commands/command"
+import { DesktopCommands } from "@/shell/commands/desktop"
+import { GlobalProvider, useGlobal } from "@/runtime/server/runtime"
+import {
+  type EnterpriseProviderCatalogView,
+  type Platform,
+  PlatformProvider,
+  usePlatform,
+} from "@/runtime/platform/platform"
+import { SettingsProvider } from "@/settings/model"
+import { TabsProvider } from "@/shell/tabs/tabs"
+import { ToastRegion } from "@/shell/notifications/toast"
 
 const DIAGNOSTIC_SUCCESS = {
   ok: true,
@@ -172,20 +172,20 @@ function createHarness(scenario?: string | null) {
     return {
       getItem: async (key: string) => values.get(key) ?? null,
       setItem: async (key: string, value: string) => {
+        values.set(key, value)
         setObservations(
           "storageWrites",
           untrack(() => observations.storageWrites.length),
           { name, key, value },
         )
-        values.set(key, value)
       },
       removeItem: async (key: string) => {
+        values.delete(key)
         setObservations(
           "storageWrites",
           untrack(() => observations.storageWrites.length),
           { name, key, value: null },
         )
-        values.delete(key)
       },
     }
   }
@@ -209,8 +209,10 @@ function createHarness(scenario?: string | null) {
   const connectedEvent = () =>
     new Response(
       `data: ${JSON.stringify({
-        directory: "global",
-        payload: { id: "fixture-connected", type: "server.connected", properties: {} },
+        id: "fixture-connected",
+        created: Date.now(),
+        type: "server.connected",
+        data: {},
       })}\n\n`,
       { status: 200, headers: { "content-type": "text/event-stream" } },
     )
@@ -236,123 +238,93 @@ function createHarness(scenario?: string | null) {
       body,
     })
 
-    if (url.pathname === "/global/health") return json({ healthy: true, version: "test" })
-    if (url.pathname === "/global/config") {
-      return json({ $schema: "https://opencode.ai/config.json" })
-    }
-    if (url.pathname === "/provider") {
-      if (scenario === "composer-enterprise-empty" && providerResponses.empty) {
-        return json({ all: [], connected: [], default: {} })
-      }
+    const location = { directory: url.searchParams.get("location[directory]") ?? "/repo" }
+    const response = (data: unknown) => json({ location, data })
+    if (url.pathname === "/api/info")
+      return json({ version: "2.0.30", pid: 1, urls: [sidecar.http.url], paths: { tmp: "/tmp" } })
+    if (url.pathname === "/api/location")
+      return json({ ...location, project: { id: "proj_fixture", directory: "/repo", canonical: "/repo" } })
+    if (url.pathname === "/api/provider" || url.pathname === "/api/model") {
+      if (scenario === "composer-enterprise-empty" && providerResponses.empty) return response([])
       if (scenario === "composer-enterprise-empty" && providerResponses.deferred) {
         return new Promise<Response>((resolve) => {
           providerResponses.pending.push(resolve)
           setProviderPending(providerResponses.pending.length)
         })
       }
-      if (
-        !scenario?.startsWith("company") &&
-        scenario !== "connect" &&
-        scenario !== "settings" &&
-        scenario !== "composer-enterprise-empty"
-      ) {
-        return json({ all: [], connected: [], default: {} })
-      }
-      const model = (providerID: string, id: string, name: string, url: string) => ({
-        id,
-        providerID,
-        name,
-        api: { id, url, npm: "@ai-sdk/openai-compatible" },
-        status: "active",
-      })
-      return json({
-        all: [
-          {
-            id: "company-llm",
-            name: "Company LLM",
-            source: "config",
-            env: [],
-            options: {},
-            models: {
-              "company-code": model("company-llm", "company-code", "Company Code", "https://llm.company.test/v1"),
-              ...(scenario === "company-mismatch"
-                ? {
-                    "pending-model": model(
-                      "company-llm",
-                      "pending-model",
-                      "Pending Model",
-                      "https://pending.company.test/v1",
-                    ),
-                  }
-                : {}),
-            },
-          },
-          {
-            id: "company-llm-2",
-            name: "Company Reasoning",
-            source: "config",
-            env: [],
-            options: {},
-            models: {
-              "company-reasoning": model(
-                "company-llm-2",
-                "company-reasoning",
-                "Company Reasoning",
-                "https://reasoning.company.test/v1",
-              ),
-            },
-          },
-        ],
-        connected: scenario === "composer-enterprise-empty" ? ["company-llm"] : [],
-        default: { "company-llm": "company-code", "company-llm-2": "company-reasoning" },
-      })
+      const providers =
+        scenario === "composer-enterprise-empty"
+          ? [{ id: "company-llm", name: "Company LLM", models: [{ id: "company-code", name: "Company Code" }] }]
+          : catalogState.value.providers
+      return response(
+        url.pathname === "/api/provider"
+          ? providers.map((provider) => ({
+              ...Provider.Info.empty(Provider.ID.make(provider.id)),
+              name: provider.name,
+            }))
+          : providers.flatMap((provider) =>
+              provider.models.map((model) => ({
+                ...Model.Info.default(Provider.ID.make(provider.id), Model.ID.make(model.id)),
+                name: model.name,
+              })),
+            ),
+      )
     }
-    if (url.pathname === "/path") {
-      return json({
-        home: "/home",
-        state: "/state",
-        config: "/config",
-        worktree: "/repo",
-        directory: "/repo",
-      })
-    }
-    if (url.pathname === "/session") return json([])
-    if (url.pathname === "/agent") {
+    if (url.pathname === "/api/agent")
+      return response(
+        ["build", "plan"].map((name) => ({
+          id: name,
+          name,
+          mode: "primary",
+          hidden: false,
+          request: { settings: {}, headers: {}, body: {} },
+          permissions: [],
+          model: catalogState.value.default && {
+            providerID: catalogState.value.default.providerID,
+            id: catalogState.value.default.modelID,
+          },
+        })),
+      )
+    if (url.pathname === "/api/config")
       return json([
         {
-          name: "build",
-          mode: "primary",
-          model:
-            scenario === "composer-enterprise-empty"
-              ? { providerID: "company-llm", modelID: "company-code" }
-              : undefined,
+          type: "document",
+          path: "/config/opencode.jsonc",
+          info: {
+            model: catalogState.value.default && {
+              providerID: catalogState.value.default.providerID,
+              model: catalogState.value.default.modelID,
+            },
+          },
         },
       ])
-    }
-    if (url.pathname === "/config") return json({})
-    if (url.pathname === "/session/status") return json({})
-    if (url.pathname === "/project/current") return json({ id: "project", worktree: "/repo" })
-    if (url.pathname === "/vcs") return json(null)
-    if (url.pathname === "/api/reference") return json({ data: [] })
-    if (url.pathname === "/permission" || url.pathname === "/question" || url.pathname === "/command") {
-      return json([])
-    }
-    if (url.pathname === "/mcp") return json({})
-    if (url.pathname === "/experimental/resource" || url.pathname === "/lsp") return json([])
-    if (url.pathname === "/project") return json([])
-    if (/^\/provider\/[^/]+\/diagnostics$/.test(url.pathname)) {
-      if (behavior.diagnosticOutcome === "network-error") {
-        throw new Error("transport failure with private detail")
-      }
+    if (url.pathname === "/api/session/active") return json({})
+    if (url.pathname === "/api/project" || url.pathname === "/api/worktree") return json([])
+    if (
+      [
+        "/api/session",
+        "/api/integration",
+        "/api/command",
+        "/api/reference",
+        "/api/permission/request",
+        "/api/permission/saved",
+        "/api/form",
+        "/api/shell",
+      ].includes(url.pathname)
+    )
+      return response([])
+    if (url.pathname === "/api/vcs") return response(null)
+    if (/^\/api\/provider\/[^/]+\/diagnose$/.test(url.pathname)) {
+      if (behavior.diagnosticOutcome === "network-error") throw new Error("transport failure with private detail")
       const value = await new Promise<unknown>((resolve) => {
         diagnostic.resolve = resolve
         setDiagnosticPending(true)
       })
       diagnostic.resolve = undefined
       setDiagnosticPending(false)
-      return json(value)
+      return response(value)
     }
-    if (url.pathname === "/global/event") {
+    if (url.pathname === "/api/event") {
       if (globalEvent.connected) {
         globalEvent.connected = false
         return connectedEvent()
@@ -395,12 +367,6 @@ function createHarness(scenario?: string | null) {
     async notify() {},
     async openDirectoryPickerDialog() {
       return null
-    },
-    async getDefaultServer() {
-      return ServerConnection.key(remote)
-    },
-    async setDefaultServer(key) {
-      setObservations("defaultWrites", observations.defaultWrites.length, key)
     },
     enterprise: {
       async providerCatalog() {
@@ -566,7 +532,7 @@ function createHarness(scenario?: string | null) {
     resolveProviders() {
       providerResponses.deferred = false
       providerResponses.empty = true
-      const response = json({ all: [], connected: [], default: {} })
+      const response = json({ location: { directory: "/repo" }, data: [] })
       providerResponses.pending.splice(0).forEach((resolve) => resolve(response.clone()))
       setProviderPending(0)
     },
@@ -594,54 +560,36 @@ function createHarness(scenario?: string | null) {
 
 type Harness = ReturnType<typeof createHarness>
 
-function QueryProvider(props: ParentProps) {
-  return (
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false, refetchOnMount: false, refetchOnWindowFocus: false } },
-        })
-      }
-    >
-      {props.children}
-    </QueryClientProvider>
-  )
-}
-
 function ServerTree(props: ParentProps<{ harness: Harness; platform?: Platform }>) {
   return (
     <PlatformProvider value={props.platform ?? props.harness.platform}>
-      <LanguageProvider locale="en">
-        <QueryProvider>
-          <MemoryRouter history={props.harness.history}>
-            <Route
-              path="*"
-              component={() => (
-                <ServerProvider
-                  defaultServer={ServerConnection.key(props.harness.remote)}
-                  servers={[props.harness.sidecar, props.harness.remote]}
-                >
-                  <GlobalProvider>{props.children}</GlobalProvider>
-                </ServerProvider>
-              )}
-            />
-          </MemoryRouter>
-        </QueryProvider>
-      </LanguageProvider>
+      <AppBaseProviders locale="en">
+        <ServersProvider
+          canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
+          servers={[props.harness.sidecar, props.harness.remote]}
+        >
+          <SettingsProvider>
+            <MemoryRouter history={props.harness.history}>
+              <Route
+                path="*"
+                component={() => (
+                  <TabsProvider>
+                    <GlobalProvider>
+                      <ServerProvider conn={props.harness.sidecar}>{props.children}</ServerProvider>
+                    </GlobalProvider>
+                  </TabsProvider>
+                )}
+              />
+            </MemoryRouter>
+          </SettingsProvider>
+        </ServersProvider>
+      </AppBaseProviders>
     </PlatformProvider>
   )
 }
 
 function DialogTree(props: ParentProps<{ harness: Harness }>) {
-  return (
-    <ServerTree harness={props.harness}>
-      <DialogProvider>
-        <ServerSDKProvider>
-          <ServerSyncProvider>{props.children}</ServerSyncProvider>
-        </ServerSDKProvider>
-      </DialogProvider>
-    </ServerTree>
-  )
+  return <ServerTree harness={props.harness}>{props.children}</ServerTree>
 }
 
 function Observations(props: { harness: Harness }) {
@@ -672,14 +620,11 @@ function Observations(props: { harness: Harness }) {
 }
 
 function HealthConsumer(props: { harness: Harness }) {
+  const servers = useServers()
   const server = useServer()
-  useServerHealth(
-    () => server.list,
-    () => true,
-  )
   return (
     <>
-      <output data-testid="server-list">{server.list.map(ServerConnection.key).join(",")}</output>
+      <output data-testid="server-list">{servers.list.map((conn) => ServerConnection.key(conn)).join(",")}</output>
       <output data-testid="active-server">{server.key}</output>
       <Observations harness={props.harness} />
     </>
@@ -688,86 +633,17 @@ function HealthConsumer(props: { harness: Harness }) {
 
 function ServerScenario(props: { harness: Harness }) {
   return (
-    <PlatformProvider value={props.harness.platform}>
-      <ServerProvider
-        defaultServer={ServerConnection.key(props.harness.remote)}
-        servers={[props.harness.sidecar, props.harness.remote]}
-      >
-        <HealthConsumer harness={props.harness} />
-      </ServerProvider>
-    </PlatformProvider>
-  )
-}
-
-function ControllerConsumer(props: { harness: Harness }) {
-  const [operations, setOperations] = createStore<Record<string, string>>({})
-  const [closeCalls, setCloseCalls] = createSignal(0)
-  const controller = useServerManagementController({ onSelect: () => setCloseCalls((value) => value + 1) })
-  const server = useServer()
-  const settings = useSettings()
-  const tabs = useTabs()
-  const location = useLocation()
-  const invoke = (name: string, action: () => unknown) => {
-    setOperations(name, "pending")
-    void Promise.resolve()
-      .then(action)
-      .then(
-        () => setOperations(name, "resolved"),
-        (error: unknown) => setOperations(name, error instanceof Error ? error.message : String(error)),
-      )
-  }
-
-  return (
-    <>
-      <div data-testid="controller-controls">
-        <button
-          type="button"
-          disabled={!settings.ready() || !tabs.ready()}
-          onClick={() => invoke("add", controller.startAdd)}
-        >
-          Invoke add
-        </button>
-        <button
-          type="button"
-          disabled={!settings.ready() || !tabs.ready()}
-          onClick={() => invoke("select", () => controller.select(props.harness.remote, true))}
-        >
-          Invoke select
-        </button>
-        <button
-          type="button"
-          disabled={!settings.ready() || !tabs.ready()}
-          onClick={() => invoke("remove", () => controller.handleRemove(ServerConnection.key(props.harness.remote)))}
-        >
-          Invoke remove
-        </button>
-        <button
-          type="button"
-          disabled={!settings.ready() || !tabs.ready()}
-          onClick={() => invoke("default", () => controller.setDefault(ServerConnection.key(props.harness.remote)))}
-        >
-          Invoke default
-        </button>
-      </div>
-      <output data-testid="controller-ready">{String(settings.ready() && tabs.ready())}</output>
-      <output data-testid="controller-results">{JSON.stringify(operations)}</output>
-      <output data-testid="controller-location">{location.pathname}</output>
-      <output data-testid="controller-active">{server.key}</output>
-      <output data-testid="controller-close-calls">{closeCalls()}</output>
-      <Observations harness={props.harness} />
-      <ToastRegion v2={false} />
-    </>
+    <ServerTree harness={props.harness}>
+      <HealthConsumer harness={props.harness} />
+    </ServerTree>
   )
 }
 
 function ControllerScenario(props: { harness: Harness }) {
   return (
     <ServerTree harness={props.harness}>
-      <SettingsProvider>
-        <TabsProvider>
-          <ControllerConsumer harness={props.harness} />
-        </TabsProvider>
-      </SettingsProvider>
+      <OpenDialog component={() => <DialogServer mode="add" />} />
+      <Observations harness={props.harness} />
     </ServerTree>
   )
 }
@@ -856,7 +732,7 @@ function GuideMenu() {
   const platform = usePlatform()
   return (
     <div class="fixed left-2 top-2">
-      <WindowsAppMenu command={command} platform={platform} variant="v2" />
+      <WindowsAppMenu command={command} platform={platform} />
     </div>
   )
 }
@@ -864,20 +740,10 @@ function GuideMenu() {
 function CompanyGuideTree(props: ParentProps<{ harness: Harness; platform?: Platform }>) {
   return (
     <ServerTree harness={props.harness} platform={props.platform}>
-      <DialogProvider>
-        <ServerSDKProvider>
-          <ServerSyncProvider>
-            <SettingsProvider>
-              <CommandProvider>
-                <MarkedProvider>
-                  <DesktopCommands />
-                  {props.children}
-                </MarkedProvider>
-              </CommandProvider>
-            </SettingsProvider>
-          </ServerSyncProvider>
-        </ServerSDKProvider>
-      </DialogProvider>
+      <CommandProvider>
+        <DesktopCommands />
+        {props.children}
+      </CommandProvider>
     </ServerTree>
   )
 }
@@ -901,7 +767,6 @@ function TopLevelFailure(): JSX.Element {
 }
 
 function SettingsDiagnosticConsumer() {
-  setV2Toast(true)
   const company = useCompanyProviderSettingsState()
   return (
     <>
@@ -909,7 +774,7 @@ function SettingsDiagnosticConsumer() {
         {company.checking() ? "Testing settings connection" : "Settings test connection"}
       </button>
       <output data-testid="settings-credential-status">{company.status()}</output>
-      <ToastRegion v2 />
+      <ToastRegion />
     </>
   )
 }
@@ -928,9 +793,7 @@ function SettingsScenario(props: { harness: Harness }) {
 function SettingsLayoutScenario(props: { harness: Harness; v2?: boolean }) {
   return (
     <DialogTree harness={props.harness}>
-      <Show when={props.v2} fallback={<SettingsProviders />}>
-        <SettingsProvidersV2 directory={() => undefined} />
-      </Show>
+      <SettingsProviders directory={undefined} />
     </DialogTree>
   )
 }
@@ -947,12 +810,11 @@ function ComposerScenario(props: { harness: Harness; enterprise: boolean }) {
       <AppBaseProviders locale="en">
         <AppInterface
           router={Router}
-          defaultServer={ServerConnection.key(props.harness.sidecar)}
           canonicalLocalServer={ServerConnection.key(props.harness.sidecar)}
           servers={[props.harness.sidecar]}
-          disableHealthCheck
-          serverScoped={<ComposerControls harness={props.harness} />}
-        />
+        >
+          <ComposerControls harness={props.harness} />
+        </AppInterface>
         <Observations harness={props.harness} />
       </AppBaseProviders>
     </PlatformProvider>
@@ -960,16 +822,18 @@ function ComposerScenario(props: { harness: Harness; enterprise: boolean }) {
 }
 
 function ComposerControls(props: { harness: Harness }) {
-  const queryClient = useQueryClient()
+  const global = useGlobal()
   return (
-    <div class="fixed left-2 top-2 z-[10000]">
+    <div style={{ position: "fixed", bottom: "2px", right: "2px", "z-index": 10000 }}>
       <button
         type="button"
         onClick={() => {
           props.harness.refreshProviders()
-          void queryClient.invalidateQueries({
-            predicate: (query) => query.queryKey[2] === "providers",
-          })
+          const data = global.ensureServerCtx(props.harness.sidecar).data
+          const location = { directory: "/repo" }
+          data.location.provider.invalidate(location)
+          data.location.model.invalidate(location)
+          void Promise.all([data.location.provider.sync(location), data.location.model.sync(location)])
         }}
       >
         Refresh providers

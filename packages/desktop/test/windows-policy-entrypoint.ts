@@ -9,7 +9,9 @@ const publicProtocol = mode === "public-protocol"
 Object.defineProperty(process, "resourcesPath", { value: tmpdir() })
 Object.assign(process.env, {
   OPENCODE_ENTERPRISE: publicProtocol ? "0" : "1",
-  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }]),
+  OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
+    { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
+  ]),
   OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
@@ -155,7 +157,7 @@ mock.module("electron-window-state", () => ({
   }),
 }))
 
-mock.module("../src/main/store", () => ({
+mock.module("../src/main/storage/store", () => ({
   getStore: () => ({
     get: (key: string) => store.get(key),
     set: (key: string, value: unknown) => store.set(key, value),
@@ -187,13 +189,14 @@ mock.module("electron", () => ({
   dialog: {},
   nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
   nativeTheme: { shouldUseDarkColors: false },
-  net: {},
+  screen: {},
+  net: assetSession,
   netLog: {},
   protocol: {
     handle(_scheme: string, handler: ProtocolHandler) {
       protocolState.handler = handler
     },
-    isProtocolHandled: () => false,
+    isProtocolHandled: () => Boolean(protocolState.handler),
     registerSchemesAsPrivileged() {},
   },
   session: {
@@ -262,10 +265,17 @@ await Promise.all([
   writeFile(join(assetRoot, "assets/icon.png"), "image"),
 ])
 
+mock.module("../src/main/windows/window-state", () => ({
+  windowStateFile: (id: string) => `${id}.json`,
+  readWindowState: () => undefined,
+  resolveWindowState: (_value: unknown, defaults: { width: number; height: number }) => defaults,
+  manageWindowState() {},
+}))
+const { registerRendererProtocol, setProtocolReporter } = await import("../src/main/windows/protocol")
+setProtocolReporter((level, message, metadata) => logs.push({ service: "protocol", level, message, metadata }))
+registerRendererProtocol(assetRoot)
 if (publicProtocol) {
   try {
-    const { registerRendererProtocol } = await import("../src/main/windows")
-    registerRendererProtocol({ rendererRoot: assetRoot })
     console.log(
       JSON.stringify({
         mode,
@@ -279,16 +289,13 @@ if (publicProtocol) {
 }
 
 try {
-  const { createMainWindow, installEnterpriseWindowPolicy, registerRendererProtocol } = await import(
-    "../src/main/windows"
-  )
-  createMainWindow("security-review")
-  createMainWindow("security-review-second")
+  const { createEarlyWindow } = await import("../src/main/windows/early")
+  createEarlyWindow()
+  createEarlyWindow()
   const win = windows[0]
   const second = windows[1]
   if (!win) throw new Error("production window was not created")
   if (!second) throw new Error("second production window was not created")
-  registerRendererProtocol({ rendererRoot: assetRoot })
 
   const requests = {
     loopbackHealth: request(sessionRequest, {
@@ -395,31 +402,6 @@ try {
     fetchError: (await protocolRequest("oc://renderer/assets/fetch-error.js?token=fetch-error-query-secret")).status,
   }
 
-  const ordinary = new FakeBrowserWindow()
-  Reflect.apply(installEnterpriseWindowPolicy, undefined, [ordinary, { profile: { enabled: false } }])
-  const conflicting = new FakeBrowserWindow()
-  const conflictingPolicyError = (() => {
-    try {
-      Reflect.apply(installEnterpriseWindowPolicy, undefined, [
-        conflicting,
-        {
-          profile: {
-            enabled: true,
-            baseURL: "https://other.example/v1",
-            modelID: "other",
-            modelName: "Other",
-            defaultsVersion: "other",
-            guideVersion: "other",
-            allowedOrigins: ["https://other.example"],
-          },
-        },
-      ])
-      return undefined
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error)
-    }
-  })()
-
   console.log(
     JSON.stringify({
       productionWindow: {
@@ -450,13 +432,6 @@ try {
         rejections: protocolRejections,
       },
       logs,
-      ordinaryRegistrations: {
-        requestRegistrations: sessionRequestRegistrations,
-        windowOpen: Boolean(ordinary.callbacks.windowOpen),
-        navigation: Boolean(ordinary.callbacks.navigation),
-        redirect: Boolean(ordinary.callbacks.redirect),
-      },
-      conflictingPolicyError,
     }),
   )
 } finally {

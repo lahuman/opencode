@@ -1,4 +1,13 @@
 import "../../app/happydom"
+import { mock } from "bun:test"
+import { createDraftStore } from "../../app/src/runtime/persistence/drafts"
+import { createNamespaceStorage } from "../../app/src/runtime/persistence/namespace"
+import { flushPersisted } from "../../app/src/runtime/persistence/persist"
+
+mock.module("@opencode/app/desktop", () => ({ createDraftStore, createNamespaceStorage, flushPersisted }))
+mock.module("../src/renderer/ipc-client", () => ({
+  onBeforeDispose: () => {}, invoke: async () => {}, listen: () => () => {}, send: () => {}, cancellable: () => {},
+}))
 
 const mode = process.argv[2]
 Object.assign(process.env, {
@@ -44,8 +53,14 @@ const api = {
   relaunch: async () => {
     restartCalls.push("relaunch")
   },
+  getZoomFactor: async () => 1,
+  getWindowBootstrap: () => ({ packaged: false }),
+  getWindowFullscreen: async () => false,
+  onWindowFullscreenChanged: () => {},
+  onStoreChanged: () => {},
 }
-Object.assign(window, { api })
+Object.assign(window, { electron: { enterprise: api.enterprise } })
+mock.module("../src/renderer/api", () => ({ api }))
 
 const nativeFetch: typeof fetch = (input, init) => {
   fetchCalls.push({
@@ -56,12 +71,8 @@ const nativeFetch: typeof fetch = (input, init) => {
 }
 Object.defineProperty(globalThis, "fetch", { value: nativeFetch, configurable: true, writable: true })
 
-const { createPlatform } = await import("../src/renderer/platform")
-const platform = createPlatform({}, () => ({ status: "disabled" }), {
-  acceptedFileExtensions: [],
-  makeServerKey: (value) => value,
-  windowFullscreen: () => false,
-})
+const { createDesktopPlatform } = await import("../src/renderer/platform")
+const platform = createDesktopPlatform(api as unknown as Parameters<typeof createDesktopPlatform>[0], { id: "test-window", version: "test" })
 
 platform.openExternal("https://opencode.ai/docs?token=open-link-secret")
 platform.openExternal("https://llm.corp.example/docs")

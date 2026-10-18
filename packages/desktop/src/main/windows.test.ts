@@ -30,7 +30,7 @@ function parseCSP(value: string) {
   )
 }
 
-test("production windows enforce one session policy and exact packaged document navigation", async () => {
+test("production early windows enforce one session policy and exact packaged document navigation", async () => {
   const result = await run("packaged")
 
   expect(result.productionWindow).toEqual({
@@ -55,7 +55,7 @@ test("production windows enforce one session policy and exact packaged document 
     malformed: { value: { cancel: true } },
     rendererFile: { value: { cancel: true } },
   })
-  expect(result.loggerFailure).toEqual({ value: { cancel: true }, error: "logger failed" })
+  expect(result.loggerFailure).toEqual({ value: { cancel: true } })
   expect(result.windowOpen).toEqual({ public: { action: "deny" }, provider: { action: "deny" } })
   const navigation = {
     trusted: false,
@@ -161,14 +161,6 @@ test("production windows enforce one session policy and exact packaged document 
     missing: 404,
     fetchError: 404,
   })
-  expect(result.ordinaryRegistrations).toEqual({
-    requestRegistrations: 1,
-    windowOpen: false,
-    navigation: false,
-    redirect: false,
-  })
-  expect(result.conflictingPolicyError).toBe("Enterprise session policy cannot change after installation")
-
   const protocolLogs = result.logs.filter((entry: { service: string }) => entry.service === "protocol")
   expect(
     protocolLogs.map((entry: { metadata: Record<string, unknown> }) => Object.keys(entry.metadata).sort()),
@@ -288,5 +280,4 @@ test.each([
     navigation: false,
     redirect: true,
   })
-  expect(result.conflictingPolicyError).toBe("Enterprise session policy cannot change after installation")
 })

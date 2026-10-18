@@ -3,7 +3,7 @@ import type {
   EnterpriseProvider,
   EnterpriseProviderCatalogView,
   EnterpriseProviderModel,
-} from "@/context/platform"
+} from "@/runtime/platform/platform"
 
 export type CompanyProviderDiagnosticResult = {
   ok: boolean
@@ -199,4 +199,26 @@ export function providerFormFromCatalog(provider: EnterpriseProvider): Enterpris
     baseURL: provider.baseURL,
     models: provider.models.map((model) => ({ ...model })),
   }
+}
+
+const providerMessageKeys = {
+  "Enterprise provider connection test failed. Check the server and try again.": "enterprise.provider.message.enterpriseProviderConnectionTestFailedCheckTheServerAndTryAgain",
+  "Provider ID is required": "enterprise.provider.message.providerIDIsRequired",
+  "Provider name is required": "enterprise.provider.message.providerNameIsRequired",
+  "Base URL is required": "enterprise.provider.message.baseURLIsRequired",
+  "Provider ID already exists": "enterprise.provider.message.providerIDAlreadyExists",
+  "Base URL must use http or https": "enterprise.provider.message.baseURLMustUseHttpOrHttps",
+  "Base URL cannot include credentials, query parameters, or fragments": "enterprise.provider.message.baseURLCannotIncludeCredentialsQueryParametersOrFragments",
+  "Model ID is required": "enterprise.provider.message.modelIDIsRequired",
+  "Model name is required": "enterprise.provider.message.modelNameIsRequired",
+  "Model IDs must be unique": "enterprise.provider.message.modelIDsMustBeUnique",
+  "Secret headers require a name and value": "enterprise.provider.message.secretHeadersRequireANameAndValue",
+  "Secret header names must be unique": "enterprise.provider.message.secretHeaderNamesMustBeUnique",
+  "Credentials must be re-entered": "enterprise.provider.message.credentialsMustBeReentered",
+  "Credentials configured": "enterprise.provider.message.credentialsConfigured",
+  "Credentials not configured": "enterprise.provider.message.credentialsNotConfigured"
+} as const
+
+export function enterpriseProviderMessageKey(message: string) {
+  return providerMessageKeys[message as keyof typeof providerMessageKeys] ?? "common.requestFailed"
 }

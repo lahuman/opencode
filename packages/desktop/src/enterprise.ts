@@ -47,7 +47,7 @@ export function enterpriseRendererRequestAllowed(
     return url.hostname === renderer.hostname && url.port === renderer.port
   }
   if (url.protocol === "opencode:") return url.host === "app"
-  if (url.protocol === "oc:") return url.host === "renderer"
+  if (url.protocol === "oc:") return url.host === "renderer" || url.host === "extensions"
   if (url.protocol === "data:" || url.protocol === "blob:") return true
   return enterpriseURLAllowed(profile, url)
 }
@@ -95,6 +95,36 @@ function parseURL(input: string | URL) {
   } catch {
     return undefined
   }
+}
+
+export function enterpriseContentSecurityPolicy(profile: EnterpriseProfile) {
+  if (!profile.enabled) return undefined
+  const loopback = ["localhost", "127.0.0.1", "[::1]"]
+  return [
+    ["default-src", "'none'"],
+    ["script-src", "'self'", "'wasm-unsafe-eval'"],
+    ["style-src", "'self'", "'unsafe-inline'"],
+    ["font-src", "'self'", "data:"],
+    ["img-src", "'self'", "data:", "blob:"],
+    ["media-src", "'self'", "data:", "blob:"],
+    ["worker-src", "'self'", "blob:"],
+    ["manifest-src", "'none'"],
+    [
+      "connect-src",
+      "'self'",
+      "data:",
+      "blob:",
+      ...["http", "https", "ws", "wss"].flatMap((scheme) => loopback.map((host) => `${scheme}://${host}:*`)),
+      ...profile.allowedOrigins.filter((origin) => !new URL(origin).hostname.includes("*")),
+    ],
+    ["object-src", "'none'"],
+    ["base-uri", "'none'"],
+    ["frame-src", "'none'"],
+    ["frame-ancestors", "'none'"],
+    ["form-action", "'none'"],
+  ]
+    .map((directive) => directive.join(" "))
+    .join("; ")
 }
 
 function isLoopback(url: URL) {

@@ -18,6 +18,7 @@ describe("company guide command", () => {
   test("is unavailable outside enterprise mode", () => {
     expect(
       createCompanyGuideCommand({
+      title: "CHAI AI 가이드",
         enterprise: undefined,
         category: "Settings",
         open: () => undefined,
@@ -29,6 +30,7 @@ describe("company guide command", () => {
   test("opens the local guide returned by the enterprise platform", async () => {
     const opened: { version: string; markdown: string }[] = []
     const command = createCompanyGuideCommand({
+      title: "CHAI AI 가이드",
       enterprise: {
         ...providerAPI,
         readGuide: async () => ({ version: "chai-1", markdown: "# CHAI AI 사용 가이드" }),
@@ -55,6 +57,7 @@ describe("company guide command", () => {
     const opened: { version: string; markdown: string }[] = []
     let failures = 0
     const command = createCompanyGuideCommand({
+      title: "CHAI AI 가이드",
       enterprise: {
         ...providerAPI,
         readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),

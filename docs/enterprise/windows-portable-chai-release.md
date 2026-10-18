@@ -23,11 +23,11 @@ Run these checks before the controlled Windows build. Run every command from the
 
 ```powershell
 Set-Location packages\core
-bun test
+bun run test
 bun typecheck
 
-Set-Location ..\opencode
-bun test test/session/system.test.ts test/config/config.test.ts test/permission/next.test.ts
+Set-Location ..\cli
+bun test test/model-snapshot.test.ts
 bun typecheck
 
 Set-Location ..\client
@@ -35,7 +35,7 @@ bun test
 bun typecheck
 
 Set-Location ..\app
-bun test src/desktop-menu.test.ts src/context/highlights.test.ts
+bun run test:unit
 bun run test:browser
 bun typecheck
 bun run typecheck:e2e
@@ -48,7 +48,23 @@ bun test
 bun typecheck
 ```
 
-The focused desktop command is the package-fixture check; it exercises the unpacked/ZIP contract, integrity metadata, and PowerShell smoke contract. The full desktop test command is required as the integrated source check. Run the enterprise Playwright command from `packages/app`: that package owns the `test:e2e` script and its Playwright configuration. It requires the local listener available to the test runner; run it outside a local-listener sandbox when required. If the non-CI full app suite is also run, record the known Arabic locale parity failure separately and do not classify it as a portable-package regression.
+The focused desktop command is the package-fixture check; it exercises the unpacked/ZIP contract, integrity metadata, and PowerShell smoke contract. The full desktop test command is required as the integrated source check. Run the enterprise Playwright command from `packages/app`: that package owns the `test:e2e` script and its Playwright configuration. It requires the local listener available to the test runner; run it outside a local-listener sandbox when required. Also run `bun run check` from the repository root for the canonical lint and package type checks. Record failures separately rather than treating a focused test pass as a complete release acceptance.
+
+### Dev merge verification, 2026-10-18
+
+The merge combines enterprise revision `902b59f255` with dev snapshot `7b99646cf1`. Enterprise behavior now uses the native Core, Protocol, Server, Client, CLI, App, and Desktop owners. The generated Client was regenerated from the HTTP API. Plan remains read-only until an explicit Build approval; company credentials stay outside the public credential database; enterprise saved permissions remain directory-scoped and expire when the process restarts.
+
+Verified on Windows with Bun 1.3.14 and Node 24.19.0:
+
+- Core: 106 permission tests, 63 focused enterprise tests, and all 10 Session shell tests passed. A shell timeout failed under concurrent build load and passed both alone and in the complete standalone shell suite.
+- App: production build, all 21 company UI cases, request-dock confirmation/replacement and background auto-approval cases passed. Client state synchronization passed all 31 tests.
+- TUI: 36 lifecycle tests passed, with 2 existing skips. Desktop native IPC, window security, and authenticated private-server tests passed all 11 cases; packaging configuration passed 19 tests.
+- Desktop enterprise suite: 341 tests passed in the broad run. Three failures were subsequently fixed and covered by the focused manifest/skill/package run (145 passed). Two file-symlink fixtures still fail before verification with Windows `EPERM`; directory-junction escape checks passed. No Windows security setting was changed to bypass this restriction.
+- Production tab-switch benchmark: all 3 final runs showed the correct destination and exactly one history request. First correct display took 482.4, 554.8, and 460.6 ms; stable display took 496.7, 568.0, and 475.7 ms. The earlier single baseline was 350.9/355.8 ms. These observations do not establish a performance improvement or isolate the cause of the slower timings.
+
+The retired monolithic Desktop entrypoint fixtures are replaced by the native IPC/window/private-server tests. The retired legacy-layout new-session test targeted a layout removed upstream; current `new-session.spec.ts`, `composer.spec.ts`, composer submission tests, and prompt-persistence tests own the supported draft/composer contracts.
+
+Remaining validation limits must be resolved or accepted before a release: the root check's Astro site type checks (`@opencode/www` and `@opencode/posts`) fail in upstream `picomatch` loading with `require is not defined`; the other 33 type-check tasks passed. App E2E type checking also reports existing overload/listener typing errors in the terminal probe, timeline probe, and timeline-stream keeper; those files match the dev snapshot. This merge verification does not produce a portable ZIP or replace the Windows acceptance steps below.
 
 On a Windows acceptance VM, parse the PowerShell script before executing it:
 

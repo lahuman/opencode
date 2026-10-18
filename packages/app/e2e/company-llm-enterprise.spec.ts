@@ -7,7 +7,7 @@ const diagnosticRequest = {
   origin: "http://127.0.0.1:5199",
   host: "127.0.0.1:5199",
   method: "POST",
-  path: "/provider/company-llm/diagnostics",
+  path: "/api/provider/company-llm/diagnose",
   query: "",
   body: { modelID: "company-code", checkToolCall: true },
 }
@@ -41,7 +41,7 @@ test("mounted ServerProvider excludes persisted remotes before health polling", 
   await expect
     .poll(async () =>
       (await output<Array<{ host: string; path: string }>>(page, "requests"))
-        .filter((request) => request.path === "/global/health")
+        .filter((request) => request.path === "/api/info")
         .map((request) => request.host),
     )
     .toEqual(["127.0.0.1:5199"])
@@ -50,49 +50,17 @@ test("mounted ServerProvider excludes persisted remotes before health polling", 
   expect(requests.some((request) => request.host === "remote.example.test")).toBe(false)
 })
 
-test("mounted management controller rejects before storage, navigation, probes, or activation", async ({ page }) => {
+test("the remote server dialog explains the enterprise restriction before rendering connection controls", async ({
+  page,
+}) => {
   await page.goto(fixture("controller"))
-  await expect(page.getByTestId("controller-ready")).toHaveText("true")
-  await expect
-    .poll(
-      async () =>
-        (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health")
-          .length,
-    )
-    .toBeGreaterThan(0)
-
-  // Global initialization and health polling can both probe the local sidecar.
-  // The rejected management operations below must not add any further probes.
-  expect(
-    (await output<Array<{ host: string; path: string }>>(page, "requests"))
-      .filter((request) => request.path === "/global/health")
-      .map((request) => request.host),
-  ).toEqual(expect.arrayContaining(["127.0.0.1:5199"]))
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByText(REMOTE_DISABLED, { exact: true })).toBeVisible()
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: /Pair|Connect|Scan/ })).toHaveCount(0)
   expect(
     (await output<Array<{ host: string }>>(page, "requests")).every((request) => request.host === "127.0.0.1:5199"),
   ).toBe(true)
-  const probes = (await output<Array<{ path: string }>>(page, "requests")).filter(
-    (request) => request.path === "/global/health",
-  ).length
-  const writes = (await output<unknown[]>(page, "storage-writes")).length
-
-  await page.getByRole("button", { name: "Invoke add" }).click()
-  await page.getByRole("button", { name: "Invoke select" }).click()
-  await page.getByRole("button", { name: "Invoke remove" }).click()
-  await page.getByRole("button", { name: "Invoke default" }).click()
-
-  await expect
-    .poll(() => output<Record<string, string>>(page, "controller-results"))
-    .toEqual({ add: REMOTE_DISABLED, select: REMOTE_DISABLED, remove: REMOTE_DISABLED, default: "resolved" })
-  await expect(page.getByText(REMOTE_DISABLED, { exact: true })).toBeVisible()
-  expect(
-    (await output<Array<{ path: string }>>(page, "requests")).filter((request) => request.path === "/global/health"),
-  ).toHaveLength(probes)
-  expect(await output<unknown[]>(page, "storage-writes")).toHaveLength(writes)
-  expect(await output<unknown[]>(page, "default-writes")).toEqual([])
-  await expect(page.getByTestId("controller-location")).toHaveText("/")
-  await expect(page.getByTestId("controller-active")).toHaveText("sidecar")
-  await expect(page.getByTestId("controller-close-calls")).toHaveText("0")
 })
 
 test("DialogConnectProvider diverts enterprise mode directly to provider management", async ({ page }) => {
@@ -127,19 +95,14 @@ test("New Session stays editable while Enterprise providers load, then disables 
   await expect(emptyEditor).toHaveAttribute("aria-disabled", "true")
   await expect(page.getByRole("button", { name: "Send" })).toBeDisabled()
 
-  await page
-    .getByRole("button", { name: "Manage providers" })
-    .evaluate((node: HTMLButtonElement) => node.click())
+  await page.getByRole("button", { name: "Manage providers" }).evaluate((node: HTMLButtonElement) => node.click())
   await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
 })
 
 test("New Session preserves the ordinary composer with an empty provider catalog", async ({ page }) => {
   await page.goto(fixture("composer-ordinary-empty"))
 
-  await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveAttribute(
-    "contenteditable",
-    "true",
-  )
+  await expect(page.getByRole("textbox", { name: "Prompt" })).toHaveAttribute("contenteditable", "true")
   await expect(page.getByRole("button", { name: "Manage providers" })).toHaveCount(0)
 })
 
@@ -443,7 +406,7 @@ test("settings diagnostics display the authenticated server remediation", async 
 
   await expect(page.getByText(SAFE_REMEDIATION, { exact: true })).toBeVisible()
   const diagnostics = (await output<Array<typeof diagnosticRequest>>(page, "requests")).filter(
-    (request) => request.path === "/provider/company-llm/diagnostics",
+    (request) => request.path === "/api/provider/company-llm/diagnose",
   )
   expect(diagnostics).toEqual([diagnosticRequest])
 })
@@ -467,7 +430,7 @@ test("enterprise fatal error offers the local company guide without public repor
 
   const guide = page.getByRole("button", { name: "CHAI AI 가이드 열기" })
   await expect(guide).toBeVisible()
-  await expect(guide.locator('use[href="#opencode-icon-help"]')).toHaveCount(1)
+  await expect(guide.locator('use[href="#opencode-v2-icon-help"]')).toHaveCount(1)
   await expect(page.getByText("Please report this error to the OpenCode team", { exact: true })).toHaveCount(0)
   await expect(page.getByText("on Discord", { exact: true })).toHaveCount(0)
 
@@ -482,7 +445,7 @@ test("public fatal error preserves the localized Discord reporting action", asyn
   await expect(page.getByText("Please report this error to the OpenCode team")).toBeVisible()
   const discord = page.getByRole("button", { name: "on Discord" })
   await expect(discord).toBeVisible()
-  await expect(discord.locator('use[href="#opencode-icon-discord"]')).toHaveCount(1)
+  await expect(discord.locator('use[href="#opencode-v2-icon-discord"]')).toHaveCount(1)
   await expect(page.getByText("CHAI AI 가이드", { exact: true })).toHaveCount(0)
 
   await discord.click()

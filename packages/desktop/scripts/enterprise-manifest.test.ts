@@ -6,12 +6,23 @@ import { tmpdir } from "node:os"
 import { generateEnterpriseManifest, prepareEnterpriseManifest } from "./enterprise-manifest"
 
 test("keeps the generated CHAI guide and manifest version aligned", async () => {
+  await using fixture = await manifestFixture()
   const root = resolve(import.meta.dir, "..")
-  const guide = Bun.file(join(root, "resources/enterprise/company-guide.md"))
-  const manifest = await Bun.file(join(root, "resources/enterprise/enterprise-manifest.json")).json<{
-    guideVersion: string
-    resources: Record<string, string>
-  }>()
+  const file = join(root, "resources/enterprise/company-guide.md")
+  const guide = Bun.file(file)
+  const manifest = await generateEnterpriseManifest({
+    appVersion: "1.2.3",
+    output: fixture.output,
+    resources: { ...fixture.resources, "company-guide.md": file },
+    env: {
+      OPENCODE_ENTERPRISE: "1",
+      OPENCODE_ENTERPRISE_MODELS: "[]",
+      OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+      OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
+      OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
+      OPENCODE_ENTERPRISE_CATALOG_VERSION: "pilot-1",
+    },
+  })
 
   expect(manifest.guideVersion).toBe("chai-1")
   expect(await guide.text()).toStartWith("# CHAI AI 사용 가이드\n")

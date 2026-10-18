@@ -2,188 +2,100 @@ import { mock } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createEnterpriseProviderRuntime } from "../src/main/enterprise-provider-runtime"
+import { readEnterpriseGuide } from "../src/main/enterprise-guide"
 
-const shellOpenExternalURLs: string[] = []
-let relaunchCalls = 0
-
-mock.module("electron", () => ({
-  default: { app: { getPath: () => "" } },
-  app: { getPath: () => "", once: () => undefined },
-  BrowserWindow: class {
-    static fromWebContents() {}
-    static getAllWindows() {
-      return []
-    }
+Object.assign(process.env, {
+  OPENCODE_ENTERPRISE: "1",
+  OPENCODE_ENTERPRISE_MODELS: "[]",
+  OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "",
+  OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "test",
+  OPENCODE_ENTERPRISE_GUIDE_VERSION: "test",
+  OPENCODE_ENTERPRISE_CATALOG_VERSION: "test",
+})
+const directory = await mkdtemp(join(tmpdir(), "enterprise-ipc-"))
+const path = join(directory, "guide.md")
+await writeFile(path, "# Registered guide\n")
+const catalog = {
+  schemaVersion: 1 as const,
+  default: { providerID: "company", modelID: "company-code" },
+  providers: [
+    {
+      id: "company",
+      name: "Company",
+      baseURL: "https://llm.corp.example/v1",
+      models: [{ id: "company-code", name: "Company Code" }],
+    },
+  ],
+}
+const credentials = {
+  schemaVersion: 3 as const,
+  providers: { company: { headers: { Authorization: "private-ipc-secret" } } },
+}
+const providers = createEnterpriseProviderRuntime({
+  catalog: { read: async () => catalog, write: async () => undefined },
+  credentials: {
+    read: async () => credentials,
+    write: async () => undefined,
+    health: async () => ({ state: "available" as const }),
   },
-  Notification: class {},
-  clipboard: { readImage: () => undefined },
-  crashReporter: {},
-  dialog: { showOpenDialog: () => undefined, showSaveDialog: () => undefined },
-  ipcMain: { handle: () => undefined, on: () => undefined },
-  nativeImage: {},
-  nativeTheme: { shouldUseDarkColors: false },
-  net: {},
-  netLog: {},
-  protocol: { registerSchemesAsPrivileged: () => undefined },
-  session: { fromPartition: () => ({ fetch: () => undefined }) },
-  shell: { openExternal: (url: string) => shellOpenExternalURLs.push(url), openPath: () => undefined },
+  restart: async () => undefined,
+})
+const api = {
+  ...providers,
+  readGuide: () => readEnterpriseGuide({ enabled: true, path, version: "2026.08" }),
+  readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "pass", checks: [] }),
+  stateBackups: async () => [],
+  restoreStateBackup: async () => ({ restartRequired: true }),
+  skillPacks: async () => [],
+  setSkillPackEnabled: async () => [],
+  openSkillPackSource: async () => undefined,
+}
+let invoke: ((event: unknown, method: unknown, args: unknown) => unknown) | undefined
+mock.module("electron", () => ({
+  app: { isPackaged: true },
+  protocol: {},
+  ipcMain: {
+    handle: (_channel: string, handler: typeof invoke) => {
+      invoke = handler
+    },
+  },
 }))
-
-const { registerMainIpcHandlers } = await import("../src/main/ipc")
-const { parseEnterpriseProfile } = await import("../src/enterprise")
-const { createEnterpriseProviderRuntime } = await import("../src/main/enterprise-provider-runtime")
-const { createUpdaterController } = await import("../src/main/updater-controller")
-const directory = await mkdtemp(join(tmpdir(), "enterprise-guide-registration-"))
-
+mock.module("../src/main/lifecycle/enterprise", () => ({ enterpriseDesktop: async () => ({ api }) }))
 try {
-  const path = join(directory, "company-guide.md")
-  await writeFile(path, "# Registered guide\n", "utf8")
-  const handlers = new Map<string, (...args: unknown[]) => unknown>()
-  const listeners = new Map<string, (...args: unknown[]) => unknown>()
-  let runtimeCatalog = {
-    schemaVersion: 1 as const,
-    default: { providerID: "provider", modelID: "model" },
-    providers: [
-      {
-        id: "provider",
-        name: "Provider",
-        baseURL: "https://provider.example/v1",
-        models: [{ id: "model", name: "Model" }],
-      },
-    ],
+  const { registerEnterpriseHandlers } = await import("../src/main/ipc-handlers/enterprise")
+  await registerEnterpriseHandlers()
+  if (!invoke) throw new Error("Enterprise IPC was not registered")
+  const sender = (url: string) => {
+    const frame = { url }
+    return { sender: { mainFrame: frame }, senderFrame: frame }
   }
-  let runtimeCredentials = { schemaVersion: 3 as const, providers: { provider: { headers: {} } } }
-  const providerRuntime = createEnterpriseProviderRuntime({
-    catalog: {
-      read: async () => structuredClone(runtimeCatalog),
-      write: async (value) => {
-        runtimeCatalog = structuredClone(value)
-      },
-    },
-    credentials: {
-      read: async () => structuredClone(runtimeCredentials),
-      write: async (value) => {
-        runtimeCredentials = structuredClone(value)
-      },
-      health: async () => ({ state: "available" as const }),
-    },
-    restart: async () => undefined,
-  })
-  const updater = createUpdaterController({
-    enabled: false,
-    currentVersion: "2026.08",
-    backend: {
-      checkForUpdates: async () => null,
-      downloadUpdate: async () => undefined,
-      quitAndInstall() {},
-    },
-    persistence: {
-      get: async () => undefined,
-      set: async () => undefined,
-      clear: async () => undefined,
-    },
-    stop: async () => undefined,
-  })
-
-  registerMainIpcHandlers(
-    {
-      killSidecar() {},
-      relaunch() {
-        relaunchCalls++
-      },
-      awaitInitialization: async () => ({ url: "http://localhost", username: null, password: null }),
-      consumeInitialDeepLinks: () => [],
-      getDefaultServerUrl: () => null,
-      setDefaultServerUrl() {},
-      isFirstLaunchOnboardingPending: () => false,
-      finishFirstLaunchOnboarding: () => null,
-      getDisplayBackend: async () => null,
-      setDisplayBackend() {},
-      parseMarkdown: (markdown) => markdown,
-      checkAppExists: () => false,
-      resolveAppPath: async () => null,
-      updater,
-      showUpdater() {},
-      setBackgroundColor() {},
-      exportDebugLogs: async () => "logs.zip",
-      recordFatalRendererError() {},
-      enterprise: {
-        providerCatalog: async () => ({
-          schemaVersion: 1 as const,
-          default: { providerID: "company", modelID: "company-code" },
-          providers: [
-            {
-              id: "company",
-              name: "Company",
-              baseURL: "https://llm.corp.example/v1",
-              models: [{ id: "company-code", name: "Company Code" }],
-              credentials: { configured: true, headerNames: ["Authorization"] },
-            },
-          ],
-        }),
-        createProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        replaceProviderCredentials: (input) => providerRuntime.replaceProviderCredentials(input),
-        clearProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),
-        readiness: async () => ({ schemaVersion: 1, generatedAt: "now", overall: "warn", checks: [] }),
-        stateBackups: async () => [],
-        restoreStateBackup: async () => ({ restartRequired: true }),
-        skillPacks: async () => [],
-        setSkillPackEnabled: async () => [],
-        openSkillPackSource: async () => undefined,
-        guide: { enabled: true, path, version: "2026.08" },
-      },
-    },
-    {
-      profile: parseEnterpriseProfile({
-        OPENCODE_ENTERPRISE: "1",
-        OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-          { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
-        ]),
-        OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
-        OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
-        OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
-        OPENCODE_ENTERPRISE_CATALOG_VERSION: "catalog-1",
-      }),
-      openExternal: (url) => shellOpenExternalURLs.push(url),
-      registry: {
-        handle: (channel, handler) => handlers.set(channel, handler),
-        on: (channel, handler) => listeners.set(channel, handler),
-      },
-    },
-  )
-
-  await listeners.get("open-link")?.({}, "https://opencode.ai/docs?token=main-secret")
-  await listeners.get("open-link")?.({}, "https://llm.corp.example/docs")
-  await listeners.get("open-link")?.({}, "https://user:secret@llm.corp.example/docs")
-  await handlers.get("relaunch")?.()
-  const credentialBypassErrors = await Promise.all(
-    [
-      { headers: { "   ": "secret" } },
-      { headers: { "X-Token": "first", "x-token": "second" } },
-    ].map((credentials) =>
-      Promise.resolve(
-        handlers.get("enterprise-provider-credentials-replace")?.({}, { providerID: "provider", credentials }),
-      ).then(
-        () => undefined,
-        (error: unknown) => (error instanceof Error ? error.message : String(error)),
-      ),
-    ),
-  )
-
-  console.log(
+  const trusted = sender("oc://renderer/index.html")
+  const failure = async (event: unknown, method: string, args: unknown) => {
+    try {
+      await invoke!(event, method, args)
+      return "accepted"
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  }
+  const failures = [
+    await failure({ sender: trusted.sender }, "readGuide", []),
+    await failure(sender("https://public.example"), "readGuide", []),
+    await failure(sender("oc://renderer/index.html?token=private"), "readGuide", []),
+    await failure(trusted, "unknown", []),
+    await failure(trusted, "replaceProviderCredentials", [
+      { providerID: "company", credentials: { apiKey: 123, headers: {} } },
+    ]),
+    await failure(trusted, "replaceProviderCredentials", [
+      { providerID: "company", credentials: { apiKey: "", headers: { Authorization: 123 } } },
+    ]),
+  ]
+  process.stdout.write(
     JSON.stringify({
-      registered: handlers.has("enterprise-guide-read"),
-      providerCatalog: await handlers.get("enterprise-provider-catalog")?.(),
-      guide: await handlers.get("enterprise-guide-read")?.(),
-      credentialBypassErrors,
-      relaunchCalls,
-      shellOpenExternalURLs,
+      providerCatalog: await invoke(trusted, "providerCatalog", []),
+      guide: await invoke(trusted, "readGuide", []),
+      failures,
     }),
   )
 } finally {

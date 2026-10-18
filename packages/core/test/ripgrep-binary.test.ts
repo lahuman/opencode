@@ -2,12 +2,12 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Effect } from "effect"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { RipgrepBinary } from "@opencode-ai/core/ripgrep/binary"
+import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
+import { RipgrepBinary } from "@opencode/core/ripgrep/binary"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
-const it = testEffect(LayerNode.compile(RipgrepBinary.node))
+const it = testEffect(AppNodeBuilder.build(RipgrepBinary.node))
 
 describe("RipgrepBinary", () => {
   it.live("prefers an explicitly configured absolute executable path", () =>

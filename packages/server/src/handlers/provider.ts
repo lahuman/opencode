@@ -1,25 +1,34 @@
-import { Catalog } from "@opencode-ai/core/catalog"
+import { Provider } from "@opencode/core/provider"
+import { ProviderDiagnostic } from "@opencode/core/provider-diagnostic"
+import { ProviderNotFoundError } from "@opencode/protocol/errors"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { Api } from "../api"
-import { ProviderNotFoundError } from "@opencode-ai/protocol/errors"
-import { response } from "../location"
+import { awaitPlugins, response } from "../location"
 
 export const ProviderHandler = HttpApiBuilder.group(Api, "server.provider", (handlers) =>
   Effect.gen(function* () {
     return handlers
       .handle(
+        "provider.diagnose",
+        Effect.fn(function* (ctx) {
+          yield* awaitPlugins
+          const diagnostic = yield* ProviderDiagnostic.Service
+          return yield* response(diagnostic.run(ctx.params.providerID, ctx.payload))
+        }),
+      )
+      .handle(
         "provider.list",
         Effect.fn(function* () {
-          const catalog = yield* Catalog.Service
-          return yield* response(catalog.provider.available())
+          const providers = yield* Provider.Service
+          return yield* response(providers.available())
         }),
       )
       .handle(
         "provider.get",
         Effect.fn(function* (ctx) {
-          const catalog = yield* Catalog.Service
-          const provider = yield* catalog.provider.get(ctx.params.providerID)
+          const providers = yield* Provider.Service
+          const provider = yield* providers.get(ctx.params.providerID)
           if (!provider)
             return yield* new ProviderNotFoundError({
               providerID: ctx.params.providerID,

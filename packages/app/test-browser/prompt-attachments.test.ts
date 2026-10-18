@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot } from "solid-js"
-import { createPromptAttachmentsCore } from "@/components/prompt-input/attachments"
-import { createPromptState } from "@/context/prompt"
+import { createComposerAttachments } from "@/composer/attachments/attachments"
+import { createMemoryComposerState } from "@/composer/state"
 
 describe("prompt attachment session ownership", () => {
   test("adds an asynchronously read image to the session where the read started", async () => {
     await createRoot(async (dispose) => {
-      const sessions = { A: createPromptState(), B: createPromptState() }
+      const sessions = { A: createMemoryComposerState(), B: createMemoryComposerState() }
       let active: "A" | "B" = "A"
-      const attachments = createPromptAttachmentsCore({
+      const attachments = attachmentsFor({
         capture: () => sessions[active].capture(),
         editor: () => document.createElement("div"),
       })
-      const pending = attachments.addAttachment(new File([new Uint8Array(1024 * 1024)], "a.png", { type: "image/png" }))
+      const pending = attachments.addAttachments([new File([new Uint8Array(1024 * 1024)], "a.png", { type: "image/png" })])
 
       active = "B"
       await pending
@@ -25,13 +25,13 @@ describe("prompt attachment session ownership", () => {
 
   test("finishes the captured attachment after the active editor is removed", async () => {
     await createRoot(async (dispose) => {
-      const prompt = createPromptState()
+      const prompt = createMemoryComposerState()
       let editor: HTMLDivElement | undefined = document.createElement("div")
-      const attachments = createPromptAttachmentsCore({
+      const attachments = attachmentsFor({
         capture: prompt.capture,
         editor: () => editor,
       })
-      const pending = attachments.addAttachment(new File([new Uint8Array(1024 * 1024)], "a.png", { type: "image/png" }))
+      const pending = attachments.addAttachments([new File([new Uint8Array(1024 * 1024)], "a.png", { type: "image/png" })])
 
       editor = undefined
       await pending
@@ -43,9 +43,9 @@ describe("prompt attachment session ownership", () => {
 
   test("keeps every file in a batch on the session where the batch started", async () => {
     await createRoot(async (dispose) => {
-      const sessions = { A: createPromptState(), B: createPromptState() }
+      const sessions = { A: createMemoryComposerState(), B: createMemoryComposerState() }
       let active: "A" | "B" = "A"
-      const attachments = createPromptAttachmentsCore({
+      const attachments = attachmentsFor({
         capture: () => sessions[active].capture(),
         editor: () => document.createElement("div"),
       })
@@ -65,14 +65,15 @@ describe("prompt attachment session ownership", () => {
 
   test("keeps a delayed native clipboard image on the session where paste started", async () => {
     await createRoot(async (dispose) => {
-      const sessions = { A: createPromptState(), B: createPromptState() }
+      const sessions = { A: createMemoryComposerState(), B: createMemoryComposerState() }
       const read = Promise.withResolvers<File | null>()
       let active: "A" | "B" = "A"
-      const attachments = createPromptAttachmentsCore({
+      const attachments = attachmentsFor({
         capture: () => sessions[active].capture(),
         editor: () => document.createElement("div"),
+        readClipboardImage: () => read.promise,
       })
-      const pending = attachments.addClipboardAttachment(read.promise)
+      const pending = attachments.handlePaste(new ClipboardEvent("paste", { clipboardData: new DataTransfer() }))
 
       active = "B"
       read.resolve(new File([new Uint8Array(1024 * 1024)], "clipboard.png", { type: "image/png" }))
@@ -85,6 +86,21 @@ describe("prompt attachment session ownership", () => {
   })
 })
 
-function images(prompt: ReturnType<typeof createPromptState>) {
+function images(prompt: ReturnType<typeof createMemoryComposerState>) {
   return prompt.current().filter((part) => part.type === "image")
+}
+
+function attachmentsFor(input: Pick<Parameters<typeof createComposerAttachments>[0], "capture" | "editor" | "readClipboardImage">) {
+  return createComposerAttachments({
+    ...input,
+    directory: () => "C:/project",
+    destination: () => ({ input: { image: true, pdf: true }, local: true, upload: async () => { throw new Error("Unexpected upload") } }),
+    isDialogActive: () => false,
+    duplicate: () => { throw new Error("Unexpected duplicate") },
+    onError: (error) => { throw error },
+    onUploadError: (error) => { throw error },
+    focusEditor: () => undefined,
+    addPart: () => false,
+    setDraggingType: () => undefined,
+  })
 }

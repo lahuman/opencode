@@ -1,12 +1,13 @@
-export * as PermissionSaved from "./saved"
+export * as PermissionSaved from "./saved.js"
 
 import { eq } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
-import { Database } from "../database/database"
-import { makeGlobalNode } from "../effect/app-node"
-import { ProjectV2 } from "../project"
-import { PermissionTable } from "./sql"
-import { PermissionSaved } from "@opencode-ai/schema/permission-saved"
+import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { Project } from "@opencode/schema/project"
+import { Database } from "../database/database.js"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
+import { PermissionTable } from "./sql.js"
+import { PermissionSaved } from "@opencode/schema/permission-saved"
+import { Enterprise } from "../enterprise.js"
 
 export const ID = PermissionSaved.ID
 export type ID = typeof ID.Type
@@ -15,14 +16,16 @@ export const Info = PermissionSaved.Info
 export type Info = typeof Info.Type
 
 export const ListInput = Schema.Struct({
-  projectID: ProjectV2.ID.pipe(Schema.optional),
+  projectID: Project.ID.pipe(Schema.optional),
+  directory: Schema.optional(Schema.String),
 }).annotate({ identifier: "PermissionSaved.ListInput" })
 export type ListInput = typeof ListInput.Type
 
 export const AddInput = Schema.Struct({
-  projectID: ProjectV2.ID,
+  projectID: Project.ID,
   action: Schema.String,
   resources: Schema.Array(Schema.String),
+  directory: Schema.optional(Schema.String),
 }).annotate({ identifier: "PermissionSaved.AddInput" })
 export type AddInput = typeof AddInput.Type
 
@@ -32,14 +35,21 @@ export interface Interface {
   readonly remove: (id: ID) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/PermissionSaved") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/PermissionSaved") {}
 
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const { db } = yield* Database.Service
+    const db = (yield* Database.Service).db
+    // Enterprise consent lasts for this process and the directory that requested it.
+    const approvals = new Map<ID, { info: Info; directory: string | undefined }>()
 
-    const list = Effect.fn("PermissionSaved.list")(function* (input?: ListInput) {
+    const list = Effect.fnUntraced(function* (input?: ListInput) {
+      if (Enterprise.enabled())
+        return [...approvals.values()]
+          .filter((entry) => !input?.projectID || entry.info.projectID === input.projectID)
+          .filter((entry) => !input?.directory || entry.directory === input.directory)
+          .map((entry) => entry.info)
       const rows = yield* db
         .select()
         .from(PermissionTable)
@@ -47,12 +57,48 @@ const layer = Layer.effect(
         .all()
         .pipe(Effect.orDie)
       return rows.map(
-        (row): Info => ({ id: row.id, projectID: row.project_id, action: row.action, resource: row.resource }),
+        (row): Info => ({
+          id: row.id,
+          projectID: row.project_id,
+          action: row.action,
+          resource: row.resource,
+          time: {
+            created: DateTime.makeUnsafe(row.time_created),
+            updated: DateTime.makeUnsafe(row.time_updated),
+          },
+        }),
       )
     })
 
     const add = Effect.fn("PermissionSaved.add")(function* (input: AddInput) {
       if (!input.resources.length) return
+      if (Enterprise.enabled()) {
+        const now = yield* DateTime.now
+        input.resources.forEach((resource) => {
+          if (
+            [...approvals.values()].some(
+              (entry) =>
+                entry.directory === input.directory &&
+                entry.info.projectID === input.projectID &&
+                entry.info.action === input.action &&
+                entry.info.resource === resource,
+            )
+          )
+            return
+          const id = ID.create()
+          approvals.set(id, {
+            directory: input.directory,
+            info: {
+              id,
+              projectID: input.projectID,
+              action: input.action,
+              resource,
+              time: { created: now, updated: now },
+            },
+          })
+        })
+        return
+      }
       yield* db
         .insert(PermissionTable)
         .values(
@@ -69,6 +115,10 @@ const layer = Layer.effect(
     })
 
     const remove = Effect.fn("PermissionSaved.remove")(function* (id: ID) {
+      if (Enterprise.enabled()) {
+        approvals.delete(id)
+        return
+      }
       yield* db.delete(PermissionTable).where(eq(PermissionTable.id, id)).run().pipe(Effect.orDie)
     })
 

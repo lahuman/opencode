@@ -1,11 +1,30 @@
-import { Provider } from "@opencode-ai/schema/provider"
-import { Location } from "@opencode-ai/schema/location"
+import { Provider } from "@opencode/schema/provider"
+import { Location } from "@opencode/schema/location"
+import { ProviderDiagnostic } from "@opencode/schema/provider-diagnostic"
 import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { ProviderNotFoundError, ServiceUnavailableError } from "../errors"
-import { LocationQuery, locationQueryOpenApi } from "./location"
+import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
+import { ProviderNotFoundError, ServiceUnavailableError } from "../errors.js"
+import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 export const ProviderGroup = HttpApiGroup.make("server.provider")
+  .add(
+    HttpApiEndpoint.post("provider.diagnose", "/api/provider/:providerID/diagnose", {
+      params: { providerID: Provider.ID },
+      query: LocationQuery,
+      payload: ProviderDiagnostic.Input,
+      success: Location.response(ProviderDiagnostic.Result),
+      error: ServiceUnavailableError,
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "provider.diagnose",
+          summary: "Test a provider connection",
+          description:
+            "Check basic generation, streaming, and optional tool calling without storing a Session or returning credentials.",
+        }),
+      ),
+  )
   .add(
     HttpApiEndpoint.get("provider.list", "/api/provider", {
       query: LocationQuery,
@@ -15,7 +34,7 @@ export const ProviderGroup = HttpApiGroup.make("server.provider")
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(
         OpenApi.annotations({
-          identifier: "v2.provider.list",
+          identifier: "provider.list",
           summary: "List providers",
           description: "Retrieve active AI providers so clients can show provider availability and configuration.",
         }),
@@ -31,7 +50,7 @@ export const ProviderGroup = HttpApiGroup.make("server.provider")
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(
         OpenApi.annotations({
-          identifier: "v2.provider.get",
+          identifier: "provider.get",
           summary: "Get provider",
           description: "Retrieve a single AI provider so clients can inspect its availability and endpoint settings.",
         }),
@@ -39,7 +58,7 @@ export const ProviderGroup = HttpApiGroup.make("server.provider")
   )
   .annotateMerge(
     OpenApi.annotations({
-      title: "providers",
+      title: "provider",
       description: "Experimental provider routes.",
     }),
   )

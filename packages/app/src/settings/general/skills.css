@@ -1,0 +1,35 @@
+.enterprise-skills-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px 12px;
+}
+
+.enterprise-skills-heading h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.enterprise-skills-heading p,
+.enterprise-skills-pending {
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+}
+
+.enterprise-skills-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.enterprise-skills-actions button {
+  color: var(--v2-text-text-muted);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.enterprise-skills-error {
+  margin: 0 4px 12px;
+  color: var(--v2-text-text-danger);
+  font-size: 12px;
+}

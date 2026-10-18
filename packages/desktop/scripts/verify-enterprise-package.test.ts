@@ -12,6 +12,8 @@ import { writeEnterpriseArchive } from "./package-enterprise-win"
 const roots: string[] = []
 const required = [
   "CHAI.exe",
+  "resources/opencode-cli.exe",
+  "resources/opencode-cli.version",
   "resources/app.asar",
   "resources/enterprise/opencode.jsonc",
   "resources/enterprise/company-guide.md",
@@ -655,6 +657,8 @@ async function writePortableFixture(root: string) {
   ])
   await Promise.all([
     Bun.write(path.join(root, "CHAI.exe"), "portable executable"),
+    Bun.write(path.join(root, "resources/opencode-cli.exe"), "compiled CLI"),
+    Bun.write(path.join(root, "resources/opencode-cli.version"), "2.0.30"),
     Bun.write(path.join(root, "resources/app.asar"), "application archive"),
     Bun.write(path.join(root, "resources/enterprise/opencode.jsonc"), enterpriseDefaults),
     Bun.write(path.join(root, "resources/enterprise/company-guide.md"), enterpriseGuide),
@@ -928,6 +932,8 @@ async function rewriteArchiveExtraFieldType(archive: string, name: string, sourc
 
 const portableContents: Record<string, string> = {
   "CHAI.exe": "portable executable",
+  "resources/opencode-cli.exe": "compiled CLI",
+  "resources/opencode-cli.version": "2.0.30",
   "resources/app.asar": "application archive",
   "resources/enterprise/opencode.jsonc": enterpriseDefaults,
   "resources/enterprise/company-guide.md": enterpriseGuide,

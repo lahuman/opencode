@@ -1,18 +1,19 @@
-import { Button } from "@opencode-ai/ui/button"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { Dialog } from "@opencode-ai/ui/dialog"
-import { IconButton } from "@opencode-ai/ui/icon-button"
-import { TextField } from "@opencode-ai/ui/text-field"
-import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { useLanguage } from "@/context/language"
-import { usePlatform, type EnterpriseProviderCatalogView } from "@/context/platform"
-import { useServerSDK } from "@/context/server-sdk"
-import { showToast } from "@/utils/toast"
+import { Button } from "@opencode/ui/button"
+import { useDialog } from "@opencode/ui/context/dialog"
+import { EnterpriseDialog, EnterpriseField } from "@/providers/enterprise/presentation"
+import { IconButton } from "@opencode/ui/icon-button"
+import { Icon } from "@opencode/ui/icon"
+import { Tooltip } from "@opencode/ui/tooltip"
+import { useLanguage } from "@/runtime/i18n/language"
+import { usePlatform, type EnterpriseProviderCatalogView } from "@/runtime/platform/platform"
+import { useServerSDK } from "@/runtime/server/client"
+import { showToast } from "@/shell/notifications/toast"
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
   applyEnterpriseProviderUpdate,
   COMPANY_PROVIDER_FAILURE_MESSAGE,
+  enterpriseProviderMessageKey,
   companyProviderCanStart,
   companyProviderDiagnosticResult,
   diagnoseCompanyProvider,
@@ -51,7 +52,7 @@ export function useCompanyProviderSettingsState() {
     if (!provider || !model) return
     setChecking(true)
     const response = await diagnoseCompanyProvider(
-      (input) => serverSDK().client.provider.diagnose(input),
+      (input) => serverSDK.api.provider.diagnose(input),
       provider.id,
       model.id,
     )
@@ -63,24 +64,26 @@ export function useCompanyProviderSettingsState() {
       showToast({
         variant: "success",
         icon: "circle-check",
-        title: "Enterprise provider connection succeeded",
+        title: language.t("enterprise.provider.copy.enterpriseProviderConnectionSucceeded"),
         description: `${provider.name} / ${model.name}`,
       })
       return
     }
     showToast({
       variant: "error",
-      title: COMPANY_PROVIDER_FAILURE_MESSAGE,
+      title: language.t(enterpriseProviderMessageKey(COMPANY_PROVIDER_FAILURE_MESSAGE)),
       description: result.failure?.message ?? "connection",
     })
   }
 
   const status = () => {
-    if (catalog.loading) return "Loading providers..."
+    if (catalog.loading) return language.t("enterprise.provider.copy.loadingProviders")
     if (catalog.error) return language.t("common.requestFailed")
     const provider = defaultProvider()
-    if (!provider) return "No default model"
-    return provider.credentials.configured ? "Credentials configured" : "Credentials not configured"
+    if (!provider) return language.t("enterprise.provider.copy.noDefaultModel")
+    return provider.credentials.configured
+      ? language.t("enterprise.provider.copy.credentialsConfigured")
+      : language.t("enterprise.provider.copy.credentialsNotConfigured")
   }
 
   return {
@@ -246,12 +249,12 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
       existingProviderIDs: new Set(providers().map((provider) => provider.id)),
     })
     if (value.error) {
-      setState("error", value.error)
+      setState("error", language.t(enterpriseProviderMessageKey(value.error)))
       return
     }
     const credentials = providerCredentialIntent(providerForm.credentialMode, providerForm.apiKey, providerForm.headers)
     if ("error" in credentials && credentials.error) {
-      setState("error", credentials.error)
+      setState("error", language.t(enterpriseProviderMessageKey(credentials.error)))
       return
     }
     const replacement =
@@ -296,7 +299,11 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     if (!modelID || !name || duplicate) {
       setState(
         "error",
-        duplicate ? "Model ID already exists" : !modelID ? "Model ID is required" : "Model name is required",
+        duplicate
+          ? language.t("enterprise.provider.copy.modelIDAlreadyExists")
+          : !modelID
+            ? language.t("enterprise.provider.copy.modelIDIsRequired")
+            : language.t("enterprise.provider.copy.modelNameIsRequired"),
       )
       return
     }
@@ -348,7 +355,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
     const modelID = model.id
     setState({ action: "diagnose", result: undefined, error: undefined })
     const response = await diagnoseCompanyProvider(
-      (input) => serverSDK().client.provider.diagnose(input),
+      (input) => serverSDK.api.provider.diagnose(input),
       providerID,
       modelID,
     )
@@ -364,27 +371,36 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
   const pairLabel = () => {
     const provider = selectedProvider()
     const model = selectedModel()
-    if (!provider || !model) return "Enterprise provider"
+    if (!provider || !model) return language.t("enterprise.provider.copy.enterpriseProvider")
     return `${provider.name} / ${model.name}`
   }
   const diagnosticStatus = () => {
-    if (state.action === "diagnose") return `Testing ${pairLabel()} connection`
-    if (!state.result) return selectedModel() ? `Ready to test ${pairLabel()} connection` : "Select a model to test"
-    if (state.result.ok) return `${pairLabel()} connection test completed successfully`
+    if (state.action === "diagnose")
+      return language.t("enterprise.provider.copy.testingConnection", { pair: pairLabel() })
+    if (!state.result)
+      return selectedModel()
+        ? language.t("enterprise.provider.copy.readyToTestConnection", { pair: pairLabel() })
+        : language.t("enterprise.provider.copy.selectAModelToTest")
+    if (state.result.ok) return language.t("enterprise.provider.copy.connectionCompleted", { pair: pairLabel() })
     return ""
   }
   const pending = () => state.action !== undefined
   const locked = () => pending() || state.confirm !== undefined
 
   return (
-    <Dialog title="Enterprise providers" size="large" class="w-full max-w-[980px]" preventClose={locked()}>
+    <EnterpriseDialog
+      title={language.t("enterprise.provider.copy.enterpriseProviders")}
+      size="large"
+      class="w-full max-w-[980px]"
+      preventClose={locked()}
+    >
       <div class="flex max-h-[min(720px,calc(100vh-96px))] min-w-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
         <Show when={catalog.error}>
           <p
             class="rounded-md border border-border-danger-base px-3 py-2 text-12-regular text-text-danger-base"
             role="alert"
           >
-            Provider settings could not be loaded. Restart the desktop app and try again.
+            {language.t("enterprise.provider.copy.providerSettingsCouldNotBeLoadedRestartTheDesktopAppAndTryAgain")}
           </p>
         </Show>
         <Show when={state.error}>
@@ -404,33 +420,44 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   setState("error", undefined)
                 }}
               >
-                Dismiss error
+                {language.t("enterprise.provider.copy.dismissError")}
               </Button>
             </div>
           )}
         </Show>
 
         <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.25fr)]">
-          <section class="flex min-w-0 flex-col gap-2" aria-label="Enterprise providers">
+          <section
+            class="flex min-w-0 flex-col gap-2"
+            aria-label={language.t("enterprise.provider.copy.enterpriseProviders")}
+          >
             <div class="flex items-center justify-between gap-2">
-              <span class="text-12-medium text-text-weak">Providers</span>
+              <span class="text-12-medium text-text-weak">{language.t("enterprise.provider.copy.providers")}</span>
               <Button
                 type="button"
                 size="small"
-                variant="secondary"
+                variant="outline"
                 disabled={locked()}
                 onClick={() => beginProviderEditor("create")}
               >
-                Create provider
+                {language.t("enterprise.provider.copy.createProvider")}
               </Button>
             </div>
             <Show
               when={!catalog.loading}
-              fallback={<span class="text-12-regular text-text-weak">Loading providers...</span>}
+              fallback={
+                <span class="text-12-regular text-text-weak">
+                  {language.t("enterprise.provider.copy.loadingProviders")}
+                </span>
+              }
             >
               <For
                 each={providers()}
-                fallback={<span class="py-4 text-12-regular text-text-weak">No enterprise providers configured</span>}
+                fallback={
+                  <span class="py-4 text-12-regular text-text-weak">
+                    {language.t("enterprise.provider.copy.noEnterpriseProvidersConfigured")}
+                  </span>
+                }
               >
                 {(provider) => {
                   const presentation = () => enterpriseProviderPresentation(catalog.latest!, provider)
@@ -451,16 +478,24 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                         <span class="truncate text-13-medium text-text-strong">{provider.name}</span>
                         <Show when={presentation().isDefaultProvider}>
                           <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
-                            Default
+                            {language.t("enterprise.provider.copy.default")}
                           </span>
                         </Show>
                       </span>
                       <span class="truncate text-11-regular text-text-weak">{provider.id}</span>
                       <span class="break-all text-11-regular text-text-weak">{provider.baseURL}</span>
-                      <span class="text-11-regular text-text-weak">{presentation().modelCount}</span>
-                      <span class="text-11-medium text-text-strong">{presentation().credentials}</span>
+                      <span class="text-11-regular text-text-weak">
+                        {language.plural("enterprise.provider.modelCount", provider.models.length)}
+                      </span>
+                      <span class="text-11-medium text-text-strong">
+                        {language.t(enterpriseProviderMessageKey(presentation().credentials))}
+                      </span>
                       <Show when={presentation().defaultModel}>
-                        {(model) => <span class="text-11-regular text-text-weak">Default model: {model()}</span>}
+                        {(model) => (
+                          <span class="text-11-regular text-text-weak">
+                            {language.t("enterprise.provider.copy.defaultModel", { model: model() })}
+                          </span>
+                        )}
                       </Show>
                     </button>
                   )
@@ -469,57 +504,66 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
             </Show>
           </section>
 
-          <section class="flex min-w-0 flex-col gap-4" aria-label="Provider details">
+          <section
+            class="flex min-w-0 flex-col gap-4"
+            aria-label={language.t("enterprise.provider.copy.providerDetails")}
+          >
             <Show when={state.editor === "create-provider" || state.editor === "edit-provider"}>
               <form class="flex min-w-0 flex-col gap-3" onSubmit={saveProvider}>
                 <h3 class="text-14-medium text-text-strong">
-                  {state.editor === "create-provider" ? "Create provider" : "Edit provider"}
+                  {state.editor === "create-provider"
+                    ? language.t("enterprise.provider.copy.createProvider")
+                    : language.t("enterprise.provider.copy.editProvider")}
                 </h3>
-                <TextField
-                  label="Provider ID"
+                <EnterpriseField
+                  label={language.t("enterprise.provider.copy.providerID")}
                   value={providerForm.providerID}
                   disabled={locked() || state.editor === "edit-provider"}
                   onChange={(value) => setProviderForm("providerID", value)}
                 />
-                <TextField
-                  label="Provider name"
+                <EnterpriseField
+                  label={language.t("enterprise.provider.copy.providerName")}
                   value={providerForm.name}
                   disabled={locked()}
                   onChange={(value) => setProviderForm("name", value)}
                 />
-                <TextField
-                  label="Base URL"
+                <EnterpriseField
+                  label={language.t("enterprise.provider.copy.baseURL")}
                   value={providerForm.baseURL}
                   disabled={locked()}
                   onChange={(value) => setProviderForm("baseURL", value)}
                 />
                 <div class="flex min-w-0 flex-col gap-2">
-                  <span class="text-12-medium text-text-weak">Models</span>
+                  <span class="text-12-medium text-text-weak">{language.t("enterprise.provider.copy.models")}</span>
                   <For
                     each={providerForm.models}
-                    fallback={<span class="text-11-regular text-text-weak">This provider has zero models.</span>}
+                    fallback={
+                      <span class="text-11-regular text-text-weak">
+                        {language.t("enterprise.provider.copy.thisProviderHasZeroModels")}
+                      </span>
+                    }
                   >
                     {(model, index) => (
                       <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
-                        <TextField
-                          label={`Model ID ${index() + 1}`}
+                        <EnterpriseField
+                          label={language.t("enterprise.provider.copy.modelIDOrdinal", { ordinal: index() + 1 })}
                           value={model.id}
                           disabled={locked() || state.editor === "edit-provider"}
                           onChange={(value) => setProviderForm("models", index(), "id", value)}
                         />
-                        <TextField
-                          label={`Model name ${index() + 1}`}
+                        <EnterpriseField
+                          label={language.t("enterprise.provider.copy.modelNameOrdinal", { ordinal: index() + 1 })}
                           value={model.name}
                           disabled={locked() || state.editor === "edit-provider"}
                           onChange={(value) => setProviderForm("models", index(), "name", value)}
                         />
-                        <Tooltip value="Remove initial model" placement="top">
+                        <Tooltip value={language.t("enterprise.provider.copy.removeInitialModel")} placement="top">
                           <IconButton
                             type="button"
-                            icon="trash"
+                            icon={<Icon name="trash" />}
                             variant="ghost"
                             class="mt-1.5"
-                            aria-label="Remove initial model"
+                            aria-label={language.t("enterprise.provider.copy.removeInitialModel")}
                             disabled={locked() || state.editor === "edit-provider"}
                             onClick={() =>
                               setProviderForm("models", (models) => models.filter((_, row) => row !== index()))
@@ -537,12 +581,12 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       disabled={locked()}
                       onClick={() => setProviderForm("models", providerForm.models.length, { id: "", name: "" })}
                     >
-                      Add initial model
+                      {language.t("enterprise.provider.copy.addInitialModel")}
                     </Button>
                   </Show>
                 </div>
                 <label class="flex min-w-0 flex-col gap-1 text-12-medium text-text-weak">
-                  Credential action
+                  {language.t("enterprise.provider.copy.credentialAction")}
                   <select
                     class="h-8 rounded-md border border-border-weak-base bg-surface-base px-2 text-13-regular text-text-strong"
                     value={providerForm.credentialMode}
@@ -556,14 +600,14 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       )
                     }}
                   >
-                    <option value="preserve">Preserve credentials</option>
-                    <option value="replace">Replace credentials</option>
-                    <option value="clear">Clear credentials</option>
+                    <option value="preserve">{language.t("enterprise.provider.copy.preserveCredentials")}</option>
+                    <option value="replace">{language.t("enterprise.provider.copy.replaceCredentials")}</option>
+                    <option value="clear">{language.t("enterprise.provider.copy.clearCredentials")}</option>
                   </select>
                 </label>
                 <Show when={providerForm.credentialMode === "replace"}>
-                  <TextField
-                    label="API key"
+                  <EnterpriseField
+                    label={language.t("enterprise.provider.copy.apiKey")}
                     type="password"
                     autocomplete="off"
                     value={providerForm.apiKey}
@@ -572,12 +616,14 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   />
                   <div class="flex min-w-0 flex-col gap-2">
                     <div class="flex items-center justify-between gap-2">
-                      <span class="text-12-medium text-text-weak">Secret headers</span>
+                      <span class="text-12-medium text-text-weak">
+                        {language.t("enterprise.provider.copy.secretHeaders")}
+                      </span>
                       <IconButton
                         type="button"
-                        icon="plus-small"
+                        icon={<Icon name="plus-small" />}
                         variant="ghost"
-                        aria-label="Add secret header"
+                        aria-label={language.t("enterprise.provider.copy.addSecretHeader")}
                         disabled={locked()}
                         onClick={() => setProviderForm("headers", providerForm.headers.length, { key: "", value: "" })}
                       />
@@ -585,20 +631,20 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                     <For each={providerForm.headers}>
                       {(header, index) => (
                         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_32px] items-start gap-2">
-                          <TextField
-                            label="Secret header"
+                          <EnterpriseField
+                            label={language.t("enterprise.provider.copy.secretHeader")}
                             hideLabel
-                            placeholder="Header name"
+                            placeholder={language.t("enterprise.provider.copy.headerName")}
                             autocomplete="off"
                             value={header.key}
                             disabled={locked()}
                             onChange={(value) => setProviderForm("headers", index(), "key", value)}
                           />
-                          <TextField
-                            label="Secret value"
+                          <EnterpriseField
+                            label={language.t("enterprise.provider.copy.secretValue")}
                             hideLabel
                             type="password"
-                            placeholder="Secret value"
+                            placeholder={language.t("enterprise.provider.copy.secretValue")}
                             autocomplete="off"
                             value={header.value}
                             disabled={locked()}
@@ -606,10 +652,10 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                           />
                           <IconButton
                             type="button"
-                            icon="trash"
+                            icon={<Icon name="trash" />}
                             variant="ghost"
                             class="mt-1.5"
-                            aria-label="Remove secret header"
+                            aria-label={language.t("enterprise.provider.copy.removeSecretHeader")}
                             disabled={locked() || providerForm.headers.length === 1}
                             onClick={() =>
                               setProviderForm("headers", (headers) => headers.filter((_, row) => row !== index()))
@@ -621,8 +667,10 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   </div>
                 </Show>
                 <div class="flex flex-wrap gap-2">
-                  <Button type="submit" variant="primary" disabled={locked()}>
-                    {state.action === "save" ? "Saving..." : "Save provider"}
+                  <Button type="submit" variant="neutral" disabled={locked()}>
+                    {state.action === "save"
+                      ? language.t("enterprise.provider.copy.saving")
+                      : language.t("enterprise.provider.copy.saveProvider")}
                   </Button>
                   <Button
                     type="button"
@@ -633,7 +681,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       setState("editor", undefined)
                     }}
                   >
-                    Cancel edit
+                    {language.t("enterprise.provider.copy.cancelEdit")}
                   </Button>
                 </div>
               </form>
@@ -642,23 +690,25 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
             <Show when={state.editor === "create-model" || state.editor === "edit-model"}>
               <form class="flex min-w-0 flex-col gap-3" onSubmit={saveModel}>
                 <h3 class="text-14-medium text-text-strong">
-                  {state.editor === "create-model" ? "Add model" : "Edit model"}
+                  {state.editor === "create-model" ? "Add model" : language.t("enterprise.provider.copy.editModel")}
                 </h3>
-                <TextField
-                  label="Model ID"
+                <EnterpriseField
+                  label={language.t("enterprise.provider.copy.modelID")}
                   value={modelForm.id}
                   disabled={locked() || state.editor === "edit-model"}
                   onChange={(value) => setModelForm("id", value)}
                 />
-                <TextField
-                  label="Model name"
+                <EnterpriseField
+                  label={language.t("enterprise.provider.copy.modelName")}
                   value={modelForm.name}
                   disabled={locked()}
                   onChange={(value) => setModelForm("name", value)}
                 />
                 <div class="flex flex-wrap gap-2">
-                  <Button type="submit" variant="primary" disabled={locked()}>
-                    {state.action === "save" ? "Saving..." : "Save model"}
+                  <Button type="submit" variant="neutral" disabled={locked()}>
+                    {state.action === "save"
+                      ? language.t("enterprise.provider.copy.saving")
+                      : language.t("enterprise.provider.copy.saveModel")}
                   </Button>
                   <Button
                     type="button"
@@ -666,7 +716,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                     disabled={locked()}
                     onClick={() => setState("editor", undefined)}
                   >
-                    Cancel edit
+                    {language.t("enterprise.provider.copy.cancelEdit")}
                   </Button>
                 </div>
               </form>
@@ -680,11 +730,17 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       <h3 class="truncate text-14-medium text-text-strong">{provider().name}</h3>
                       <p class="break-all text-12-regular text-text-weak">{provider().baseURL}</p>
                       <p class="text-12-regular text-text-weak" role="status">
-                        {enterpriseProviderPresentation(catalog.latest!, provider()).credentials}
+                        {language.t(
+                          enterpriseProviderMessageKey(
+                            enterpriseProviderPresentation(catalog.latest!, provider()).credentials,
+                          ),
+                        )}
                       </p>
                       <Show when={provider().credentials.headerNames.length}>
                         <p class="text-11-regular text-text-weak">
-                          Configured headers: {provider().credentials.headerNames.join(", ")}
+                          {language.t("enterprise.provider.copy.configuredHeaders", {
+                            headers: provider().credentials.headerNames.join(", "),
+                          })}
                         </p>
                       </Show>
                     </div>
@@ -692,42 +748,46 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       <Button
                         type="button"
                         size="small"
-                        variant="secondary"
+                        variant="outline"
                         disabled={locked()}
                         onClick={() => beginProviderEditor("edit")}
                       >
-                        Edit provider
+                        {language.t("enterprise.provider.copy.editProvider")}
                       </Button>
                       <Button
                         type="button"
                         size="small"
-                        variant="secondary"
+                        variant="outline"
                         disabled={locked()}
                         onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
                           requestDelete(enterpriseDeleteConfirmation("provider", provider().id), event.currentTarget)
                         }
                       >
-                        Delete provider
+                        {language.t("enterprise.provider.copy.deleteProvider")}
                       </Button>
                     </div>
                   </div>
 
                   <div class="flex min-w-0 flex-col gap-2">
                     <div class="flex items-center justify-between gap-2">
-                      <span class="text-12-medium text-text-weak">Models</span>
+                      <span class="text-12-medium text-text-weak">{language.t("enterprise.provider.copy.models")}</span>
                       <Button
                         type="button"
                         size="small"
-                        variant="secondary"
+                        variant="outline"
                         disabled={locked()}
                         onClick={() => beginModelEditor("create")}
                       >
-                        Add model
+                        {language.t("enterprise.provider.copy.addModel")}
                       </Button>
                     </div>
                     <For
                       each={provider().models}
-                      fallback={<span class="py-3 text-12-regular text-text-weak">No models configured</span>}
+                      fallback={
+                        <span class="py-3 text-12-regular text-text-weak">
+                          {language.t("enterprise.provider.copy.noModelsConfigured")}
+                        </span>
+                      }
                     >
                       {(model) => (
                         <button
@@ -753,7 +813,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                             }
                           >
                             <span class="rounded bg-surface-info-base/20 px-1.5 py-0.5 text-10-medium text-text-strong">
-                              Default
+                              {language.t("enterprise.provider.copy.default")}
                             </span>
                           </Show>
                         </button>
@@ -764,15 +824,15 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                   <div class="flex flex-wrap gap-2">
                     <Button
                       type="button"
-                      variant="secondary"
+                      variant="outline"
                       disabled={locked() || !selectedModel()}
                       onClick={() => beginModelEditor("edit")}
                     >
-                      Edit model
+                      {language.t("enterprise.provider.copy.editModel")}
                     </Button>
                     <Button
                       type="button"
-                      variant="secondary"
+                      variant="outline"
                       disabled={
                         locked() ||
                         !selectedModel() ||
@@ -781,19 +841,16 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                       }
                       onClick={setDefault}
                     >
-                      Set default
+                      {language.t("enterprise.provider.copy.setDefault")}
+                    </Button>
+                    <Button type="button" variant="outline" disabled={locked() || !selectedModel()} onClick={diagnose}>
+                      {state.action === "diagnose"
+                        ? language.t("enterprise.provider.copy.testing")
+                        : language.t("enterprise.provider.copy.testConnection")}
                     </Button>
                     <Button
                       type="button"
-                      variant="secondary"
-                      disabled={locked() || !selectedModel()}
-                      onClick={diagnose}
-                    >
-                      {state.action === "diagnose" ? "Testing..." : "Test connection"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
+                      variant="outline"
                       disabled={locked() || !selectedModel()}
                       onClick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
                         const model = selectedModel()
@@ -804,7 +861,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                           )
                       }}
                     >
-                      Delete model
+                      {language.t("enterprise.provider.copy.deleteModel")}
                     </Button>
                   </div>
                 </div>
@@ -831,12 +888,17 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                 onKeyDown={containConfirmationFocus}
               >
                 <h3 id="enterprise-delete-title" class="text-13-medium text-text-strong">
-                  Delete {value.type} {name}
+                  {language.t(
+                    value.type === "provider"
+                      ? "enterprise.provider.copy.deleteProviderNamed"
+                      : "enterprise.provider.copy.deleteModelNamed",
+                    { name },
+                  )}
                 </h3>
                 <p id="enterprise-delete-description" class="mt-1 text-12-regular text-text-strong">
                   {value.type === "provider"
-                    ? "All models and credentials for this provider will be removed."
-                    : "Conversation history remains available."}
+                    ? language.t("enterprise.provider.copy.allModelsAndCredentialsForThisProviderWillBeRemoved")
+                    : language.t("enterprise.provider.copy.conversationHistoryRemainsAvailable")}
                 </p>
                 <div class="mt-2 flex gap-2">
                   <Button
@@ -845,14 +907,14 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
                     }}
                     type="button"
                     size="small"
-                    variant="primary"
+                    variant="neutral"
                     disabled={pending()}
                     onClick={confirmDelete}
                   >
                     Confirm delete {value.type}
                   </Button>
                   <Button type="button" size="small" variant="ghost" disabled={pending()} onClick={cancelDelete}>
-                    Cancel delete
+                    {language.t("enterprise.provider.copy.cancelDelete")}
                   </Button>
                 </div>
               </div>
@@ -871,17 +933,23 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
               role={diagnostic().ok ? undefined : "alert"}
               aria-atomic="true"
             >
-              <span class="min-w-0 break-words text-text-weak">Provider / model</span>
+              <span class="min-w-0 break-words text-text-weak">
+                {language.t("enterprise.provider.copy.providerModel")}
+              </span>
               <span class="min-w-0 break-words text-right text-text-strong">{pairLabel()}</span>
-              <span class="min-w-0 break-words text-text-weak">Basic response</span>
+              <span class="min-w-0 break-words text-text-weak">
+                {language.t("enterprise.provider.copy.basicResponse")}
+              </span>
               <span class="min-w-0 break-words text-right text-text-strong capitalize">
                 {diagnostic().checks.basic}
               </span>
-              <span class="min-w-0 break-words text-text-weak">Streaming</span>
+              <span class="min-w-0 break-words text-text-weak">{language.t("enterprise.provider.copy.streaming")}</span>
               <span class="min-w-0 break-words text-right text-text-strong capitalize">
                 {diagnostic().checks.streaming}
               </span>
-              <span class="min-w-0 break-words text-text-weak">Tool calling</span>
+              <span class="min-w-0 break-words text-text-weak">
+                {language.t("enterprise.provider.copy.toolCalling")}
+              </span>
               <span class="min-w-0 break-words text-right text-text-strong capitalize">
                 {diagnostic().checks.toolCall}
               </span>
@@ -907,7 +975,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           {(report) => (
             <details class="border-t border-border-weak-base pt-3 text-12-regular">
               <summary class="cursor-pointer text-text-strong capitalize" tabIndex={state.confirm ? -1 : undefined}>
-                Offline readiness: {report().overall}
+                {language.t("enterprise.provider.copy.offlineReadiness", { status: report().overall })}
               </summary>
               <div class="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2">
                 <For each={report().checks}>
@@ -940,7 +1008,7 @@ export function DialogCompanyProvider(props: { onBack?: () => void }) {
           </Button>
         </div>
       </div>
-    </Dialog>
+    </EnterpriseDialog>
   )
 }
 
