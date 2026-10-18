@@ -7,7 +7,6 @@ const providerAPI = {
   updateProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
   deleteProvider: async () => ({ schemaVersion: 1 as const, providers: [] }),
   createModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
-  updateModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
   deleteModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
   setDefaultModel: async () => ({ schemaVersion: 1 as const, providers: [] }),
   replaceProviderCredentials: async () => ({ schemaVersion: 1 as const, providers: [] }),

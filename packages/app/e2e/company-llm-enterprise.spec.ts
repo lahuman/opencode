@@ -115,8 +115,8 @@ test("provider editor defaults credentials by operation", async ({ page }) => {
   await expect(page.getByLabel("API key")).toBeVisible()
   await expect(page.getByPlaceholder("Header name")).toBeVisible()
   await expect(page.getByPlaceholder("Secret value")).toBeVisible()
+  await expect(page.getByLabel("Provider name")).toHaveCount(0)
   await page.getByLabel("Provider ID").fill("gateway")
-  await page.getByLabel("Provider name").fill("Gateway")
   await page.getByLabel("Base URL").fill("https://gateway.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
 
@@ -138,23 +138,21 @@ test("DialogCompanyProvider manages provider, model, credentials, defaults, diag
   await expect(dialog.getByText("No enterprise providers configured", { exact: true })).toBeVisible()
   await dialog.getByRole("button", { name: "Create provider" }).click()
   await page.getByLabel("Provider ID").fill("gateway")
-  await page.getByLabel("Provider name").fill("Gateway")
   await page.getByLabel("Base URL").fill("https://gateway.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
 
   const provider = page.getByTestId("enterprise-provider-gateway")
-  await expect(provider).toContainText("Gateway")
+  await expect(provider).toContainText("gateway")
   await expect(provider).toContainText("https://gateway.example/v1")
   await expect(provider).toContainText("0 models")
   await expect(provider).toContainText("Credentials not configured")
 
   await dialog.getByRole("button", { name: "Add model" }).click()
+  await expect(page.getByLabel("Model name")).toHaveCount(0)
   await page.getByLabel("Model ID").fill("chat")
-  await page.getByLabel("Model name").fill("Chat")
   await dialog.getByRole("button", { name: "Save model" }).click()
   await dialog.getByRole("button", { name: "Add model" }).click()
   await page.getByLabel("Model ID").fill("reasoning")
-  await page.getByLabel("Model name").fill("Reasoning")
   await dialog.getByRole("button", { name: "Save model" }).click()
 
   const chat = page.getByTestId("enterprise-model-gateway-chat")
@@ -188,56 +186,56 @@ test("DialogCompanyProvider manages provider, model, credentials, defaults, diag
 
   await invokeFixtureControl(page, "Credentials error")
   await dialog.getByRole("button", { name: "Edit provider" }).click()
-  await page.getByLabel("Provider name").fill("Gateway Replace Reconciled")
+  await page.getByLabel("Base URL").fill("https://gateway-replace.example/v1")
   await page.getByLabel("Credential action").selectOption("replace")
   await page.getByLabel("API key").fill("failed-replacement-secret")
   await dialog.getByRole("button", { name: "Save provider" }).click()
   await expect(dialog.getByRole("alert")).toContainText("Request failed")
-  await expect(provider).toContainText("Gateway")
-  await expect(provider).not.toContainText("Gateway Replace Reconciled")
+  await expect(provider).toContainText("gateway")
+  await expect(provider).not.toContainText("https://gateway-replace.example/v1")
   await expect(provider).toContainText("Credentials configured")
   await expect(dialog).not.toContainText("failed-replacement-secret")
   await dialog.getByRole("button", { name: "Dismiss error" }).click()
 
   await invokeFixtureControl(page, "Credentials error")
-  await page.getByLabel("Provider name").fill("Gateway Clear Reconciled")
+  await page.getByLabel("Base URL").fill("https://gateway-clear.example/v1")
   await page.getByLabel("Credential action").selectOption("clear")
   await dialog.getByRole("button", { name: "Save provider" }).click()
   await expect(dialog.getByRole("alert")).toContainText("Request failed")
-  await expect(provider).not.toContainText("Gateway Clear Reconciled")
+  await expect(provider).not.toContainText("https://gateway-clear.example/v1")
   await dialog.getByRole("button", { name: "Dismiss error" }).click()
   await invokeFixtureControl(page, "Credentials no restart")
   await page.getByLabel("Credential action").selectOption("clear")
   await dialog.getByRole("button", { name: "Save provider" }).click()
-  await expect(provider).toContainText("Gateway Clear Reconciled")
+  await expect(provider).toContainText("https://gateway-clear.example/v1")
   await expect(provider).toContainText("Credentials not configured")
   expect(await output<string[]>(page, "credential-clear-inputs")).toEqual([])
   expect(await output<unknown[]>(page, "standalone-credential-inputs")).toEqual([])
   expect(await output<unknown[]>(page, "provider-update-inputs")).toEqual([
     {
       providerID: "gateway",
-      name: "Gateway",
+      baseURL: "https://gateway.example/v1",
       hasApiKey: true,
       headerNames: ["X-Token"],
       clearCredentials: false,
     },
     {
       providerID: "gateway",
-      name: "Gateway Replace Reconciled",
+      baseURL: "https://gateway-replace.example/v1",
       hasApiKey: true,
       headerNames: [],
       clearCredentials: false,
     },
     {
       providerID: "gateway",
-      name: "Gateway Clear Reconciled",
+      baseURL: "https://gateway-clear.example/v1",
       hasApiKey: false,
       headerNames: [],
       clearCredentials: true,
     },
     {
       providerID: "gateway",
-      name: "Gateway Clear Reconciled",
+      baseURL: "https://gateway-clear.example/v1",
       hasApiKey: false,
       headerNames: [],
       clearCredentials: true,
@@ -246,21 +244,18 @@ test("DialogCompanyProvider manages provider, model, credentials, defaults, diag
 
   await dialog.getByRole("button", { name: "Edit provider" }).click()
   await expect(page.getByLabel("Provider ID")).toBeDisabled()
-  await page.getByLabel("Provider name").fill("Gateway Updated")
   await page.getByLabel("Base URL").fill("https://gateway-updated.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
-  await expect(provider).toContainText("Gateway Updated")
+  await expect(provider).toContainText("gateway")
   await expect(provider).toContainText("https://gateway-updated.example/v1")
 
   await reasoning.click()
-  await dialog.getByRole("button", { name: "Edit model" }).click()
-  await expect(page.getByLabel("Model ID")).toBeDisabled()
-  await page.getByLabel("Model name").fill("Reasoning Updated")
-  await dialog.getByRole("button", { name: "Save model" }).click()
+  await expect(dialog.getByRole("button", { name: "Edit model" })).toHaveCount(0)
+  await expect(reasoning.getByText("reasoning", { exact: true })).toHaveCount(1)
   await dialog.getByRole("button", { name: "Test connection" }).click()
-  await expect(status).toHaveText("Testing Gateway Updated / Reasoning Updated connection")
+  await expect(status).toHaveText("Testing gateway / reasoning connection")
   await invokeFixtureControl(page, "Resolve diagnostic")
-  await expect(status).toHaveText("Gateway Updated / Reasoning Updated connection test completed successfully")
+  await expect(status).toHaveText("gateway / reasoning connection test completed successfully")
 
   await dialog.getByRole("button", { name: "Delete model" }).click()
   await expect(dialog).toContainText("Conversation history remains available")
@@ -280,13 +275,11 @@ test("provider recovery failure keeps its code and shows restart guidance", asyn
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("button", { name: "Create provider" }).click()
   await page.getByLabel("Provider ID").fill("recovery")
-  await page.getByLabel("Provider name").fill("Recovery")
   await page.getByLabel("Base URL").fill("https://recovery.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
 
   await invokeFixtureControl(page, "Credentials recovery failure")
   await dialog.getByRole("button", { name: "Edit provider" }).click()
-  await page.getByLabel("Provider name").fill("Must Roll Back")
   await page.getByLabel("Credential action").selectOption("replace")
   await page.getByLabel("API key").fill("recovery-secret")
   await dialog.getByRole("button", { name: "Save provider" }).click()
@@ -303,7 +296,6 @@ test("pending provider mutations lock every dialog close path", async ({ page })
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("button", { name: "Create provider" }).click()
   await page.getByLabel("Provider ID").fill("pending")
-  await page.getByLabel("Provider name").fill("Pending")
   await page.getByLabel("Base URL").fill("https://pending.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
   await invokeFixtureControl(page, "Credentials pending")
@@ -335,12 +327,10 @@ test("delete confirmation is an accessible modal interaction within provider man
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("button", { name: "Create provider" }).click()
   await page.getByLabel("Provider ID").fill("confirm")
-  await page.getByLabel("Provider name").fill("Confirm")
   await page.getByLabel("Base URL").fill("https://confirm.example/v1")
   await dialog.getByRole("button", { name: "Save provider" }).click()
   await dialog.getByRole("button", { name: "Add model" }).click()
   await page.getByLabel("Model ID").fill("code")
-  await page.getByLabel("Model name").fill("Code")
   await dialog.getByRole("button", { name: "Save model" }).click()
 
   await dialog.getByRole("button", { name: "Test connection" }).click()
@@ -348,8 +338,8 @@ test("delete confirmation is an accessible modal interaction within provider man
   const readiness = dialog.getByText(/Offline readiness:/)
   await expect(readiness).toBeVisible()
 
-  await dialog.getByRole("button", { name: "Edit model" }).click()
-  await page.getByLabel("Model name").fill("")
+  await dialog.getByRole("button", { name: "Add model" }).click()
+  await page.getByLabel("Model ID").fill("")
   await dialog.getByRole("button", { name: "Save model" }).click()
   const dismissError = dialog.getByRole("button", { name: "Dismiss error" })
   await expect(dismissError).toBeVisible()
@@ -357,7 +347,7 @@ test("delete confirmation is an accessible modal interaction within provider man
 
   const deleteModel = dialog.getByRole("button", { name: "Delete model" })
   await deleteModel.click()
-  const confirmation = dialog.getByRole("alertdialog", { name: "Delete model Code" })
+  const confirmation = dialog.getByRole("alertdialog", { name: "Delete model code" })
   const confirm = confirmation.getByRole("button", { name: "Confirm delete model" })
   await expect(confirmation).toHaveAttribute("aria-describedby", "enterprise-delete-description")
   await expect(confirm).toBeFocused()
@@ -387,7 +377,7 @@ for (const scenario of ["settings-layout", "settings-v2-layout"]) {
     await page.goto(fixture(scenario))
 
     await expect(page.getByText("1 provider", { exact: true })).toBeVisible()
-    await expect(page.getByText("Company LLM / Company Code", { exact: true })).toBeVisible()
+    await expect(page.getByText("company-llm / company-code", { exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled()
     await page.getByRole("button", { name: "Manage providers" }).click()
     await expect(page.getByRole("dialog")).toContainText("Enterprise providers")
@@ -535,7 +525,6 @@ responsiveViewports.forEach((viewport) => {
     await page.getByTestId("company-controls").evaluate((node) => node.setAttribute("hidden", ""))
     await dialog.getByRole("button", { name: "Create provider" }).click()
     await page.getByLabel("Provider ID").fill("compact-gateway")
-    await page.getByLabel("Provider name").fill("Compact Gateway")
     await page.getByLabel("Base URL").fill("https://gateway.example/v1")
     await expect(dialog.getByRole("button", { name: "Save provider" })).toBeVisible()
 

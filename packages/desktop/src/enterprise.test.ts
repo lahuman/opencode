@@ -32,7 +32,7 @@ const emptyCatalog = {
 const nonEmptyCatalog = {
   ...emptyCatalog,
   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
+    { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
   ]),
 }
 
@@ -95,8 +95,8 @@ describe("enterprise profile", () => {
     const profile = parseEnterpriseProfile({
       OPENCODE_ENTERPRISE: "1",
       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-        { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+        { id: "reasoning", name: "reasoning", baseURL: "https://reasoning.corp.example/v1" },
       ]),
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
@@ -108,8 +108,8 @@ describe("enterprise profile", () => {
     expect(profile).toEqual({
       enabled: true,
       models: [
-        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-        { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+        { id: "reasoning", name: "reasoning", baseURL: "https://reasoning.corp.example/v1" },
       ],
       defaultModelID: "code",
       defaultsVersion: "pilot-1",
@@ -129,14 +129,14 @@ describe("enterprise profile", () => {
     }
 
     for (const models of [
-      [{ id: "code", name: "Company Code", baseURL: "file:///private" }],
-      [{ id: "code", name: "Company Code", baseURL: "https://user:secret@code.corp.example/v1" }],
-      [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1?secret=value" }],
+      [{ id: "code", name: "code", baseURL: "file:///private" }],
+      [{ id: "code", name: "code", baseURL: "https://user:secret@code.corp.example/v1" }],
+      [{ id: "code", name: "code", baseURL: "https://code.corp.example/v1?secret=value" }],
       [
-        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-        { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://other.corp.example/v1" },
       ],
-      [{ id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", token: "secret" }],
+      [{ id: "code", name: "code", baseURL: "https://code.corp.example/v1", token: "secret" }],
     ]) {
       expect(() => parseEnterpriseProfile({ ...env, OPENCODE_ENTERPRISE_MODELS: JSON.stringify(models) })).toThrow(
         "OPENCODE_ENTERPRISE_MODELS",
@@ -147,7 +147,7 @@ describe("enterprise profile", () => {
       parseEnterpriseProfile({
         ...env,
         OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-          { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+          { id: "reasoning", name: "reasoning", baseURL: "https://reasoning.corp.example/v1" },
         ]),
       }),
     ).toThrow("OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID")
@@ -165,7 +165,7 @@ describe("enterprise profile", () => {
     })
 
     expect(profile).toMatchObject({
-      models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+      models: [{ id: "company-code", name: "company-code", baseURL: "https://llm.corp.example/v1" }],
       defaultModelID: "company-code",
       allowedOrigins: ["https://llm.corp.example"],
     })
@@ -239,8 +239,8 @@ describe("enterprise profile", () => {
     const profile = parseEnterpriseProfile({
       OPENCODE_ENTERPRISE: "1",
       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
-        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+        { id: "company-code", name: "company-code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "company-fast", baseURL: "https://fast.corp.example/v1" },
       ]),
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
@@ -268,8 +268,8 @@ describe("enterprise profile", () => {
       OPENCODE_ENTERPRISE_ALLOWED_ORIGINS:
         "https://llm.corp.example,https://fast.corp.example,https://llm-dr.corp.example",
       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-        { id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" },
-        { id: "company-fast", name: "Company Fast", baseURL: "https://fast.corp.example/v1" },
+        { id: "company-code", name: "company-code", baseURL: "https://llm.corp.example/v1" },
+        { id: "company-fast", name: "company-fast", baseURL: "https://fast.corp.example/v1" },
       ]),
       OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "company-code",
       XDG_DATA_HOME: "C:/Users/person/AppData/Local/company-opencode/data",

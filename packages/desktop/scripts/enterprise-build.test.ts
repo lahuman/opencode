@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 
 import { enterprisePackageEnvironment, validateEnterpriseBuild } from "./enterprise-build"
+import { parseEnterpriseProfile } from "../src/enterprise-profile"
 
 const valid = {
   OPENCODE_ENTERPRISE: "1",
@@ -13,11 +14,24 @@ const valid = {
   OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "https://llm.corp.example",
 }
 
+test.each([undefined, "Legacy display name"])("derives internal names from IDs for build and runtime profiles: %s", (name) => {
+  const env = {
+    ...valid,
+    OPENCODE_ENTERPRISE_MODELS: JSON.stringify([{ id: "model", baseURL: "https://provider.example/v1", ...(name === undefined ? {} : { name }) }]),
+    OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID: "model",
+  }
+  const profile = parseEnterpriseProfile(env)
+  if (!profile.enabled) throw new Error("Missing enterprise profile")
+  expect(profile.models).toEqual([{ id: "model", name: "model", baseURL: "https://provider.example/v1" }])
+  expect(validateEnterpriseBuild(env).models).toEqual(profile.models)
+  expect(validateEnterpriseBuild({ ...valid, OPENCODE_ENTERPRISE_MODEL_NAME: undefined }).models[0]?.name).toBe("company-code")
+})
+
 const nonEmptyCatalog = {
   OPENCODE_ENTERPRISE: "1",
   OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-    { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-    { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+    { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+    { id: "reasoning", name: "reasoning", baseURL: "https://reasoning.corp.example/v1" },
   ]),
   OPENCODE_ENTERPRISE_DEFAULTS_VERSION: "pilot-1",
   OPENCODE_ENTERPRISE_GUIDE_VERSION: "chai-1",
@@ -91,8 +105,8 @@ test.each([
 test("validates normalized multi-model build metadata", () => {
   expect(validateEnterpriseBuild(multiModel)).toEqual({
     models: [
-      { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-      { id: "reasoning", name: "Company Reasoning", baseURL: "https://reasoning.corp.example/v1" },
+      { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+      { id: "reasoning", name: "reasoning", baseURL: "https://reasoning.corp.example/v1" },
     ],
     defaultModelID: "code",
     defaultsVersion: "pilot-1",
@@ -114,8 +128,8 @@ test("rejects duplicate, secret-bearing, and incomplete model catalogs", () => {
     validateEnterpriseBuild({
       ...multiModel,
       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1" },
-        { id: "code", name: "Duplicate", baseURL: "https://other.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://code.corp.example/v1" },
+        { id: "code", name: "code", baseURL: "https://other.corp.example/v1" },
       ]),
     }),
   ).toThrow("OPENCODE_ENTERPRISE_MODELS")
@@ -123,7 +137,7 @@ test("rejects duplicate, secret-bearing, and incomplete model catalogs", () => {
     validateEnterpriseBuild({
       ...multiModel,
       OPENCODE_ENTERPRISE_MODELS: JSON.stringify([
-        { id: "code", name: "Company Code", baseURL: "https://code.corp.example/v1", apiKey: "secret" },
+        { id: "code", name: "code", baseURL: "https://code.corp.example/v1", apiKey: "secret" },
       ]),
     }),
   ).toThrow("OPENCODE_ENTERPRISE_MODELS")
@@ -134,7 +148,7 @@ test("rejects duplicate, secret-bearing, and incomplete model catalogs", () => {
 
 test("accepts a portable unsigned profile without signing inputs", () => {
   expect(validateEnterpriseBuild(valid)).toMatchObject({
-    models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v1" }],
+    models: [{ id: "company-code", name: "company-code", baseURL: "https://llm.corp.example/v1" }],
     defaultModelID: "company-code",
     allowedOrigins: ["https://llm.corp.example"],
   })
@@ -156,7 +170,7 @@ test("returns only normalized non-secret enterprise build metadata", () => {
       OPENCODE_ENTERPRISE_SECRET_HEADERS: "set",
     }),
   ).toEqual({
-    models: [{ id: "company-code", name: "Company Code", baseURL: "https://llm.corp.example/v2" }],
+    models: [{ id: "company-code", name: "company-code", baseURL: "https://llm.corp.example/v2" }],
     defaultModelID: "company-code",
     defaultsVersion: "pilot-1",
     guideVersion: "guide-1",
@@ -171,7 +185,6 @@ test("requires enterprise mode and every enterprise package input", () => {
   for (const key of [
     "OPENCODE_ENTERPRISE_BASE_URL",
     "OPENCODE_ENTERPRISE_MODEL_ID",
-    "OPENCODE_ENTERPRISE_MODEL_NAME",
     "OPENCODE_ENTERPRISE_DEFAULTS_VERSION",
     "OPENCODE_ENTERPRISE_GUIDE_VERSION",
     "OPENCODE_ENTERPRISE_CATALOG_VERSION",

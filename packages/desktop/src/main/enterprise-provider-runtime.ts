@@ -40,7 +40,6 @@ export type EnterpriseProviderAPI = {
   }): Promise<EnterpriseProviderCatalogView>
   updateProvider(input: {
     providerID: string
-    name: string
     baseURL: string
     credentials?: CredentialReplacement
     clearCredentials?: true
@@ -50,7 +49,6 @@ export type EnterpriseProviderAPI = {
     providerID: string
     model: EnterpriseProviderModel
   }): Promise<EnterpriseProviderCatalogView>
-  updateModel(input: { providerID: string; modelID: string; name: string }): Promise<EnterpriseProviderCatalogView>
   deleteModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
   setDefaultModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
   replaceProviderCredentials(input: {
@@ -68,7 +66,7 @@ type CredentialHealth =
 export async function initializeEnterpriseProviderStores(input: {
   catalog: ReturnType<typeof createEnterpriseProviderStore>
   credentials: ReturnType<typeof createEnterpriseCredentialStore>
-  profile: { defaultModelID: string; models: { id: string; name: string; baseURL: string }[] }
+  profile: { defaultModelID: string; models: { id: string; baseURL: string }[] }
 }) {
   const health = await input.credentials.health()
   const errorCode = credentialHealthError(health)
@@ -215,7 +213,7 @@ export function createEnterpriseProviderRuntime(input: {
           ...state.catalog,
           providers: state.catalog.providers.map((provider) =>
             provider.id === value.providerID
-              ? { ...provider, name: value.name, baseURL: value.baseURL }
+              ? { ...provider, baseURL: value.baseURL }
               : provider,
           ),
         })
@@ -263,26 +261,6 @@ export function createEnterpriseProviderRuntime(input: {
             schemaVersion: 1,
             ...(selected ? { default: selected } : {}),
             providers,
-          }),
-          credentials: state.credentials,
-        }
-      }),
-    updateModel: (value) =>
-      mutate((state) => {
-        requireModel(state.catalog, value)
-        return {
-          catalog: validateEnterpriseProviderCatalog({
-            ...state.catalog,
-            providers: state.catalog.providers.map((provider) =>
-              provider.id === value.providerID
-                ? {
-                    ...provider,
-                    models: provider.models.map((model) =>
-                      model.id === value.modelID ? { ...model, name: value.name } : model,
-                    ),
-                  }
-                : provider,
-            ),
           }),
           credentials: state.credentials,
         }

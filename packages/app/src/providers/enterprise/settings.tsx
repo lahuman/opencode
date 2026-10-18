@@ -14,7 +14,7 @@ export function SettingsCompanyProvider() {
     const provider = company.defaultProvider()
     const model = company.defaultModel()
     if (!provider || !model) return language.t("enterprise.provider.copy.noDefault")
-    return `${provider.name} / ${model.name}`
+    return `${provider.id} / ${model.id}`
   }
 
   return (

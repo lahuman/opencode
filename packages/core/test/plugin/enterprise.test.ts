@@ -62,11 +62,13 @@ it.effect("restricts the actual provider/model catalogs after config transforms 
     yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin))
     yield* providers.reload()
     expect((yield* providers.all()).map((provider) => provider.id)).toEqual([providerID])
+    expect((yield* providers.get(providerID))?.name).toBe(providerID)
     expect((yield* providers.get(providerID))?.settings).toEqual({
       baseURL: "https://llm.internal/v1",
       provider: providerID,
     })
     expect((yield* models.available()).map((model) => model.id)).toEqual([modelID])
+    expect((yield* models.available())[0]?.name).toBe(modelID)
     expect((yield* models.default())?.id).toBe(modelID)
     expect(JSON.stringify(yield* models.all())).not.toContain("config-secret")
   }),

@@ -11,9 +11,8 @@ const Catalog = Schema.Struct({
   providers: Schema.Array(
     Schema.Struct({
       id: Schema.String,
-      name: Schema.String,
       baseURL: Schema.String,
-      models: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+      models: Schema.Array(Schema.Struct({ id: Schema.String })),
     }),
   ),
 })
@@ -53,11 +52,11 @@ export function settings() {
   // Registered LLM endpoints are independent of the build's web-access policy.
   const providerOrigins = new Set<string>()
   for (const provider of catalog.providers) {
-    if (!provider.id.trim() || !provider.name.trim()) throw new Error("Invalid enterprise provider")
+    if (!provider.id.trim()) throw new Error("Invalid enterprise provider")
     providerOrigins.add(parseHTTPURL(provider.baseURL).origin)
     if (
       new Set(provider.models.map((model) => model.id)).size !== provider.models.length ||
-      provider.models.some((model) => !model.id.trim() || !model.name.trim())
+      provider.models.some((model) => !model.id.trim())
     )
       throw new Error("Invalid enterprise models")
   }

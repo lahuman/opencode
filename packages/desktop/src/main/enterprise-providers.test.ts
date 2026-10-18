@@ -1,9 +1,41 @@
 import { expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createEnterpriseProviderStore, validateEnterpriseProviderCatalog } from "./enterprise-providers"
+
+test("reads legacy names without changing IDs and persists only IDs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "enterprise-provider-ids-"))
+  try {
+    const file = join(dir, "providers.json")
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        default: { providerID: "provider", modelID: "model" },
+        providers: [{
+          id: "provider",
+          name: "Friendly provider",
+          baseURL: "https://provider.example/v1",
+          models: [{ id: "model", name: "Friendly model" }],
+        }],
+      }),
+    )
+    const store = createEnterpriseProviderStore({ file })
+    const catalog = await store.read()
+    expect(catalog).toEqual({
+      schemaVersion: 1,
+      default: { providerID: "provider", modelID: "model" },
+      providers: [{ id: "provider", baseURL: "https://provider.example/v1", models: [{ id: "model" }] }],
+    })
+    if (!catalog) throw new Error("Missing catalog")
+    await store.write(catalog)
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(catalog)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 
 test("rejects invalid URLs and dangling defaults", () => {
   expect(() =>
@@ -13,7 +45,6 @@ test("rejects invalid URLs and dangling defaults", () => {
       providers: [
         {
           id: "provider",
-          name: "Provider",
           baseURL: "https://user:pass@example.com/v1",
           models: [],
         },
@@ -30,8 +61,8 @@ test("seeds one provider per packaged legacy model", async () => {
       {
         defaultModelID: "code",
         models: [
-          { id: "code", name: "Code", baseURL: "https://code.example/v1" },
-          { id: "reasoning", name: "Reasoning", baseURL: "https://reasoning.example/v1" },
+          { id: "code", baseURL: "https://code.example/v1" },
+          { id: "reasoning", baseURL: "https://reasoning.example/v1" },
         ],
       },
       {
@@ -47,12 +78,11 @@ test("seeds one provider per packaged legacy model", async () => {
       schemaVersion: 1,
       default: { providerID: "company-llm", modelID: "code" },
       providers: [
-        { id: "company-llm", name: "Code", baseURL: "https://code.example/v1", models: [{ id: "code", name: "Code" }] },
+        { id: "company-llm", baseURL: "https://code.example/v1", models: [{ id: "code" }] },
         {
           id: "company-llm-2",
-          name: "Reasoning",
           baseURL: "https://reasoning.example/v1",
-          models: [{ id: "reasoning", name: "Reasoning" }],
+          models: [{ id: "reasoning" }],
         },
       ],
     })
@@ -75,9 +105,9 @@ test("assigns company-llm to a non-first legacy default without changing model i
       {
         defaultModelID: "reasoning",
         models: [
-          { id: "code", name: "Code", baseURL: "https://code.example/v1" },
-          { id: "reasoning", name: "Reasoning", baseURL: "https://reasoning.example/v1" },
-          { id: "history", name: "Historical", baseURL: "https://history.example/v1" },
+          { id: "code", baseURL: "https://code.example/v1" },
+          { id: "reasoning", baseURL: "https://reasoning.example/v1" },
+          { id: "history", baseURL: "https://history.example/v1" },
         ],
       },
       {
@@ -94,18 +124,16 @@ test("assigns company-llm to a non-first legacy default without changing model i
       schemaVersion: 1,
       default: { providerID: "company-llm", modelID: "reasoning" },
       providers: [
-        { id: "company-llm-2", name: "Code", baseURL: "https://code.example/v1", models: [{ id: "code", name: "Code" }] },
+        { id: "company-llm-2", baseURL: "https://code.example/v1", models: [{ id: "code" }] },
         {
           id: "company-llm",
-          name: "Reasoning",
           baseURL: "https://reasoning.example/v1",
-          models: [{ id: "reasoning", name: "Reasoning" }],
+          models: [{ id: "reasoning" }],
         },
         {
           id: "company-llm-3",
-          name: "Historical",
           baseURL: "https://history.example/v1",
-          models: [{ id: "history", name: "Historical" }],
+          models: [{ id: "history" }],
         },
       ],
     })
@@ -129,8 +157,8 @@ test("re-derives provider credentials when catalog initialization is retried aft
     const profile = {
       defaultModelID: "code",
       models: [
-        { id: "code", name: "Code", baseURL: "https://code.example/v1" },
-        { id: "reasoning", name: "Reasoning", baseURL: "https://reasoning.example/v1" },
+        { id: "code", baseURL: "https://code.example/v1" },
+        { id: "reasoning", baseURL: "https://reasoning.example/v1" },
       ],
     }
     const legacy = {
@@ -163,8 +191,8 @@ test("rejects duplicate IDs and incomplete provider metadata", () => {
     {
       schemaVersion: 1,
       providers: [
-        { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
-        { id: "provider", name: "Duplicate", baseURL: "https://duplicate.example/v1", models: [] },
+        { id: "provider", baseURL: "https://provider.example/v1", models: [] },
+        { id: "provider", baseURL: "https://duplicate.example/v1", models: [] },
       ],
     },
     {
@@ -172,18 +200,17 @@ test("rejects duplicate IDs and incomplete provider metadata", () => {
       providers: [
         {
           id: "provider",
-          name: "",
           baseURL: "https://provider.example/v1",
           models: [
-            { id: "model", name: "Model" },
-            { id: "model", name: "Duplicate" },
+            { id: "model" },
+            { id: "model" },
           ],
         },
       ],
     },
     {
       schemaVersion: 1,
-      providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1#fragment", models: [] }],
+      providers: [{ id: "provider", baseURL: "https://provider.example/v1#fragment", models: [] }],
     },
   ]
 
@@ -194,7 +221,7 @@ test("rejects query parameters in provider URLs", () => {
   expect(() =>
     validateEnterpriseProviderCatalog({
       schemaVersion: 1,
-      providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1?query=value", models: [] }],
+      providers: [{ id: "provider", baseURL: "https://provider.example/v1?query=value", models: [] }],
     }),
   ).toThrow()
 })
@@ -203,11 +230,11 @@ test("allows empty catalogs and normalizes provider URLs", () => {
   expect(
     validateEnterpriseProviderCatalog({
       schemaVersion: 1,
-      providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
+      providers: [{ id: "provider", baseURL: "https://provider.example/v1", models: [] }],
     }),
   ).toEqual({
     schemaVersion: 1,
-    providers: [{ id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] }],
+    providers: [{ id: "provider", baseURL: "https://provider.example/v1", models: [] }],
   })
   expect(validateEnterpriseProviderCatalog({ schemaVersion: 1, providers: [] })).toEqual({ schemaVersion: 1, providers: [] })
 })
@@ -236,9 +263,8 @@ test("preserves an existing user catalog when packaged models are empty", async 
       providers: [
         {
           id: "existing",
-          name: "Existing",
           baseURL: "https://existing.example/v1",
-          models: [{ id: "model", name: "Model" }],
+          models: [{ id: "model" }],
         },
       ],
     }
@@ -261,9 +287,8 @@ test("preserves an existing catalog and cleans up temp files after failed writes
       providers: [
         {
           id: "existing",
-          name: "Existing",
           baseURL: "https://existing.example/v1",
-          models: [{ id: "model", name: "Model" }],
+          models: [{ id: "model" }],
         },
       ],
     }
@@ -271,7 +296,7 @@ test("preserves an existing catalog and cleans up temp files after failed writes
 
     expect(
       await store.initialize(
-        { defaultModelID: "new", models: [{ id: "new", name: "New", baseURL: "https://new.example/v1" }] },
+        { defaultModelID: "new", models: [{ id: "new", baseURL: "https://new.example/v1" }] },
       ),
     ).toEqual({ catalog })
     expect(await store.read()).toEqual(catalog)
@@ -295,9 +320,9 @@ test("uses stable provider ID suffixes during migration", async () => {
       {
         defaultModelID: "first",
         models: [
-          { id: "first", name: "First", baseURL: "https://first.example/v1" },
-          { id: "second", name: "Second", baseURL: "https://second.example/v1" },
-          { id: "third", name: "Third", baseURL: "https://third.example/v1" },
+          { id: "first", baseURL: "https://first.example/v1" },
+          { id: "second", baseURL: "https://second.example/v1" },
+          { id: "third", baseURL: "https://third.example/v1" },
         ],
       },
       { schemaVersion: 2, models: {} },

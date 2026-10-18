@@ -5,8 +5,8 @@ import { enterpriseDesktop } from "../lifecycle/enterprise"
 import { parseEnterpriseProviderDiagnostic } from "../enterprise-readiness"
 import { isTrustedRendererDocument } from "../windows/scheme"
 
-const Model = Schema.Struct({ id: Schema.String, name: Schema.String })
-const Provider = Schema.Struct({ id: Schema.String, name: Schema.String, baseURL: Schema.String, models: Schema.mutable(Schema.Array(Model)) })
+const Model = Schema.Struct({ id: Schema.String })
+const Provider = Schema.Struct({ id: Schema.String, baseURL: Schema.String, models: Schema.mutable(Schema.Array(Model)) })
 const Credentials = Schema.Struct({ apiKey: Schema.optionalKey(Schema.String), headers: Schema.Record(Schema.String, Schema.String) })
 const Ref = Schema.Struct({ providerID: Schema.String, modelID: Schema.String })
 
@@ -27,10 +27,9 @@ export async function registerEnterpriseHandlers() {
   const handlers = new Map([
     ["providerCatalog", handler(Schema.Tuple([]), api.providerCatalog)],
     ["createProvider", handler(Schema.Tuple([Schema.Struct({ provider: Provider, credentials: Schema.optionalKey(Credentials) })]), api.createProvider)],
-    ["updateProvider", handler(Schema.Tuple([Schema.Struct({ providerID: Schema.String, name: Schema.String, baseURL: Schema.String, credentials: Schema.optionalKey(Credentials), clearCredentials: Schema.optionalKey(Schema.Literal(true)) })]), api.updateProvider)],
+    ["updateProvider", handler(Schema.Tuple([Schema.Struct({ providerID: Schema.String, baseURL: Schema.String, credentials: Schema.optionalKey(Credentials), clearCredentials: Schema.optionalKey(Schema.Literal(true)) })]), api.updateProvider)],
     ["deleteProvider", handler(Schema.Tuple([Schema.String]), api.deleteProvider)],
     ["createModel", handler(Schema.Tuple([Schema.Struct({ providerID: Schema.String, model: Model })]), api.createModel)],
-    ["updateModel", handler(Schema.Tuple([Schema.Struct({ providerID: Schema.String, modelID: Schema.String, name: Schema.String })]), api.updateModel)],
     ["deleteModel", handler(Schema.Tuple([Ref]), api.deleteModel)],
     ["setDefaultModel", handler(Schema.Tuple([Ref]), api.setDefaultModel)],
     ["replaceProviderCredentials", handler(Schema.Tuple([Schema.Struct({ providerID: Schema.String, credentials: Credentials })]), api.replaceProviderCredentials)],

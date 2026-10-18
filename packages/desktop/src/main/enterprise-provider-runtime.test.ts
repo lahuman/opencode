@@ -21,9 +21,8 @@ const initial = (): TestState => ({
     providers: [
       {
         id: "provider",
-        name: "Provider",
         baseURL: "https://provider.example/v1",
-        models: [{ id: "model", name: "Model" }],
+        models: [{ id: "model" }],
       },
     ],
   },
@@ -39,56 +38,52 @@ test("creates, updates, and deletes providers while keeping provider IDs immutab
   await runtime.createProvider({
     provider: {
       id: "second",
-      name: "Second",
       baseURL: "https://second.example/v1",
       models: [],
     },
   })
   await runtime.updateProvider({
     providerID: "second",
-    name: "Updated",
     baseURL: "https://updated.example/v1",
   })
 
   expect(runtime.readCatalog().providers[1]).toEqual({
     id: "second",
-    name: "Updated",
     baseURL: "https://updated.example/v1",
     models: [],
   })
   await expect(
-    runtime.updateProvider({ providerID: "missing", name: "Renamed", baseURL: "https://renamed.example/v1" }),
+    runtime.updateProvider({ providerID: "missing", baseURL: "https://renamed.example/v1" }),
   ).rejects.toThrow("provider")
   await runtime.deleteProvider("second")
   expect(runtime.readCatalog().providers.map((provider) => provider.id)).toEqual(["provider"])
 })
 
-test("creates, updates, and deletes models while keeping model IDs immutable", async () => {
+test("creates and deletes models while keeping model IDs immutable", async () => {
   const runtime = createRuntime(initial())
 
-  await runtime.createModel({ providerID: "provider", model: { id: "reasoning", name: "Reasoning" } })
-  await runtime.updateModel({ providerID: "provider", modelID: "reasoning", name: "Updated reasoning" })
+  await runtime.createModel({ providerID: "provider", model: { id: "reasoning" } })
 
   expect(runtime.readCatalog().providers[0]?.models).toEqual([
-    { id: "model", name: "Model" },
-    { id: "reasoning", name: "Updated reasoning" },
+    { id: "model" },
+    { id: "reasoning" },
   ])
   await expect(
-    runtime.updateModel({ providerID: "provider", modelID: "missing", name: "Renamed" }),
+    runtime.deleteModel({ providerID: "provider", modelID: "missing" }),
   ).rejects.toThrow("model")
   await runtime.deleteModel({ providerID: "provider", modelID: "reasoning" })
-  expect(runtime.readCatalog().providers[0]?.models).toEqual([{ id: "model", name: "Model" }])
+  expect(runtime.readCatalog().providers[0]?.models).toEqual([{ id: "model" }])
 })
 
 test("allows a provider with zero models and selects the first subsequently created model", async () => {
   const runtime = createRuntime({ catalog: { schemaVersion: 1, providers: [] }, credentials: { schemaVersion: 3, providers: {} } })
 
   await runtime.createProvider({
-    provider: { id: "empty", name: "Empty", baseURL: "https://empty.example/v1", models: [] },
+    provider: { id: "empty", baseURL: "https://empty.example/v1", models: [] },
   })
   expect(runtime.readCatalog().default).toBeUndefined()
 
-  await runtime.createModel({ providerID: "empty", model: { id: "first", name: "First" } })
+  await runtime.createModel({ providerID: "empty", model: { id: "first" } })
   expect(runtime.readCatalog().default).toEqual({ providerID: "empty", modelID: "first" })
 })
 
@@ -100,11 +95,10 @@ test("deleting the default chooses the same provider's first remaining model", a
       providers: [
         {
           id: "provider",
-          name: "Provider",
           baseURL: "https://provider.example/v1",
           models: [
-            { id: "first", name: "First" },
-            { id: "second", name: "Second" },
+            { id: "first" },
+            { id: "second" },
           ],
         },
       ],
@@ -122,15 +116,13 @@ test("default fallback uses the first model of the first remaining provider", as
   state.catalog.providers.push(
     {
       id: "empty",
-      name: "Empty",
       baseURL: "https://empty.example/v1",
       models: [],
     },
     {
       id: "fallback",
-      name: "Fallback",
       baseURL: "https://fallback.example/v1",
-      models: [{ id: "first", name: "First" }],
+      models: [{ id: "first" }],
     },
   )
   const runtime = createRuntime(state)
@@ -234,7 +226,7 @@ test("queues a second mutation until the first restart completes", async () => {
   })
 
   const first = runtime.createProvider({
-    provider: { id: "second", name: "Second", baseURL: "https://second.example/v1", models: [] },
+    provider: { id: "second", baseURL: "https://second.example/v1", models: [] },
   })
   await entered.promise
   const second = runtime.deleteProvider("provider")
@@ -304,14 +296,12 @@ test("updates provider metadata and clears credentials in one restart", async ()
 
   await runtime.updateProvider({
     providerID: "provider",
-    name: "Updated",
     baseURL: "https://updated.example/v1",
     clearCredentials: true,
   })
 
   expect(runtime.readCatalog().providers[0]).toMatchObject({
     id: "provider",
-    name: "Updated",
     baseURL: "https://updated.example/v1",
   })
   expect(runtime.readCredentials().providers.provider).toEqual({ headers: {} })
@@ -402,7 +392,6 @@ test("catalog snapshots reject credentials for providers outside the catalog", a
     await expect(
       runtime.updateProvider({
         providerID: "provider",
-        name: "Updated",
         baseURL: "https://updated.example/v1",
       }),
     ).rejects.toMatchObject({ code: errorCode, message: errorCode })
@@ -444,10 +433,10 @@ test("startup with an empty packaged profile has no default until the first mode
     expect(await runtime.providerCatalog()).toMatchObject({ providers: [], default: undefined })
 
     await runtime.createProvider({
-      provider: { id: "provider", name: "Provider", baseURL: "https://provider.example/v1", models: [] },
+      provider: { id: "provider", baseURL: "https://provider.example/v1", models: [] },
     })
     expect(
-      await runtime.createModel({ providerID: "provider", model: { id: "first", name: "First" } }),
+      await runtime.createModel({ providerID: "provider", model: { id: "first" } }),
     ).toMatchObject({ default: { providerID: "provider", modelID: "first" } })
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -502,7 +491,7 @@ test("startup migration writes schema v3 once and is retry-safe", async () => {
     const catalog = createEnterpriseProviderStore({ file: join(root, "providers.json") })
     const profile = {
       defaultModelID: "code",
-      models: [{ id: "code", name: "Code", baseURL: "https://code.example/v1" }],
+      models: [{ id: "code", baseURL: "https://code.example/v1" }],
     }
 
     await initializeEnterpriseProviderStores({ catalog, credentials, profile })
@@ -545,7 +534,7 @@ test("startup rejects orphaned provider credentials without modifying durable st
         credentials,
         profile: {
           defaultModelID: "model",
-          models: [{ id: "model", name: "Model", baseURL: "https://provider.example/v1" }],
+          models: [{ id: "model", baseURL: "https://provider.example/v1" }],
         },
       }),
     ).rejects.toMatchObject({
@@ -592,7 +581,7 @@ test("startup rejects orphaned provider credentials without modifying durable st
           credentials,
           profile: {
             defaultModelID: "code",
-            models: [{ id: "code", name: "Code", baseURL: "https://code.example/v1" }],
+            models: [{ id: "code", baseURL: "https://code.example/v1" }],
           },
         }),
       ).rejects.toMatchObject({ code: errorCode, message: errorCode })

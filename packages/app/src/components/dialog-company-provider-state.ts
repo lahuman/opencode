@@ -21,14 +21,12 @@ export type EnterpriseProviderFormMode = { type: "create" } | { type: "edit"; pr
 export type EnterpriseProviderFormInput = {
   mode: EnterpriseProviderFormMode
   providerID: string
-  name: string
   baseURL: string
   models: EnterpriseProviderModel[]
   existingProviderIDs: Set<string>
 }
 export type EnterpriseProviderFormResult = {
   providerID: string
-  name: string
   baseURL: string
   models: EnterpriseProviderModel[]
   error?: string
@@ -48,13 +46,11 @@ export const COMPANY_PROVIDER_FAILURE_MESSAGE =
 
 export function validateEnterpriseProviderForm(input: EnterpriseProviderFormInput): EnterpriseProviderFormResult {
   const providerID = (input.mode.type === "edit" ? input.mode.providerID : input.providerID).trim()
-  const name = input.name.trim()
   const baseURL = input.baseURL.trim()
-  const models = input.models.map((model) => ({ id: model.id.trim(), name: model.name.trim() }))
-  const value = { providerID, name, baseURL, models }
+  const models = input.models.map((model) => ({ id: model.id.trim() }))
+  const value = { providerID, baseURL, models }
 
   if (!providerID) return { ...value, error: "Provider ID is required" }
-  if (!name) return { ...value, error: "Provider name is required" }
   if (!baseURL) return { ...value, error: "Base URL is required" }
   if (
     input.mode.type === "create" &&
@@ -68,7 +64,6 @@ export function validateEnterpriseProviderForm(input: EnterpriseProviderFormInpu
   if (url.username || url.password || url.search || url.hash)
     return { ...value, error: "Base URL cannot include credentials, query parameters, or fragments" }
   if (models.some((model) => !model.id)) return { ...value, error: "Model ID is required" }
-  if (models.some((model) => !model.name)) return { ...value, error: "Model name is required" }
   if (new Set(models.map((model) => model.id.toLowerCase())).size !== models.length)
     return { ...value, error: "Model IDs must be unique" }
   return value
@@ -99,12 +94,10 @@ export function providerCredentialIntent(
 
 export async function applyEnterpriseProviderUpdate<T>(input: {
   providerID: string
-  name: string
   baseURL: string
   credentials: { mode: "preserve" } | { mode: "clear" } | { mode: "replace"; credentials: CredentialReplacement }
   updateProvider: (value: {
     providerID: string
-    name: string
     baseURL: string
     credentials?: CredentialReplacement
     clearCredentials?: true
@@ -113,7 +106,6 @@ export async function applyEnterpriseProviderUpdate<T>(input: {
 }) {
   const updated = await input.updateProvider({
     providerID: input.providerID,
-    name: input.name,
     baseURL: input.baseURL,
     ...(input.credentials.mode === "replace"
       ? { credentials: input.credentials.credentials }
@@ -151,7 +143,7 @@ export function enterpriseProviderPresentation(
       : provider.credentials.configured
         ? "Credentials configured"
         : "Credentials not configured",
-    defaultModel: model?.name,
+    defaultModel: model?.id,
     isDefaultProvider: Boolean(model),
   }
 }
@@ -195,7 +187,6 @@ export function companyProviderDiagnosticResult(
 export function providerFormFromCatalog(provider: EnterpriseProvider): EnterpriseProviderFormResult {
   return {
     providerID: provider.id,
-    name: provider.name,
     baseURL: provider.baseURL,
     models: provider.models.map((model) => ({ ...model })),
   }

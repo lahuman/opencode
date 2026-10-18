@@ -16,17 +16,15 @@ describe("enterprise provider form", () => {
     const result = validateEnterpriseProviderForm({
       mode: { type: "edit", providerID: "internal" },
       providerID: "changed-in-the-dom",
-      name: " Internal Updated ",
       baseURL: " https://new.example/v1 ",
-      models: [{ id: "code", name: " Code Updated " }],
+      models: [{ id: "code" }],
       existingProviderIDs: new Set(["internal"]),
     })
 
     expect(result).toMatchObject({
       providerID: "internal",
-      name: "Internal Updated",
       baseURL: "https://new.example/v1",
-      models: [{ id: "code", name: "Code Updated" }],
+      models: [{ id: "code" }],
     })
     expect(result.error).toBeUndefined()
   })
@@ -36,7 +34,6 @@ describe("enterprise provider form", () => {
       validateEnterpriseProviderForm({
         mode: { type: "create" },
         providerID: " INTERNAL ",
-        name: "Internal",
         baseURL: "https://internal.example/v1",
         models: [],
         existingProviderIDs: new Set(["internal"]),
@@ -49,7 +46,6 @@ describe("enterprise provider form", () => {
       validateEnterpriseProviderForm({
         mode: { type: "create" },
         providerID: "internal",
-        name: "Internal",
         baseURL: "file:///private/provider",
         models: [],
         existingProviderIDs: new Set(),
@@ -59,11 +55,10 @@ describe("enterprise provider form", () => {
       validateEnterpriseProviderForm({
         mode: { type: "create" },
         providerID: "internal",
-        name: "Internal",
         baseURL: "https://internal.example/v1",
         models: [
-          { id: "code", name: "Code" },
-          { id: " CODE ", name: "Code duplicate" },
+          { id: "code" },
+          { id: " CODE " },
         ],
         existingProviderIDs: new Set(),
       }).error,
@@ -80,7 +75,6 @@ describe("enterprise provider form", () => {
         validateEnterpriseProviderForm({
           mode: { type: "create" },
           providerID: "internal",
-          name: "Internal",
           baseURL,
           models: [],
           existingProviderIDs: new Set(),
@@ -93,7 +87,6 @@ describe("enterprise provider form", () => {
     const result = validateEnterpriseProviderForm({
       mode: { type: "create" },
       providerID: "empty",
-      name: "Empty provider",
       baseURL: "https://empty.example/v1",
       models: [],
       existingProviderIDs: new Set(),
@@ -148,7 +141,6 @@ describe("enterprise provider credentials", () => {
 
     await applyEnterpriseProviderUpdate({
       providerID: "internal",
-      name: "Internal Updated",
       baseURL: "https://new.example/v1",
       credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
       updateProvider: async (input) => {
@@ -161,7 +153,6 @@ describe("enterprise provider credentials", () => {
     expect(inputs).toEqual([
       {
         providerID: "internal",
-        name: "Internal Updated",
         baseURL: "https://new.example/v1",
         credentials: { apiKey: "secret", headers: {} },
       },
@@ -174,7 +165,6 @@ describe("enterprise provider credentials", () => {
     const inputs: unknown[] = []
     const result = applyEnterpriseProviderUpdate({
       providerID: "internal",
-      name: "Internal Updated",
       baseURL: "https://new.example/v1",
       credentials: { mode: "clear" },
       updateProvider: async (input) => {
@@ -189,7 +179,6 @@ describe("enterprise provider credentials", () => {
     expect(inputs).toEqual([
       {
         providerID: "internal",
-        name: "Internal Updated",
         baseURL: "https://new.example/v1",
         clearCredentials: true,
       },
@@ -201,7 +190,6 @@ describe("enterprise provider credentials", () => {
     const mutations: unknown[] = []
     const result = applyEnterpriseProviderUpdate({
       providerID: "internal",
-      name: "Internal Updated",
       baseURL: "https://new.example/v1",
       credentials: { mode: "replace", credentials: { apiKey: "secret", headers: {} } },
       updateProvider: async () => {
@@ -223,11 +211,10 @@ describe("enterprise provider presentation state", () => {
     providers: [
       {
         id: "internal",
-        name: "Internal",
         baseURL: "https://internal.example/v1",
         models: [
-          { id: "chat", name: "Chat" },
-          { id: "code", name: "Code" },
+          { id: "chat" },
+          { id: "code" },
         ],
         credentials: { configured: true, headerNames: ["X-Token"] },
       },
@@ -238,7 +225,7 @@ describe("enterprise provider presentation state", () => {
     expect(enterpriseProviderPresentation(catalog, catalog.providers[0])).toEqual({
       modelCount: "2 models",
       credentials: "Credentials configured",
-      defaultModel: "Code",
+      defaultModel: "code",
       isDefaultProvider: true,
     })
   })

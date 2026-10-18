@@ -50,9 +50,8 @@ describe("enterprise guide IPC", () => {
         providers: [
           {
             id: "company",
-            name: "Company",
             baseURL: "https://llm.corp.example/v1",
-            models: [{ id: "company-code", name: "Company Code" }],
+            models: [{ id: "company-code" }],
             credentials: { configured: true, headerNames: ["Authorization"] },
           },
         ],

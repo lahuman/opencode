@@ -60,10 +60,11 @@ export function validateEnterpriseBuild(env: Env): EnterpriseBuildMetadata {
 
 function parseModels(env: Env) {
   if (!env.OPENCODE_ENTERPRISE_MODELS) {
+    const id = requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID")
     return [
       {
-        id: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID"),
-        name: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_NAME"),
+        id,
+        name: id,
         baseURL: parseModelURL(requireValue(env, "OPENCODE_ENTERPRISE_BASE_URL"), "OPENCODE_ENTERPRISE_BASE_URL"),
       },
     ]
@@ -80,14 +81,13 @@ function parseModels(env: Env) {
     throw new Error("OPENCODE_ENTERPRISE_MODELS must be a JSON array")
   }
   const models = value.map((item) => {
-    if (!isRecord(item) || !hasExactKeys(item, ["baseURL", "id", "name"])) {
-      throw new Error("OPENCODE_ENTERPRISE_MODELS must contain only id, name, and baseURL")
+    if (!isRecord(item) || (!hasExactKeys(item, ["baseURL", "id"]) && !hasExactKeys(item, ["baseURL", "id", "name"]))) {
+      throw new Error("OPENCODE_ENTERPRISE_MODELS must contain id and baseURL")
     }
     const id = typeof item.id === "string" ? item.id.trim() : ""
-    const name = typeof item.name === "string" ? item.name.trim() : ""
     const baseURL = typeof item.baseURL === "string" ? item.baseURL.trim() : ""
-    if (!id || !name || !baseURL) throw new Error("OPENCODE_ENTERPRISE_MODELS contains incomplete model metadata")
-    return { id, name, baseURL: parseModelURL(baseURL, "OPENCODE_ENTERPRISE_MODELS") }
+    if (!id || !baseURL) throw new Error("OPENCODE_ENTERPRISE_MODELS contains incomplete model metadata")
+    return { id, name: id, baseURL: parseModelURL(baseURL, "OPENCODE_ENTERPRISE_MODELS") }
   })
   if (new Set(models.map((model) => model.id)).size !== models.length) {
     throw new Error("OPENCODE_ENTERPRISE_MODELS must contain unique model IDs")

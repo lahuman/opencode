@@ -26,7 +26,7 @@ export const Plugin = define({
       for (const item of policy.catalog.providers) {
         const id = Provider.ID.make(item.id)
         providers.update(id, (provider) => {
-          provider.name = item.name
+          provider.name = item.id
           provider.activation = "enabled"
           provider.integrationID = undefined
           provider.canonical = undefined
@@ -47,7 +47,7 @@ export const Plugin = define({
         }
         for (const model of item.models) {
           providers.models.update(id, Model.ID.make(model.id), (current) => {
-            current.name = model.name
+            current.name = model.id
             current.package = undefined
             current.headers = undefined
           })

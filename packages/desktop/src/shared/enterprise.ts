@@ -14,7 +14,6 @@ export function createEnterpriseBridge(invoke: <K extends keyof EnterpriseAPI>(
     updateProvider: (input) => invoke("updateProvider", [input]),
     deleteProvider: (id) => invoke("deleteProvider", [id]),
     createModel: (input) => invoke("createModel", [input]),
-    updateModel: (input) => invoke("updateModel", [input]),
     deleteModel: (input) => invoke("deleteModel", [input]),
     setDefaultModel: (input) => invoke("setDefaultModel", [input]),
     replaceProviderCredentials: (input) => invoke("replaceProviderCredentials", [input]),

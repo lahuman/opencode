@@ -1,10 +1,9 @@
 export type EnterpriseModelRef = { providerID: string; modelID: string }
 
-export type EnterpriseProviderModel = { id: string; name: string }
+export type EnterpriseProviderModel = { id: string }
 
 export type EnterpriseProvider = {
   id: string
-  name: string
   baseURL: string
   models: EnterpriseProviderModel[]
 }
@@ -43,11 +42,10 @@ export function validateEnterpriseProviderCatalog(value: unknown): EnterprisePro
       const modelID = requireText(model.id, "Enterprise model ID is required")
       if (modelIDs.has(modelID)) throw new Error("Enterprise model ID is duplicated")
       modelIDs.add(modelID)
-      return { id: modelID, name: requireText(model.name, "Enterprise model name is required") }
+      return { id: modelID }
     })
     return {
       id,
-      name: requireText(item.name, "Enterprise provider name is required"),
       baseURL: requireBaseURL(item.baseURL),
       models,
     }
@@ -81,7 +79,7 @@ export function createEnterpriseProviderStore(input: { file: string }) {
   }
 
   const initialize = async (
-    profile: { defaultModelID: string; models: { id: string; name: string; baseURL: string }[] },
+    profile: { defaultModelID: string; models: { id: string; baseURL: string }[] },
     legacyCredentials?: LegacyCredentials,
   ) => {
     const existing = await read()
@@ -96,9 +94,8 @@ export function createEnterpriseProviderStore(input: { file: string }) {
       providerIDs.add(id)
       return {
         id,
-        name: model.name,
         baseURL: model.baseURL,
-        models: [{ id: model.id, name: model.name }],
+        models: [{ id: model.id }],
       }
     })
     const defaultProvider = providers.find((provider) => provider.models[0]?.id === profile.defaultModelID)

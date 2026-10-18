@@ -23,10 +23,9 @@ type PlatformName = "web" | "desktop"
 
 type DesktopOS = "macos" | "windows" | "linux"
 export type EnterpriseModelRef = { providerID: string; modelID: string }
-export type EnterpriseProviderModel = { id: string; name: string }
+export type EnterpriseProviderModel = { id: string }
 export type EnterpriseProvider = {
   id: string
-  name: string
   baseURL: string
   models: EnterpriseProviderModel[]
 }
@@ -114,7 +113,6 @@ type PlatformBase = {
     }): Promise<EnterpriseProviderCatalogView>
     updateProvider(input: {
       providerID: string
-      name: string
       baseURL: string
       credentials?: CredentialReplacement
       clearCredentials?: true
@@ -124,7 +122,6 @@ type PlatformBase = {
       providerID: string
       model: EnterpriseProviderModel
     }): Promise<EnterpriseProviderCatalogView>
-    updateModel(input: { providerID: string; modelID: string; name: string }): Promise<EnterpriseProviderCatalogView>
     deleteModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
     setDefaultModel(input: EnterpriseModelRef): Promise<EnterpriseProviderCatalogView>
     replaceProviderCredentials(input: {

@@ -80,7 +80,7 @@ From the clean checkout root, set only the approved non-secret enterprise inputs
 
 ```powershell
 $env:OPENCODE_ENTERPRISE = "1"
-$env:OPENCODE_ENTERPRISE_MODELS = '[{"id":"company-code","name":"Company Code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","name":"Company Reasoning","baseURL":"https://llm-dr.corp.example/v1"}]'
+$env:OPENCODE_ENTERPRISE_MODELS = '[{"id":"company-code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","baseURL":"https://llm-dr.corp.example/v1"}]'
 $env:OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID = "company-code"
 $env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = ""
 $env:OPENCODE_ENTERPRISE_DEFAULTS_VERSION = "pilot-1"
@@ -101,7 +101,7 @@ Use this exact non-secret profile for the candidate build and both Windows accep
 - Reasoning-model origin: `https://llm-dr.corp.example`
 - Default model: `company-llm/company-code`
 
-Each entry in `OPENCODE_ENTERPRISE_MODELS` has its own non-secret ID, display name, and OpenAI-compatible base URL. Model origins are allowed automatically; `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS` is reserved for additional approved project-level overrides and may be empty. It must contain only comma-separated absolute HTTP(S) origins without paths, credentials, queries, or fragments. Never place API keys, authorization headers, or tokens in `.env`; enter credentials for each model in the Company LLM settings screen so Windows DPAPI encrypts them. The legacy `BASE_URL`, `MODEL_ID`, and `MODEL_NAME` variables remain accepted for one compatibility release only.
+Each entry in `OPENCODE_ENTERPRISE_MODELS` has its own non-secret ID and OpenAI-compatible base URL. Legacy `name` fields are accepted but ignored; internal display names are derived from IDs. Registered provider endpoints authorize LLM connections independently of `OPENCODE_ENTERPRISE_ALLOWED_ORIGINS`, which controls separate web access and may be empty. It must contain only comma-separated absolute HTTP(S) origins without paths, credentials, queries, or fragments. Never place API keys, authorization headers, or tokens in `.env`; enter provider credentials in the enterprise settings screen so Windows DPAPI encrypts them. The legacy `BASE_URL` and `MODEL_ID` inputs remain accepted; `MODEL_NAME` is no longer required or used.
 
 Both approved endpoints must validate through the normal Windows trust store. The second origin does not authorize a certificate exception, relaxed TLS validation, or any change to the release gates.
 

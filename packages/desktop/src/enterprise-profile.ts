@@ -97,7 +97,6 @@ function parseModels(env: BuildEnv) {
     return [
       parseModel({
         id: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_ID"),
-        name: requireValue(env, "OPENCODE_ENTERPRISE_MODEL_NAME"),
         baseURL: requireValue(env, "OPENCODE_ENTERPRISE_BASE_URL"),
       }, "OPENCODE_ENTERPRISE_BASE_URL"),
     ]
@@ -121,13 +120,12 @@ function parseModels(env: BuildEnv) {
 }
 
 function parseModel(value: unknown, key: string): EnterpriseModel {
-  if (!isRecord(value) || !hasExactKeys(value, ["baseURL", "id", "name"])) {
-    throw new Error(`${key} must contain only id, name, and baseURL`)
+  if (!isRecord(value) || (!hasExactKeys(value, ["baseURL", "id"]) && !hasExactKeys(value, ["baseURL", "id", "name"]))) {
+    throw new Error(`${key} must contain id and baseURL`)
   }
   const id = typeof value.id === "string" ? value.id.trim() : ""
-  const name = typeof value.name === "string" ? value.name.trim() : ""
   const baseURL = typeof value.baseURL === "string" ? value.baseURL.trim() : ""
-  if (!id || !name || !baseURL) throw new Error(`${key} contains incomplete model metadata`)
+  if (!id || !baseURL) throw new Error(`${key} contains incomplete model metadata`)
   if (/[?#]/.test(baseURL)) throw new Error(`${key} model URLs must not contain a query or fragment`)
   const url = (() => {
     try {
@@ -140,7 +138,7 @@ function parseModel(value: unknown, key: string): EnterpriseModel {
     throw new Error(`${key} model URLs must be absolute HTTP(S) URLs`)
   }
   if (url.username || url.password) throw new Error(`${key} model URLs must not contain credentials`)
-  return { id, name, baseURL: url.toString() }
+  return { id, name: id, baseURL: url.toString() }
 }
 
 function parseAllowedOrigin(value: string) {

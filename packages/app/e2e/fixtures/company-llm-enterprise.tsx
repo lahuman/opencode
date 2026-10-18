@@ -71,7 +71,7 @@ type CredentialInput = {
   hasApiKey: boolean
   headerNames: string[]
 }
-type ProviderUpdateInput = CredentialInput & { name: string; clearCredentials: boolean }
+type ProviderUpdateInput = CredentialInput & { baseURL: string; clearCredentials: boolean }
 type CredentialMode = "restart" | "no-restart" | "error" | "recovery" | "pending"
 type DiagnosticOutcome = "success" | "failure" | "network-error"
 
@@ -126,9 +126,8 @@ function createHarness(scenario?: string | null) {
           providers: [
             {
               id: "company-llm",
-              name: "Company LLM",
               baseURL: "https://llm.company.test/v1",
-              models: [{ id: "company-code", name: "Company Code" }],
+              models: [{ id: "company-code" }],
               credentials: { configured: false, headerNames: [] },
             },
           ],
@@ -260,12 +259,12 @@ function createHarness(scenario?: string | null) {
         url.pathname === "/api/provider"
           ? providers.map((provider) => ({
               ...Provider.Info.empty(Provider.ID.make(provider.id)),
-              name: provider.name,
+              name: provider.id,
             }))
           : providers.flatMap((provider) =>
               provider.models.map((model) => ({
                 ...Model.Info.default(Provider.ID.make(provider.id), Model.ID.make(model.id)),
-                name: model.name,
+                name: model.id,
               })),
             ),
       )
@@ -387,7 +386,7 @@ function createHarness(scenario?: string | null) {
       async updateProvider(input) {
         setObservations("providerUpdateInputs", observations.providerUpdateInputs.length, {
           providerID: input.providerID,
-          name: input.name,
+          baseURL: input.baseURL,
           hasApiKey: Boolean(input.credentials?.apiKey),
           headerNames: Object.keys(input.credentials?.headers ?? {}),
           clearCredentials: Boolean(input.clearCredentials),
@@ -404,7 +403,6 @@ function createHarness(scenario?: string | null) {
           provider.id === input.providerID
             ? {
                 ...provider,
-                name: input.name,
                 baseURL: input.baseURL,
                 ...(input.credentials || input.clearCredentials
                   ? {
@@ -434,14 +432,6 @@ function createHarness(scenario?: string | null) {
       async createModel(input) {
         const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
         provider?.models.push({ ...input.model })
-        return this.providerCatalog()
-      },
-      async updateModel(input) {
-        const provider = catalogState.value.providers.find((item) => item.id === input.providerID)
-        if (provider)
-          provider.models = provider.models.map((model) =>
-            model.id === input.modelID ? { ...model, name: input.name } : model,
-          )
         return this.providerCatalog()
       },
       async deleteModel(input) {
