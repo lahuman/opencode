@@ -12,7 +12,11 @@ import { Model } from "@opencode/core/model"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
-const names = ["OPENCODE_ENTERPRISE_OFFLINE", "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS", "OPENCODE_ENTERPRISE_PROVIDER_CATALOG"] as const
+const names = [
+  "OPENCODE_ENTERPRISE_OFFLINE",
+  "OPENCODE_ENTERPRISE_ALLOWED_ORIGINS",
+  "OPENCODE_ENTERPRISE_PROVIDER_CATALOG",
+] as const
 const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]))
 const it = testEffect(PluginTestLayer)
 const providerID = Provider.ID.make("company")
@@ -20,11 +24,18 @@ const modelID = Model.ID.make("company-model")
 
 beforeEach(() => {
   process.env.OPENCODE_ENTERPRISE_OFFLINE = "1"
-  process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = "https://llm.internal"
+  process.env.OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = ""
   process.env.OPENCODE_ENTERPRISE_PROVIDER_CATALOG = JSON.stringify({
     schemaVersion: 1,
     default: { providerID, modelID },
-    providers: [{ id: providerID, name: "Company", baseURL: "https://llm.internal/v1", models: [{ id: modelID, name: "Company Model" }] }],
+    providers: [
+      {
+        id: providerID,
+        name: "Company",
+        baseURL: "https://llm.internal/v1",
+        models: [{ id: modelID, name: "Company Model" }],
+      },
+    ],
   })
 })
 
@@ -51,7 +62,10 @@ it.effect("restricts the actual provider/model catalogs after config transforms 
     yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin))
     yield* providers.reload()
     expect((yield* providers.all()).map((provider) => provider.id)).toEqual([providerID])
-    expect((yield* providers.get(providerID))?.settings).toEqual({ baseURL: "https://llm.internal/v1", provider: providerID })
+    expect((yield* providers.get(providerID))?.settings).toEqual({
+      baseURL: "https://llm.internal/v1",
+      provider: providerID,
+    })
     expect((yield* models.available()).map((model) => model.id)).toEqual([modelID])
     expect((yield* models.default())?.id).toBe(modelID)
     expect(JSON.stringify(yield* models.all())).not.toContain("config-secret")
@@ -62,17 +76,47 @@ it.effect("adds private credentials only at request time and rejects endpoint ch
   Effect.gen(function* () {
     const plugin = yield* Plugin.Service
     const hooks = yield* PluginHooks.Service
-    Enterprise.setCredentials({ schemaVersion: 3, providers: { company: { apiKey: "private-key", headers: { "X-Gateway": "private-header" } } } })
+    Enterprise.setCredentials({
+      schemaVersion: 3,
+      providers: { company: { apiKey: "private-key", headers: { "X-Gateway": "private-header" } } },
+    })
     yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin))
-    const scope = { sessionID: Session.ID.create(), agent: Agent.ID.make("build"), model: { providerID, id: modelID }, kind: "primary" as const }
-    const request = yield* hooks.trigger("session", "model.request", { ...scope, baseURL: "https://llm.internal/v1", headers: {} })
+    const scope = {
+      sessionID: Session.ID.create(),
+      agent: Agent.ID.make("build"),
+      model: { providerID, id: modelID },
+      kind: "primary" as const,
+    }
+    const request = yield* hooks.trigger("session", "model.request", {
+      ...scope,
+      baseURL: "https://llm.internal/v1",
+      headers: {},
+    })
     expect(new Headers(request.headers).get("authorization")).toBe("Bearer private-key")
     expect(new Headers(request.headers).get("x-gateway")).toBe("private-header")
-    const changed = yield* hooks.trigger("session", "model.request", { ...scope, baseURL: "https://public.example", headers: {} }).pipe(Effect.exit)
+    const changed = yield* hooks
+      .trigger("session", "model.request", { ...scope, baseURL: "https://public.example", headers: {} })
+      .pipe(Effect.exit)
     expect(Exit.isFailure(changed)).toBe(true)
-    const outgoing = yield* hooks.trigger("session", "http.request", { ...scope, request: new Request("https://llm.internal/v1/chat/completions") })
+    const outgoing = yield* hooks.trigger("session", "http.request", {
+      ...scope,
+      request: new Request("https://llm.internal/v1/chat/completions"),
+    })
     expect(outgoing.request.redirect).toBe("manual")
-    const redirect = yield* hooks.trigger("session", "http.response", { ...scope, request: outgoing.request, response: new Response(null, { status: 302, headers: { location: "https://public.example" } }) }).pipe(Effect.exit)
+    const unregistered = yield* hooks
+      .trigger("session", "http.request", {
+        ...scope,
+        request: new Request("https://public.example/v1/chat/completions"),
+      })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(unregistered)).toBe(true)
+    const redirect = yield* hooks
+      .trigger("session", "http.response", {
+        ...scope,
+        request: outgoing.request,
+        response: new Response(null, { status: 302, headers: { location: "https://public.example" } }),
+      })
+      .pipe(Effect.exit)
     expect(Exit.isFailure(redirect)).toBe(true)
   }),
 )

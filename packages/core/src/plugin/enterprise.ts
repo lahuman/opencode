@@ -96,7 +96,7 @@ export const Plugin = define({
 
     yield* ctx.session.hook("http.request", (event) =>
       Effect.sync(() => {
-        Enterprise.requireURL(event.request.url, policy.allowedOrigins)
+        Enterprise.requireURL(event.request.url, policy.providerOrigins)
         event.request = new Request(event.request, { redirect: "manual" })
       }),
     )

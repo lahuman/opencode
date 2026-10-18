@@ -16,7 +16,7 @@ const withoutBunTimeout = Layer.effect(
       ? client.pipe(
           HttpClient.mapRequestEffect((request) =>
             Effect.sync(() => {
-              Enterprise.requireURL(request.url)
+              Enterprise.requireURL(request.url, Enterprise.settings().providerOrigins)
               return request
             }),
           ),

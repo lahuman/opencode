@@ -50,9 +50,11 @@ export function settings() {
   )
   if (new Set(catalog.providers.map((provider) => provider.id)).size !== catalog.providers.length)
     throw new Error("Duplicate enterprise provider ID")
+  // Registered LLM endpoints are independent of the build's web-access policy.
+  const providerOrigins = new Set<string>()
   for (const provider of catalog.providers) {
     if (!provider.id.trim() || !provider.name.trim()) throw new Error("Invalid enterprise provider")
-    requireURL(provider.baseURL, allowedOrigins)
+    providerOrigins.add(parseHTTPURL(provider.baseURL).origin)
     if (
       new Set(provider.models.map((model) => model.id)).size !== provider.models.length ||
       provider.models.some((model) => !model.id.trim() || !model.name.trim())
@@ -63,7 +65,8 @@ export function settings() {
     catalog.default &&
     !catalog.providers.some(
       (provider) =>
-        provider.id === catalog.default?.providerID && provider.models.some((model) => model.id === catalog.default?.modelID),
+        provider.id === catalog.default?.providerID &&
+        provider.models.some((model) => model.id === catalog.default?.modelID),
     )
   )
     throw new Error("Invalid enterprise default model")
@@ -74,6 +77,7 @@ export function settings() {
   return {
     catalog,
     allowedOrigins,
+    providerOrigins,
     skills,
     defaultsPath: process.env.OPENCODE_ENTERPRISE_DEFAULTS_PATH,
     guidePath: process.env.OPENCODE_ENTERPRISE_GUIDE_PATH,
@@ -81,14 +85,15 @@ export function settings() {
 }
 
 export function requireURL(value: string, allowedOrigins = settings().allowedOrigins) {
+  const url = parseHTTPURL(value)
+  if (!allowedOrigins.has(url.origin)) throw new Error("Enterprise offline policy blocked the destination")
+  return url
+}
+
+function parseHTTPURL(value: string) {
   const url = new URL(value)
-  if (
-    !["http:", "https:"].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    !allowedOrigins.has(url.origin)
-  )
-    throw new Error("Enterprise offline policy blocked the destination")
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
+    throw new Error("Enterprise endpoints require HTTP(S) URLs without embedded credentials")
   return url
 }
 

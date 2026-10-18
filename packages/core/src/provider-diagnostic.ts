@@ -129,9 +129,13 @@ const layer = Layer.effect(
           if (!selected) return failure("basic", "model")
           const request = LLM.request({ model: selected.model, prompt: "Reply with OK." })
           if (Enterprise.enabled()) {
-            const provider = Enterprise.settings().catalog.providers.find((provider) => provider.id === providerID)
+            const policy = Enterprise.settings()
+            const provider = policy.catalog.providers.find((provider) => provider.id === providerID)
             if (!provider) return failure("basic", "model")
-            const url = Enterprise.requireURL(`${provider.baseURL.replace(/\/$/, "")}/chat/completions`)
+            const url = Enterprise.requireURL(
+              `${provider.baseURL.replace(/\/$/, "")}/chat/completions`,
+              policy.providerOrigins,
+            )
             const response = yield* Effect.tryPromise(async (signal) => {
               const response = await fetch(url, {
                 method: "POST",

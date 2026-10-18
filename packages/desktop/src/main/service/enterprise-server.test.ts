@@ -117,7 +117,7 @@ test("runs authenticated company diagnostics through the private V2 desktop serv
         XDG_CACHE_HOME: path.join(root, "cache"),
         XDG_STATE_HOME: path.join(root, "state"),
         OPENCODE_ENTERPRISE_OFFLINE: "1",
-        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: endpoint.url.origin,
+        OPENCODE_ENTERPRISE_ALLOWED_ORIGINS: "",
         OPENCODE_CONFIG_PROJECT_DISABLE: "1",
         OPENCODE_DISABLE_EMBEDDED_WEB_UI: "1",
       },
