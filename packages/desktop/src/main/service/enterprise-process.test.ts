@@ -22,8 +22,10 @@ test.each(["ready", "invalid"])("keeps credentials in the private pipe and handl
   try {
     expect(server.url).toBe("http://127.0.0.1:12345")
     expect(server.password).toBe("private-service-password")
+    expect(server.running()).toBe(true)
     expect(bootstrap.credentials.providers).toEqual({})
   } finally {
     await server.stop()
   }
+  expect(server.running()).toBe(false)
 })

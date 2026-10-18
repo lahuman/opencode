@@ -74,7 +74,12 @@ type ServerSDKBase = {
 
 function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope): ServerSDKBase {
   const platform = usePlatform()
-  const transport = createServerTransport({ http: server.http, fetch: platform.fetch })
+  const reconnect = server.type === "extension" || server.type === "sidecar" ? server.reconnect : undefined
+  const transport = createServerTransport({
+    http: server.http,
+    fetch: platform.fetch,
+    resolve: platform.enterprise && server.type === "sidecar" ? reconnect : undefined,
+  })
 
   if (server.type === "extension") {
     createEffect(
@@ -87,7 +92,6 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 
   const events = createOpenCodeEventSource()
-  const reconnect = server.type === "extension" || server.type === "sidecar" ? server.reconnect : undefined
 
   const connection = createClientConnection(transport.api, {
     reconnect: reconnect ? async (signal) => transport.update(await reconnect(signal)) : undefined,
@@ -121,13 +125,46 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 }
 
-export function createServerTransport(input: { http: ServerConnection.HttpBase; fetch?: typeof globalThis.fetch }): {
+export function createServerTransport(input: {
+  http: ServerConnection.HttpBase
+  fetch?: typeof globalThis.fetch
+  resolve?: (signal: AbortSignal) => Promise<ServerConnection.HttpBase>
+}): {
   update(http: ServerConnection.HttpBase): ServerApi
   readonly url: string
   readonly api: ServerApi
   readonly pty: ReturnType<typeof createPtyClient>
 } {
-  const queue = createRequestQueue({ fetch: input.fetch ?? globalThis.fetch })
+  const base = input.fetch ?? globalThis.fetch
+  const resolve = input.resolve
+  const queue = createRequestQueue({
+    fetch: resolve
+      ? Object.assign(
+          async (resource: RequestInfo | URL, init?: RequestInit) => {
+            const request = new Request(resource, init)
+            const send = async () => {
+              request.signal.throwIfAborted()
+              // Enterprise catalog changes replace the server. Resolve behind its transition queue
+              // before dispatching, including requests queued with a previous client's base URL.
+              const endpoint = new URL((await resolve(request.signal)).url)
+              request.signal.throwIfAborted()
+              const url = new URL(request.url)
+              url.protocol = endpoint.protocol
+              url.host = endpoint.host
+              return base(new Request(url, request))
+            }
+            return send().catch((error: unknown) => {
+              // A transition can begin after resolution. Reads may retry once; writes must never
+              // replay because the previous server might have accepted them before disconnecting.
+              if (!request.signal.aborted && error instanceof TypeError && ["GET", "HEAD"].includes(request.method))
+                return send()
+              throw error
+            })
+          },
+          { preconnect: () => {} },
+        )
+      : base,
+  })
 
   const build = (http: ServerConnection.HttpBase) => {
     const api = createApiForServer({ server: http, fetch: queue.fetch })

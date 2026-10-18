@@ -36,7 +36,7 @@ export const layer = Layer.effect(
 )
 
 const connect = Effect.fn("BackgroundService.connect")(function* (mode: "initial" | "reconnect") {
-  yield* Effect.logInfo("starting v2 background service")
+  if (mode === "initial" || !ENTERPRISE_ENABLED) yield* Effect.logInfo("starting v2 background service")
   const path = yield* Path.Path
   const desktopCli = yield* DesktopCli.Service
   const runFork = Effect.runForkWith(yield* Effect.context<FileSystem.FileSystem | Path.Path>())

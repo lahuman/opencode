@@ -60,7 +60,7 @@ export async function launchEnterpriseProcess(input: {
       child.stdin.on("error", fail)
       child.stdin.write(`${JSON.stringify(input.bootstrap)}\n`)
     })
-    return { url, password, stop }
+    return { url, password, stop, running: () => !stopped && child.exitCode === null && child.signalCode === null }
   } catch (error) {
     child.kill()
     lines.close()

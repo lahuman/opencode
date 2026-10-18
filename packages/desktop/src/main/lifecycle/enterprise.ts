@@ -164,7 +164,10 @@ async function initialize() {
     verified: !state.failure,
     connect: (command: readonly string[]) => {
       state.command = command
-      return enqueue(() => restart())
+      return enqueue(() => {
+        if (state.server?.running()) return Promise.resolve({ url: state.server.url, password: state.server.password })
+        return restart()
+      })
     },
     stop: () => state.server?.stop(),
   }

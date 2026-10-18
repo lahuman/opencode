@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createServer } from "node:http"
 import type { OpenCodeEvent } from "@opencode/client/promise"
 import { createRoot } from "solid-js"
 import { createOpenCodeEventSource, createServerTransport } from "./client"
@@ -130,4 +131,64 @@ test("rotates HTTP and PTY clients together", async () => {
       authorization: `Basic ${btoa("opencode:second")}`,
     },
   ])
+})
+
+test("enterprise reads wait for the replacement endpoint even when an old client dispatches them", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json")
+    response.setHeader("access-control-allow-origin", "*")
+    response.end(JSON.stringify({ version: "replacement", pid: 2, urls: [], paths: { tmp: "/tmp" } }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("Missing test server address")
+  const url = `http://127.0.0.1:${address.port}`
+  const ready = Promise.withResolvers<{ url: string }>()
+  const requested = Promise.withResolvers<void>()
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:1" },
+    resolve: () => {
+      requested.resolve()
+      return ready.promise
+    },
+  })
+  try {
+    const previous = transport.api
+    const response = previous.server.info()
+    await requested.promise
+    transport.update({ url })
+    ready.resolve({ url })
+    expect((await response).version).toBe("replacement")
+    expect((await previous.server.info()).pid).toBe(2)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+test.each([
+  ["GET", false, 2],
+  ["POST", false, 1],
+  ["GET", true, 1],
+] as const)("enterprise disconnect recovery for %s, aborted=%s", async (method, aborted, expected) => {
+  const requests: Request[] = []
+  const controller = new AbortController()
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:4100" },
+    resolve: async () => ({ url: `http://127.0.0.1:${requests.length ? 4200 : 4100}` }),
+    fetch: Object.assign(async (resource: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(new Request(resource, init))
+      if (requests.length === 1) {
+        if (aborted) controller.abort()
+        throw new TypeError("Failed to fetch")
+      }
+      return Response.json({})
+    }, { preconnect: () => {} }),
+  })
+  const request = method === "POST"
+    ? transport.api.location.reload({ signal: controller.signal })
+    : transport.api.server.info({ signal: controller.signal })
+  if (expected === 1) await expect(request).rejects.toThrow()
+  if (expected === 2) await request
+  expect(requests.map((request) => new URL(request.url).port)).toEqual(expected === 2 ? ["4100", "4200"] : ["4100"])
 })
