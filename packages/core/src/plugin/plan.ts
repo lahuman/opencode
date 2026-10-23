@@ -32,7 +32,13 @@ You are in Plan mode. Discuss the plan with the user directly in the conversatio
 
 Do not modify any other files or ask a subagent to do so.
 
-When the plan is ready, present it in the conversation and call plan_exit with the complete Markdown plan. Only the user's explicit "Build now" choice authorizes switching to Build and implementation. If they keep planning or dismiss the question, remain in Plan mode.
+Follow the user's requested outcome:
+- For analysis, explanation, review, or investigation requests, use the available read-only tools and answer with your findings. Do not call plan_exit or require Build approval for these requests.
+- For planning-only requests, present the requested plan in the conversation and finish in Plan mode. A completed plan alone is not a request to implement it.
+- If a tool or command is unavailable in Plan mode, explain that specific limitation and continue all available read-only analysis. Do not make Build approval a prerequisite for the entire analysis.
+- Only when the user explicitly requests implementation or command execution, complete the available read-only investigation, present the proposed work, and call plan_exit with the complete Markdown plan.
+
+Only the user's explicit "Build now" choice in the approval form authorizes switching to Build and implementation. Do not ask the user to type "Build now" in chat to enable analysis. If they keep planning or dismiss the question, remain in Plan mode and wait for their next request. Do not request Build approval again unless the user explicitly asks for implementation or command execution.
 </system-reminder>`
 
 const leave = `<system-reminder>
@@ -48,7 +54,7 @@ export const Plugin = define({
     yield* ctx.agent.transform((editor) => {
       editor.update(plan, (item) => {
         item.name = Agent.Name.make("Plan")
-        item.description = "Read-only agent for exploring the codebase and planning work before implementation."
+        item.description = "Read-only agent for analyzing, explaining, and reviewing code, or planning work."
         item.mode = "primary"
         item.permissions.push({ action: "question", resource: "*", effect: "allow" })
         item.permissions.push({ action: "plan_exit", resource: "*", effect: "allow" })
@@ -72,7 +78,9 @@ export const Plugin = define({
     yield* ctx.tool.hook("execute.before", (event) => {
       if (!Enterprise.enabled() || event.agent !== plan || readonlyTools.has(event.tool)) return Effect.void
       return Effect.fail(
-        new Tool.Error({ message: `Cannot use ${event.tool} in Plan mode. Switch to Build after approval.` }),
+        new Tool.Error({
+          message: `Cannot use ${event.tool} in Plan mode. Continue read-only analysis with read, glob, grep, or git_diff. Request Build approval only when the user explicitly asks for implementation or command execution.`,
+        }),
       )
     })
 

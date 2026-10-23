@@ -163,6 +163,28 @@ const reminders = Effect.gen(function* () {
 })
 
 describe("plan plugin reminders", () => {
+  it.effect("keeps analysis and planning-only requests outside the Build approval workflow", () =>
+    withEnv({ OPENCODE_ENTERPRISE_OFFLINE: "1" }, () =>
+      Effect.gen(function* () {
+        const { contextHook } = yield* run()
+        const messages = [Message.user("Use analyze-codebase to explain the code. Do not implement changes.")]
+        yield* contextHook(request(plan, messages))
+        const reminder = messages[0]?.content[0]
+        expect(reminder?.type).toBe("text")
+        if (reminder?.type !== "text") return
+        expect(reminder.text).toContain("For analysis, explanation, review, or investigation requests")
+        expect(reminder.text).toContain("Do not call plan_exit or require Build approval for these requests.")
+        expect(reminder.text).toContain("For planning-only requests")
+        expect(reminder.text).toContain("Only when the user explicitly requests implementation or command execution")
+        expect(reminder.text).toContain("continue all available read-only analysis")
+        expect(reminder.text).toContain("Do not create or modify any files")
+        expect(messages.at(-1)).toEqual(
+          Message.user("Use analyze-codebase to explain the code. Do not implement changes."),
+        )
+      }),
+    ),
+  )
+
   it.effect("injects enter and leave reminders on agent switches", () =>
     Effect.gen(function* () {
       const { persisted } = yield* run([agentSelected(plan, build), agentSelected(build, plan)])

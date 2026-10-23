@@ -26,7 +26,7 @@ export const Plugin = {
         name: "plan_exit",
         options: { codemode: false },
         description:
-          "Present the complete Markdown plan and ask the user whether to switch to Build and implement it. Only explicit approval starts implementation.",
+          "Only use this tool when the user explicitly requests implementation or command execution and the proposed work is ready for approval. Present the complete Markdown plan and ask whether to switch to Build. Do not use this tool for analysis, explanations, reviews, or planning-only requests. Only the user's explicit choice in the approval form starts implementation; typing Build now in chat is not required for analysis.",
         input: Input,
         output: Output,
         execute: (input, context) =>
@@ -73,7 +73,8 @@ export const Plugin = {
             if (state.status !== "answered" || state.answer.q0 !== "Build now")
               return {
                 output: { agent: "plan" as const },
-                content: "Staying in Plan mode. Continue discussing the plan with the user.",
+                content:
+                  "The user did not approve implementation. Stay in Plan mode and wait for their next request. Read-only analysis does not require Build approval. Do not request Build approval again unless the user explicitly asks for implementation or command execution.",
                 metadata: { agent: "plan" },
               }
             yield* sessions

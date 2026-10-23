@@ -20,7 +20,7 @@ import { promptLocationNode } from "./fixture/prompt-location"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
 import { globalProjectNode } from "./lib/project"
-import { executeTool, registerToolPlugin, toolIdentity } from "./lib/tool"
+import { executeTool, registerToolPlugin, toolDefinitions, toolIdentity } from "./lib/tool"
 
 const plugin = makeLocationNode({
   name: "test/plan-exit",
@@ -73,6 +73,19 @@ const run = Effect.fnUntraced(function* (agent: Agent.ID) {
 })
 
 describe("Plan exit approval", () => {
+  suite({ status: "cancelled" }).effect("advertises implementation approval rather than an analysis prerequisite", () =>
+    Effect.gen(function* () {
+      const registry = yield* Tool.Service
+      const definition = (yield* toolDefinitions(registry)).find((tool) => tool.name === "plan_exit")
+      expect(definition?.description).toContain(
+        "Only use this tool when the user explicitly requests implementation or command execution",
+      )
+      expect(definition?.description).toContain(
+        "Do not use this tool for analysis, explanations, reviews, or planning-only requests.",
+      )
+    }),
+  )
+
   suite({ status: "answered", answer: { q0: "Build now" } }).effect(
     "admits the approved plan durably and switches to Build",
     () =>
@@ -97,6 +110,10 @@ describe("Plan exit approval", () => {
         Effect.gen(function* () {
           const state = yield* run(Agent.ID.make("plan"))
           expect(state.result).toMatchObject({ status: "completed", output: { agent: "plan" } })
+          expect(state.result.content).toContainEqual({
+            type: "text",
+            text: expect.stringContaining("Do not request Build approval again"),
+          })
           expect(state.session.agent).toBe(Agent.ID.make("plan"))
           expect(state.pending).toHaveLength(0)
         }),
