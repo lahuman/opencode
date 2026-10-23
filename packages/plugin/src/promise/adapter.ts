@@ -223,6 +223,7 @@ export function fromPromise(plugin: Plugin) {
         const [{ ClientApi }, { OpenCodeEvent }] = yield* Effect.promise(() =>
           Promise.all([import("@opencode/protocol/client"), import("@opencode/protocol/groups/event")]),
         )
+        const encodeOpenCodeEvent = Schema.encodeUnknownEffect(OpenCodeEvent)
         const AgentEndpoints = ClientApi.groups["server.agent"].endpoints
         const CommandEndpoints = ClientApi.groups["server.command"].endpoints
         const CredentialEndpoints = ClientApi.groups["server.credential"].endpoints
@@ -331,8 +332,8 @@ export function fromPromise(plugin: Plugin) {
             subscribe: (options) =>
               streams(
                 host.event.subscribe().pipe(
-                  Stream.mapEffect((event) => Schema.encodeUnknownEffect(OpenCodeEvent)(event)),
-                  Stream.map((event) => event as unknown as PromiseEvent),
+                  Stream.mapEffect((event) => encodeOpenCodeEvent(event)),
+                  Stream.map((event) => event as PromiseEvent),
                 ),
                 options,
               ),
@@ -594,6 +595,7 @@ export function fromPromise(plugin: Plugin) {
               register(
                 host.session.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))), options),
               ),
+            list: adaptApiMethod(SessionEndpoints["session.list"], host.session.list),
             create: adaptApiMethod(SessionEndpoints["session.create"], host.session.create),
             get: adaptApiMethod(SessionEndpoints["session.get"], host.session.get),
             remove: adaptApiMethod(SessionEndpoints["session.remove"], host.session.remove),

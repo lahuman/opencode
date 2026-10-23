@@ -11,14 +11,14 @@ type DevOptions = { server: ServerSource; electron: string[] }
 
 async function main() {
   process.env.OPENCODE_CHANNEL = "local"
-  process.env.OPENCODE_VERSION = `2.0.0-local-${Date.now()}`
+  process.env.OPENCODE_VERSION ??= `2.0.0-local-${Date.now()}`
   process.env.OPENCODE_DISABLE_CHANNEL_DB = "0"
   const options = selectOptions()
   if (process.env.OPENCODE_ENTERPRISE === "1" && options.server.type === "download")
     throw new Error("Enterprise development requires the local CLI source")
 
   if (options.server.type === "build") process.env.OPENCODE_DESKTOP_SERVER_CHANNEL = "local"
-  process.env.OPENCODE_DESKTOP_ISOLATED_SERVER = "1"
+  process.env.OPENCODE_DESKTOP_ISOLATED_SERVER ??= "1"
   await prepareDesktop()
   await prepareServer(options.server)
   await startDesktop(options.electron)

@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=CHAI
-Exec=/opt/CHAI/ai.opencode.desktop %U
+Exec=/opt/CHAI/ai.opencode %U
 Terminal=false
 Type=Application
-Icon=ai.opencode.desktop
+Icon=ai.opencode
 StartupWMClass=ai.opencode.desktop
 NoDisplay=true
 Comment=Open source AI coding agent

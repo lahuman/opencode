@@ -22,7 +22,7 @@ describe("desktop menu", () => {
 
   test("public help menu keeps OpenCode links", () => {
     expect(desktopMenuForEdition("public").find((menu) => menu.id === "help")?.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ href: "https://opencode.ai/docs" })]),
+      expect.arrayContaining([expect.objectContaining({ href: "https://opencode.ai/v2/docs" })]),
     )
   })
 

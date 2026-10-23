@@ -1,145 +1,117 @@
 /** @jsxImportSource @opentui/solid */
-import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
-import { testRender, useRenderer } from "@opentui/solid"
-import type { PermissionRequest } from "@opencode-ai/sdk/v2"
+import type { PermissionRequest } from "@opencode/client"
+import { testRender } from "@opentui/solid"
 import { expect, test } from "bun:test"
-import path from "node:path"
-import { createSignal, onCleanup, Show } from "solid-js"
-import { TuiConfigProvider } from "../../../src/config"
-import { ArgsProvider } from "../../../src/context/args"
-import { ExitProvider } from "../../../src/context/exit"
-import { KVProvider } from "../../../src/context/kv"
+import { createSignal, onMount } from "solid-js"
+import { ConfigProvider } from "../../../src/config"
+import { ClientProvider } from "../../../src/context/client"
+import { DataProvider, useData } from "../../../src/context/data"
+import { Keymap } from "../../../src/context/keymap"
 import { LocationProvider } from "../../../src/context/location"
-import { PermissionProvider } from "../../../src/context/permission"
-import { ProjectProvider } from "../../../src/context/project"
-import { SDKProvider } from "../../../src/context/sdk"
-import { SyncProvider, useSync } from "../../../src/context/sync"
 import { ThemeProvider } from "../../../src/context/theme"
-import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../../src/keymap"
 import { PermissionPrompt } from "../../../src/routes/session/permission"
-import { tmpdir } from "../../fixture/fixture"
+import { ToastProvider } from "../../../src/ui/toast"
+import { emptyThemeSource, tmpdir } from "../../fixture/fixture"
+import { createApi, createEventStream, createFetch, json } from "../../fixture/tui-client"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
-import { createEventSource, createFetch, directory, json } from "../../fixture/tui-sdk"
-
-async function wait(fn: () => boolean, timeout = 2000) {
-  const start = Date.now()
-  while (!fn()) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
-}
 
 function request(input: Partial<PermissionRequest> = {}): PermissionRequest {
-  return {
-    id: "per_test",
-    sessionID: "ses_test",
-    permission: "bash",
-    patterns: [],
-    metadata: {},
-    always: [],
-    ...input,
-  }
+  return { id: "per_test", sessionID: "ses_test", action: "shell", resources: [], ...input }
 }
 
 async function mountPermission(input: {
   request: () => PermissionRequest
   state: string
-  onReply?: (url: URL) => void
+  onReply?: (url: URL, decision: unknown) => void
 }) {
-  const calls = createFetch((url) => {
-    if (!/^\/permission\/[^/]+\/reply$/.test(url.pathname)) return
-    input.onReply?.(url)
-    return json(true)
-  })
-  const events = createEventSource()
+  const ready = Promise.withResolvers<void>()
+  const calls = createFetch((url, message) => {
+    if (url.pathname === "/api/session/ses_test")
+      return json({
+        data: {
+          id: "ses_test",
+          parentID: "ses_parent",
+          title: "Permission fixture",
+          projectID: "proj_test",
+          location: { directory: input.state },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 0, updated: 0 },
+        },
+      })
+    if (!/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(url.pathname)) return
+    return message.json().then((decision) => {
+      input.onReply?.(url, decision)
+      return new Response(null, { status: 204 })
+    })
+  }, createEventStream())
 
-  function PromptWhenReady() {
-    const sync = useSync()
-    return (
-      <Show when={sync.status === "complete"}>
-        <PermissionPrompt request={input.request()} directory={directory} />
-      </Show>
-    )
+  function Prompt() {
+    const data = useData()
+    onMount(() => void data.session.sync("ses_test").then(ready.resolve, ready.reject))
+    return <PermissionPrompt request={input.request()} directory={input.state} />
   }
 
-  function Harness() {
-    const renderer = useRenderer()
-    const keymap = createDefaultOpenTuiKeymap(renderer)
-    const config = createTuiResolvedConfig()
-    const off = registerOpencodeKeymap(keymap, renderer, config)
-    onCleanup(off)
-
-    return (
-      <TestTuiContexts paths={{ state: input.state }}>
-        <OpencodeKeymapProvider keymap={keymap}>
-          <ArgsProvider>
-            <KVProvider>
-              <TuiConfigProvider config={config}>
-                <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
-                  <PermissionProvider>
-                    <ProjectProvider>
-                      <ExitProvider exit={() => {}}>
-                        <SyncProvider>
-                          <ThemeProvider mode="dark">
-                            <LocationProvider location={{ directory }}>
-                              <PromptWhenReady />
-                            </LocationProvider>
-                          </ThemeProvider>
-                        </SyncProvider>
-                      </ExitProvider>
-                    </ProjectProvider>
-                  </PermissionProvider>
-                </SDKProvider>
-              </TuiConfigProvider>
-            </KVProvider>
-          </ArgsProvider>
-        </OpencodeKeymapProvider>
+  const app = await testRender(
+    () => (
+      <TestTuiContexts directory={input.state} paths={{ home: input.state, state: input.state, worktree: input.state }}>
+        <ConfigProvider config={createTuiResolvedConfig({ animations: false })}>
+          <Keymap.Provider>
+            <ClientProvider api={createApi(calls.fetch)}>
+              <DataProvider directory={input.state}>
+                <LocationProvider>
+                  <ThemeProvider mode="dark" source={emptyThemeSource}>
+                    <ToastProvider>
+                      <Prompt />
+                    </ToastProvider>
+                  </ThemeProvider>
+                </LocationProvider>
+              </DataProvider>
+            </ClientProvider>
+          </Keymap.Provider>
+        </ConfigProvider>
       </TestTuiContexts>
-    )
-  }
-
-  const app = await testRender(() => <Harness />, { width: 100, height: 30, kittyKeyboard: true })
-  await wait(() => app.captureCharFrame().includes("Permission required"))
+    ),
+    { width: 100, height: 30, kittyKeyboard: true },
+  )
+  app.renderer.start()
+  await ready.promise
+  await app.waitForFrame((frame) => frame.includes("Permission required"))
   return app
 }
 
 test("omits Always when there are no persistent patterns", async () => {
   await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
   const app = await mountPermission({ state: tmp.path, request: () => request() })
-
   try {
     const frame = app.captureCharFrame()
     expect(frame).toContain("Allow once")
     expect(frame).toContain("Reject")
-    expect(frame).not.toContain("Allow always")
     expect(frame).not.toContain("Always allow")
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("keeps nested Always pattern confirmation in order", async () => {
+test("shows Always patterns in order before approving them", async () => {
   await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
+  const replies: unknown[] = []
   const app = await mountPermission({
     state: tmp.path,
-    request: () => request({ always: ["src/**/*.ts", "test/**/*.ts"] }),
+    request: () => request({ save: ["src/**/*.ts", "test/**/*.ts"] }),
+    onReply: (_url, decision) => replies.push(decision),
   })
-
   try {
-    expect(app.captureCharFrame()).toContain("Allow always")
     app.mockInput.pressArrow("right")
-    app.mockInput.pressEnter()
-    await wait(() => app.captureCharFrame().includes("Always allow"))
-
+    await app.waitForFrame((frame) => frame.includes("src/**/*.ts"))
     const frame = app.captureCharFrame()
-    expect(frame).toContain("Always allow")
-    expect(frame).toContain("Confirm")
-    expect(frame).toContain("Cancel")
     expect(frame.indexOf("src/**/*.ts")).toBeGreaterThan(-1)
     expect(frame.indexOf("test/**/*.ts")).toBeGreaterThan(frame.indexOf("src/**/*.ts"))
+    expect(replies).toEqual([])
+    app.mockInput.pressEnter()
+    await app.waitFor(() => replies.length === 1)
+    expect(replies).toEqual([{ decision: "always" }])
   } finally {
     app.renderer.destroy()
   }
@@ -147,55 +119,43 @@ test("keeps nested Always pattern confirmation in order", async () => {
 
 test("resets permission choices when the request changes", async () => {
   await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
-  const [current, setCurrent] = createSignal(request({ id: "per_first", always: ["src/**/*.ts"] }))
-  const replies: URL[] = []
+  const [current, setCurrent] = createSignal(request({ id: "per_first", save: ["src/**/*.ts"] }))
+  const replies: { path: string; decision: unknown }[] = []
   const app = await mountPermission({
     state: tmp.path,
     request: current,
-    onReply: (url) => replies.push(url),
+    onReply: (url, decision) => replies.push({ path: url.pathname, decision }),
   })
-
   try {
     app.mockInput.pressArrow("right")
-    setCurrent(request({ id: "per_second", permission: "doom_loop" }))
-    await wait(() => app.captureCharFrame().includes("Continue after repeated failures"))
-
-    const frame = app.captureCharFrame()
-    expect(frame).not.toContain("Allow always")
-    app.mockInput.pressEnter()
-    await wait(() => replies.length === 1)
-    expect(replies.map((url) => url.pathname)).toEqual(["/permission/per_second/reply"])
-    expect(app.captureCharFrame()).toContain("Permission required")
+    setCurrent(request({ id: "per_second", action: "doom_loop" }))
+    await app.waitForFrame((frame) => frame.includes("Continue after repeated failures"))
     expect(app.captureCharFrame()).not.toContain("Always allow")
+    app.mockInput.pressEnter()
+    await app.waitFor(() => replies.length === 1)
+    expect(replies).toEqual([
+      { path: "/api/session/ses_test/permission/per_second/reply", decision: { decision: "once" } },
+    ])
   } finally {
     app.renderer.destroy()
   }
 })
 
-test("resets the nested Always stage when the request changes", async () => {
+test("resets the rejection stage when the request changes", async () => {
   await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
-  const [current, setCurrent] = createSignal(request({ id: "per_first", always: ["src/**/*.ts", "test/**/*.ts"] }))
+  const [current, setCurrent] = createSignal(request({ id: "per_first", save: ["src/**/*.ts"] }))
   const app = await mountPermission({ state: tmp.path, request: current })
-
   try {
-    app.mockInput.pressArrow("right")
-    app.mockInput.pressEnter()
-    await wait(() => app.captureCharFrame().includes("Always allow"))
-
+    app.mockInput.pressEscape()
+    await app.waitForFrame((frame) => frame.includes("Reject permission"))
     setCurrent(request({ id: "per_second" }))
-    await wait(() => app.captureCharFrame().includes("Permission required"))
-
+    await app.waitForFrame((frame) => frame.includes("Permission required"))
     const frame = app.captureCharFrame()
     expect(frame).toContain("Allow once")
     expect(frame).toContain("Reject")
-    expect(frame).not.toContain("Allow always")
     expect(frame).not.toContain("Always allow")
-    expect(frame).not.toContain("Confirm")
-    expect(frame).not.toContain("Cancel")
+    expect(frame).not.toContain("Reject permission")
     expect(frame).not.toContain("src/**/*.ts")
-    expect(frame).not.toContain("test/**/*.ts")
   } finally {
     app.renderer.destroy()
   }
@@ -203,18 +163,11 @@ test("resets the nested Always stage when the request changes", async () => {
 
 test("keeps wildcard Always confirmation copy", async () => {
   await using tmp = await tmpdir()
-  await Bun.write(path.join(tmp.path, "kv.json"), "{}")
-  const app = await mountPermission({ state: tmp.path, request: () => request({ always: ["*"] }) })
-
+  const app = await mountPermission({ state: tmp.path, request: () => request({ save: ["*"] }) })
   try {
     app.mockInput.pressArrow("right")
-    app.mockInput.pressEnter()
-    await wait(() => app.captureCharFrame().includes("Always allow"))
-
-    const frame = app.captureCharFrame()
-    expect(frame).toContain("This will allow bash until OpenCode is restarted.")
-    expect(frame).toContain("Confirm")
-    expect(frame).toContain("Cancel")
+    await app.waitForFrame((frame) => frame.includes("This will always allow shell for this project."))
+    expect(app.captureCharFrame()).toContain("Always allow")
   } finally {
     app.renderer.destroy()
   }

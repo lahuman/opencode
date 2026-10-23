@@ -283,7 +283,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
         type: "item",
         edition: "public",
         labelKey: "desktop.menu.documentation",
-        href: "https://opencode.ai/docs",
+        href: "https://opencode.ai/v2/docs",
       },
       {
         type: "item",
@@ -332,12 +332,19 @@ export function desktopMenuWithExtensions<Entry, Extra extends { readonly id: st
   base: readonly { readonly key?: string; readonly entry: Entry }[],
   extra: readonly Extra[],
 ) {
-  return extra.reduce<readonly { readonly key?: string; readonly entry: Entry | Extra }[]>((list, item) => {
+  const list: { readonly key?: string; readonly entry: Entry | Extra }[] = [...base]
+
+  for (const item of extra) {
     const next = { key: item.id, entry: item }
     const index = item.after ? list.findIndex((entry) => entry.key === item.after) : -1
 
-    if (index < 0) return [...list, next]
+    if (index < 0) {
+      list.push(next)
+      continue
+    }
 
-    return [...list.slice(0, index + 1), next, ...list.slice(index + 1)]
-  }, base)
+    list.splice(index + 1, 0, next)
+  }
+
+  return list
 }

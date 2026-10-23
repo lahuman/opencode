@@ -36,7 +36,7 @@ look at these below.
 
 Subagents are specialized assistants that primary agents can invoke for specific tasks. You can also manually invoke them by **@ mentioning** them in your messages.
 
-OpenCode comes with three built-in subagents, **General**, **Explore**, and **Scout**. We'll look at this below.
+OpenCode comes with two built-in subagents, **General** and **Explore**. We'll look at this below.
 
 ---
 
@@ -70,7 +70,7 @@ Use `/plan` to toggle Plan mode and `/build` to switch directly to Build. Deskto
 
 _Mode_: `subagent`
 
-A general-purpose agent for researching complex questions and executing multi-step tasks. Has full tool access, so it can make file changes when needed. Use this to run multiple units of work in parallel.
+A general-purpose agent for researching complex questions and executing multi-step tasks. Has full tool access except `todowrite`, so it can make file changes when needed. Use this to run multiple units of work in parallel.
 
 ---
 
@@ -79,14 +79,6 @@ A general-purpose agent for researching complex questions and executing multi-st
 _Mode_: `subagent`
 
 A fast, read-only agent for exploring codebases. Cannot modify files. Use this when you need to quickly find files by patterns, search code for keywords, or answer questions about the codebase.
-
----
-
-### Use scout
-
-_Mode_: `subagent`
-
-A read-only agent for external docs and dependency research. Use this when you need to clone a dependency repository into OpenCode's managed cache, inspect library source, or cross-reference local code against upstream implementations without modifying your workspace.
 
 ---
 
@@ -153,7 +145,7 @@ Configure agents in your `opencode.json` config file:
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "anthropic/claude-sonnet-4-20250514",
+      "model": "anthropic/claude-sonnet-5-5",
       "prompt": "{file:./prompts/build.txt}",
       "permission": {
         "edit": "allow",
@@ -162,7 +154,7 @@ Configure agents in your `opencode.json` config file:
     },
     "plan": {
       "mode": "primary",
-      "model": "anthropic/claude-haiku-4-20250514",
+      "model": "anthropic/claude-haiku-5-5",
       "permission": {
         "edit": "deny",
         "bash": "deny"
@@ -171,7 +163,7 @@ Configure agents in your `opencode.json` config file:
     "code-reviewer": {
       "description": "Reviews code for best practices and potential issues",
       "mode": "subagent",
-      "model": "anthropic/claude-sonnet-4-20250514",
+      "model": "anthropic/claude-sonnet-5-5",
       "prompt": "You are a code reviewer. Focus on security, performance, and maintainability.",
       "permission": {
         "edit": "deny"
@@ -194,7 +186,7 @@ You can also define agents using markdown files. Place them in:
 ---
 description: Reviews code for quality and best practices
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: anthropic/claude-sonnet-5-5
 temperature: 0.1
 permission:
   edit: deny
@@ -358,13 +350,13 @@ If you don’t specify a model, primary agents use the [model globally configure
 {
   "agent": {
     "plan": {
-      "model": "anthropic/claude-haiku-4-20250514"
+      "model": "anthropic/claude-haiku-5-5"
     }
   }
 }
 ```
 
-The model ID in your OpenCode config uses the format `provider/model-id`. For example, if you're using [OpenCode Zen](https://opencode.ai/v2/docs/console/), you would use `opencode/gpt-5.1-codex` for GPT 5.1 Codex.
+The model ID in your OpenCode config uses the format `provider/model-id`. For example, if you're using [OpenCode Zen](https://opencode.ai/v2/docs/console/), you would use `opencode/gpt-6.1-sol` for GPT-6.1 Sol.
 
 ---
 
@@ -436,6 +428,7 @@ The available permission keys are:
 | `list`               | `list`                                                           |
 | `bash`               | `bash`                                                           |
 | `task`               | `task`                                                           |
+| `todowrite`          | `todowrite`                                                      |
 | `external_directory` | Any tool that reads or writes files outside the project worktree |
 | `webfetch`           | `webfetch`                                                       |
 | `websearch`          | `websearch`                                                      |
@@ -678,7 +671,7 @@ For example, with OpenAI's reasoning models, you can control the reasoning effor
   "agent": {
     "deep-thinker": {
       "description": "Agent that uses high reasoning effort for complex problems",
-      "model": "openai/gpt-5",
+      "model": "openai/gpt-6.1-sol",
       "reasoningEffort": "high",
       "textVerbosity": "low"
     }
@@ -696,19 +689,9 @@ Run `opencode models` to see a list of the available models.
 
 ## Create agents
 
-You can create new agents using the following command:
+Create a new agent by adding a markdown file to `.opencode/agents/` for the project or `~/.config/opencode/agents/` globally. The file name becomes the agent name, and the frontmatter configures its description, mode, model, and permissions. See [Markdown](#markdown) above for the file format.
 
-```bash
-opencode agent create
-```
-
-This interactive command will:
-
-1. Ask where to save the agent; global or project-specific.
-2. Description of what the agent should do.
-3. Generate an appropriate system prompt and identifier.
-4. Let you select which permissions the agent should be allowed (anything you don't select is denied).
-5. Finally, create a markdown file with the agent configuration.
+You can also run `opencode agent create` to create an agent interactively. Run `opencode agent list` to list the agents that OpenCode has loaded.
 
 ---
 

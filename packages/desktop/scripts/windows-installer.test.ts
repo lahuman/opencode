@@ -7,7 +7,17 @@ test.skipIf(process.platform !== "win32")(
   "installer grants sandbox access without changing unrelated permissions",
   async () => {
     const { getMakeNsisPath } = await import("app-builder-lib/out/toolsets/windows")
-    const config = (await import("../electron-builder.config")).default
+    const { getConfig } = await import("../electron-builder.config")
+    const config = (() => {
+      const previous = process.env.OPENCODE_ENTERPRISE
+      process.env.OPENCODE_ENTERPRISE = "0"
+      try {
+        return getConfig()
+      } finally {
+        if (previous === undefined) delete process.env.OPENCODE_ENTERPRISE
+        else process.env.OPENCODE_ENTERPRISE = previous
+      }
+    })()
     const compiler = await getMakeNsisPath(config.toolsets?.nsis, config.nsis?.customNsisBinary)
     const dir = await mkdtemp(path.join(os.tmpdir(), "opencode-installer-"))
 

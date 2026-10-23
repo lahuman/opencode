@@ -22,6 +22,15 @@ export class PlanShellUnavailableError extends Schema.TaggedError<PlanShellUnava
   }
 }
 
+export class InvalidListCursorError extends Schema.TaggedError<InvalidListCursorError>()(
+  "Session.InvalidListCursorError",
+  {},
+) {
+  override get message() {
+    return "Invalid cursor"
+  }
+}
+
 export class MessageNotFoundError extends Schema.TaggedError<MessageNotFoundError>()("Session.MessageNotFoundError", {
   sessionID: SessionSchema.ID,
   messageID: SessionMessage.ID,
