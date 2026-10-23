@@ -26,7 +26,7 @@ if (files.length === 0) {
   process.exit(0)
 }
 
-const report = JSON.parse(await $`bunx oxlint --format json ${files}`.nothrow().quiet().text()) as {
+const report = JSON.parse(await $`bunx --bun oxlint --format json ${files}`.nothrow().quiet().text()) as {
   diagnostics: Diagnostic[]
 }
 
