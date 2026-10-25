@@ -9,6 +9,12 @@ description: 기존 코드의 구조와 동작 흐름을 이해하거나 변경 
 
 Build an evidence-based map of the relevant code before explaining behavior, recommending changes, or making changes. Distinguish observed behavior, reasonable inference, and missing information.
 
+## Plan and Build
+
+- A skill does not change the active mode or grant permission to implement. In Plan, use available read-only tools such as read, glob, grep, and git_diff; do not run shell commands or modify files.
+- Complete analysis, explanation, and planning-only requests with findings in the conversation. Build approval is not a prerequisite for reading or understanding code, even when a preferred tool is unavailable.
+- While in Plan, if the user explicitly requests implementation or command execution, finish the available analysis and use plan_exit to present the proposed work for approval. Only the approval form's Build now choice switches modes; do not tell the user to type it in chat. If they keep planning or dismiss the form, stay in Plan without repeating approval for the same request.
+
 ## Analysis workflow
 
 1. Read the nearest project instructions, package manifest, and configuration files.
@@ -38,3 +44,5 @@ Report:
 - Open questions that materially affect the requested analysis or implementation
 
 Keep the report scoped to the requested behavior. Exclude unrelated architecture observations unless they create a concrete risk.
+
+When review or implementation follows, carry forward the relevant file paths, findings, and open questions. Do not repeat completed analysis merely because another skill is selected. Diagnosis can use debug-problems; review and completion checks can use verify-changes when the user requests them.

@@ -111,6 +111,7 @@ export interface MockServerConfig {
   onIntegrationOAuthStatus?: (attemptID: string) => "pending" | "complete"
   plugins?: Resolvable<unknown[]>
   skills?: Resolvable<unknown[]>
+  agents?: Resolvable<unknown[]>
   // Replaces the `/api/worktree` inventory, which defaults to the directory plus project sandboxes.
   worktrees?: Resolvable<unknown[]>
   // Without them, creating or removing a worktree answers 501 MockUnsupported. `onWorktreeCreate` may hold the request
@@ -854,16 +855,18 @@ function mockHandlers(
         agent: (ctx) =>
           Effect.succeed({
             location: location(config, requestDirectory(config, ctx.request)),
-            data: [
-              {
-                id: "build",
-                name: "Build",
-                mode: "primary",
-                hidden: false,
-                request: { settings: {}, headers: {}, body: {} },
-                permissions: [],
-              },
-            ],
+            data: resolve(
+              config.agents ?? [
+                {
+                  id: "build",
+                  name: "Build",
+                  mode: "primary",
+                  hidden: false,
+                  request: { settings: {}, headers: {}, body: {} },
+                  permissions: [],
+                },
+              ],
+            ),
           }),
         provider: () =>
           Effect.succeed({ location: location(config), data: currentProviders(resolve(config.provider)) }),

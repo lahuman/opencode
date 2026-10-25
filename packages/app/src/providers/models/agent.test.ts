@@ -30,6 +30,6 @@ test("exposes Plan only alongside Build and labels built-in modes without renami
   expect(hasPlanMode([{ name: "build" }, { name: "plan" }])).toBe(true)
   expect(hasPlanMode([{ name: "build" }])).toBe(false)
   expect(label("build")).toBe("Build")
-  expect(label("plan")).toBe("Plan · Approval-gated")
+  expect(label("plan")).toBe("Plan · Read-only")
   expect(label("reviewer")).toBe("reviewer")
 })

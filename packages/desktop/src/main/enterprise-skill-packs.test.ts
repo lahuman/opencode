@@ -153,9 +153,9 @@ test("ships three focused development skills", async () => {
   const verified = await verifyEnterpriseSkillPacks(enterprise)
 
   expect(verified.packs.map((pack) => ({ id: pack.id, version: pack.version, enabled: pack.defaultEnabled }))).toEqual([
-    { id: "analyze-codebase", version: "1.0.1", enabled: true },
-    { id: "debug-problems", version: "1.0.1", enabled: true },
-    { id: "verify-changes", version: "1.0.1", enabled: true },
+    { id: "analyze-codebase", version: "1.1.0", enabled: true },
+    { id: "debug-problems", version: "1.1.0", enabled: true },
+    { id: "verify-changes", version: "1.1.0", enabled: true },
   ])
   expect(verified.packs.map((pack) => pack.members)).toEqual([
     ["analyze-codebase"],
@@ -171,7 +171,7 @@ test("ships intuitive English names with Korean descriptions", async () => {
   expect(catalog.packs.map((pack: { displayName: string; description: string }) => [pack.displayName, pack.description])).toEqual([
     ["Codebase Analysis", "기존 코드의 구조, 동작 흐름, 변경 영향 범위를 분석합니다."],
     ["Problem Debugging", "버그, 테스트 실패, 빌드 오류의 근본 원인을 체계적으로 조사합니다."],
-    ["Change Verification", "변경사항을 테스트, 타입 검사, 빌드와 diff로 최종 검증합니다."],
+    ["Change Verification", "변경사항을 리뷰하고 테스트, 타입 검사, 빌드와 diff로 최종 검증합니다."],
   ])
 
   const descriptions = {
@@ -180,7 +180,7 @@ test("ships intuitive English names with Korean descriptions", async () => {
     "debug-problems":
       "버그, 테스트 실패, 빌드 오류 또는 예상치 못한 동작의 근본 원인을 조사해야 할 때 사용합니다.",
     "verify-changes":
-      "작업 완료를 선언하거나 커밋·PR을 만들기 전, 변경사항이 요구사항을 충족하고 검증 명령을 통과하는지 확인할 때 사용합니다.",
+      "변경사항을 리뷰하거나 작업 완료·커밋·PR 전에 요구사항과 검증 결과를 확인할 때 사용합니다.",
   }
 
   for (const [name, description] of Object.entries(descriptions)) {
@@ -204,8 +204,8 @@ test("ships intuitive English names with Korean descriptions", async () => {
     ],
     "verify-changes": [
       "Change Verification",
-      "변경사항을 실행 결과로 최종 검증",
-      "Use $verify-changes to verify the current changes with fresh tests and checks.",
+      "변경사항을 리뷰하고 실행 결과로 최종 검증",
+      "Use $verify-changes to review the current changes and report completed checks, remaining defects, and checks still requiring execution.",
     ],
   }
   for (const [name, [displayName, shortDescription, defaultPrompt]] of Object.entries(interfaces)) {

@@ -359,7 +359,7 @@ test("keeps browser draft storage available and skips blob cleanup for malformed
   })
 
   try {
-    const { createBrowserDraftStore } = await import("@/utils/draft-store")
+    const { createBrowserDraftStore } = await import("@/runtime/persistence/drafts")
     const store = createBrowserDraftStore()
     open.dispatch("success")
     documents.dispatch("success")

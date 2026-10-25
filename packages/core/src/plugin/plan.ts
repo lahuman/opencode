@@ -22,6 +22,7 @@ const readonlyTools = new Set([
   "plan_exit",
   "question",
   "read",
+  "skill",
   "todowrite",
   "webfetch",
   "websearch",
@@ -91,9 +92,9 @@ export const Plugin = define({
         Object.keys(event.tools)
           .filter((name) => !readonlyTools.has(name))
           .forEach((name) => delete event.tools[name])
-      const reminder = lastReminder(event.messages, enterReminder)
+      const reminder = lastReminder(event.messages)
       const missing = event.agent === plan && reminder !== enterReminder
-      const stale = event.agent !== plan && reminder === enterReminder
+      const stale = event.agent !== plan && reminder !== undefined && reminder !== leave
       const text = missing ? enterReminder : stale ? leave : undefined
       if (!text) return Effect.void
       // Before the user's prompt, matching where agent-switch reminders land.
@@ -147,10 +148,12 @@ function switchReminder(
   return undefined
 }
 
-function lastReminder(messages: ReadonlyArray<Message>, enterReminder: string) {
+function lastReminder(messages: ReadonlyArray<Message>) {
   return messages.reduce<string | undefined>((found, message) => {
     const part = message.role === "user" && message.content.length === 1 ? message.content[0] : undefined
     if (part?.type !== "text") return found
-    return part.text === enterReminder || part.text === leave ? part.text : found
+    const entered =
+      part.text.startsWith("<system-reminder>\nYou are in Plan mode. ") && part.text.endsWith("\n</system-reminder>")
+    return entered || part.text === leave ? part.text : found
   }, undefined)
 }

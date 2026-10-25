@@ -234,6 +234,27 @@ describe("plan plugin reminders", () => {
     }),
   )
 
+  it.effect("reconciles reminders retained from an earlier version when resuming in Build", () =>
+    Effect.gen(function* () {
+      const previous = `<system-reminder>
+You are in Plan mode. Discuss the plan with the user directly in the conversation. Do not create or modify any files. Keep the complete plan in the conversation.
+
+Do not modify any other files or ask a subagent to do so.
+
+When the plan is ready, present it in the conversation and call plan_exit with the complete Markdown plan. Only the user's explicit "Build now" choice authorizes switching to Build and implementation. If they keep planning or dismiss the question, remain in Plan mode.
+</system-reminder>`
+      const { persisted, contextHook } = yield* run()
+      const messages = [Message.user(previous), Message.user("continue implementing")]
+      yield* contextHook(request(build, messages))
+      expect(messages).toHaveLength(3)
+      const reminder = messages[1]?.content[0]
+      expect(reminder?.type === "text" && reminder.text).toContain("NO LONGER in Plan mode")
+      expect(persisted).toHaveLength(1)
+      yield* contextHook(request(build, messages))
+      expect(persisted).toHaveLength(1)
+    }),
+  )
+
   it.effect("does nothing for non-plan sessions without plan history", () =>
     Effect.gen(function* () {
       const { persisted, contextHook } = yield* run()
@@ -275,13 +296,13 @@ describe("plan plugin mutations", () => {
         const { contextHook, beforeHook } = yield* run()
         const event = request(plan, [])
         event.tools = Object.fromEntries(
-          ["read", "git_diff", "plan_exit", "shell", "edit", "mcp_mutate", "execute"].map((name) => [
+          ["read", "git_diff", "skill", "plan_exit", "shell", "edit", "mcp_mutate", "execute"].map((name) => [
             name,
             { description: name, input: { type: "object" } },
           ]),
         )
         yield* contextHook(event)
-        expect(Object.keys(event.tools)).toEqual(["read", "git_diff", "plan_exit"])
+        expect(Object.keys(event.tools)).toEqual(["read", "git_diff", "skill", "plan_exit"])
         for (const tool of ["shell", "edit", "mcp_mutate", "execute"]) {
           const error = yield* beforeHook({
             tool,
@@ -293,14 +314,16 @@ describe("plan plugin mutations", () => {
           }).pipe(Effect.flip)
           expect(error.message).toContain("in Plan mode")
         }
-        yield* beforeHook({
-          tool: "read",
-          input: {},
-          sessionID,
-          agent: plan,
-          messageID: SessionMessage.ID.make("msg_plan_guard"),
-          id: Tool.CallID.make("call_plan_guard"),
-        })
+        for (const tool of ["read", "skill"]) {
+          yield* beforeHook({
+            tool,
+            input: {},
+            sessionID,
+            agent: plan,
+            messageID: SessionMessage.ID.make("msg_plan_guard"),
+            id: Tool.CallID.make("call_plan_guard"),
+          })
+        }
       }),
     ),
   )

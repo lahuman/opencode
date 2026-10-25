@@ -115,6 +115,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       { session: {} },
     )
 
+    const defaults =
+      platform.platform === "desktop"
+        ? persisted(
+            Persist.serverGlobal(serverSDK.scope, "agent-default"),
+            Persistence.struct({ agent: Persistence.optional(Schema.String) }),
+            { agent: undefined },
+          )
+        : undefined
+
     const [store, setStore] = createStore<{
       current?: string
       draft?: State
@@ -216,16 +225,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       list,
       visible: agentsVisible,
       current() {
-        return pickAgent(scope()?.agent ?? durable()?.agent ?? (agentsVisible() ? store.current : "build"))
+        return pickAgent(
+          scope()?.agent ??
+            durable()?.agent ??
+            (defaults ? (defaults[0].agent ?? "build") : agentsVisible() ? store.current : "build"),
+        )
       },
       setDefault(name: string) {
-        setStore("current", pickAgent(name)?.name)
+        defaults?.[1]("agent", name)
+        setStore("current", name)
       },
       set(name: string | undefined) {
         const item = pickAgent(name)
 
         if (!item) {
-          setStore("current", undefined)
+          setStore("current", name)
+          if (name) write({ agent: name })
 
           return
         }
@@ -496,7 +511,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       model,
       agent,
       session: {
-        ready: savedReady,
+        ready: () => savedReady() && (defaults?.[3]() ?? true),
         reset() {
           setStore({ draft: undefined, promoting: undefined })
         },

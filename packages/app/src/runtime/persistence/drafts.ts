@@ -452,7 +452,11 @@ export function createBrowserDraftStore(): DraftStore {
       const transaction = database.transaction(["documents", "blobs"], "readwrite")
       const documents = transaction.objectStore("documents").getAll()
       documents.addEventListener("success", () => {
-        const used = referenced(`[${documents.result.join(",")}]`)
+        const used = Option.getOrUndefined(Option.liftThrowable(referenced)(`[${documents.result.join(",")}]`))
+
+        // A damaged draft may still own blobs. Preserve them until the draft is recovered.
+        if (!used) return
+
         const store = transaction.objectStore("blobs")
         const blobs = store.openKeyCursor()
         blobs.addEventListener("success", () => {

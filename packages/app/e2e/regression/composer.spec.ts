@@ -541,6 +541,74 @@ test("lists slash commands in their built-in order", async ({ page }) => {
   ])
 })
 
+test("explicit mode commands keep Plan selected until Build is requested", async ({ page }) => {
+  const { editor } = await openSession(page, {
+    name: "ComposerModes",
+    agents: ["build", "plan"].map((id) => ({
+      id,
+      name: id === "build" ? "Build" : "Plan",
+      mode: "primary",
+      hidden: false,
+      request: { settings: {}, headers: {}, body: {} },
+      permissions: [],
+    })),
+  })
+  const mode = page.getByRole("button", { name: "Choose agent", exact: true })
+  await expect(mode).toHaveText("Build")
+
+  for (const next of ["plan", "plan", "build"] as const) {
+    await editor.fill(`/${next}`)
+    await page.locator(`[data-component="composer-suggestions"] [data-suggestion-id="agent.${next}"]`).click()
+    await expect(editor).toBeEmpty()
+    await expect(mode).toHaveText(next === "plan" ? /^Plan\b/ : "Build")
+  }
+})
+
+test("Plan submits all three workflow skills as mentions without changing modes", async ({ page }) => {
+  const skills = ["analyze-codebase", "debug-problems", "verify-changes"]
+  const prompts: unknown[] = []
+  const sessionID = "ses_plan_skills"
+  const { editor } = await openSession(page, {
+    name: "PlanSkills",
+    sessions: [{ id: sessionID, agent: "plan", model: { id: "test", providerID: "opencode" } }],
+    agents: ["build", "plan"].map((id) => ({
+      id,
+      name: id === "build" ? "Build" : "Plan",
+      mode: "primary",
+      hidden: false,
+      request: { settings: {}, headers: {}, body: {} },
+      permissions: [],
+    })),
+    skills: skills.map((id) => ({ id, name: id, path: `/skills/${id}/SKILL.md`, content: `Instructions for ${id}` })),
+    findFiles: () => [],
+    onPrompt: (input) => void prompts.push(input.body),
+  })
+  const mode = page.getByRole("button", { name: "Choose agent", exact: true })
+  await expect(mode).toHaveText(/^Plan\b/)
+
+  for (const id of skills) {
+    await editor.pressSequentially(`@${id}`)
+    await page.locator(`[data-component="composer-suggestions"] [data-suggestion-id="skill:${id}"]`).click()
+    await expect(editor.locator(`[data-mention="skill"][data-id="${id}"]`)).toHaveText(`@${id}`)
+  }
+  await editor.pressSequentially("Explain the findings without changing files.")
+  await editor.press("Enter")
+  await expect
+    .poll(() => prompts)
+    .toEqual([
+      expect.objectContaining({
+        skills: skills.map((id) => ({
+          id,
+          name: id,
+          mention: { start: expect.any(Number), end: expect.any(Number), text: `@${id}` },
+        })),
+        metadata: expect.objectContaining({ agent: "plan" }),
+      }),
+    ])
+  await expect(editor).toBeEmpty()
+  await expect(mode).toHaveText(/^Plan\b/)
+})
+
 const followUp = "Add follow-up, / for commands, @ for context…"
 
 for (const row of [

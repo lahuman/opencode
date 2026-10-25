@@ -16,7 +16,7 @@ import { buildAppArchive } from "./app-assets"
 import { verifyArtifact } from "./verify-artifact"
 import { NativeArch } from "../../../script/native-arch"
 
-const NODE_VERSION = "26.4.0"
+const NODE_VERSION = "26.12.1"
 const dir = path.resolve(import.meta.dirname, "..")
 const outdir = path.resolve(
   dir,

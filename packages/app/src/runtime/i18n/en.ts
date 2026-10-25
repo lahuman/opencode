@@ -3,7 +3,7 @@ import { CHAI_ONBOARDING } from "@/components/help-content"
 
 export const dict = {
   "enterprise.agent.build": "Build",
-  "enterprise.agent.plan": "Plan · Approval-gated",
+  "enterprise.agent.plan": "Plan · Read-only",
   "enterprise.guide.open": "CHAI AI 가이드 열기",
   "enterprise.provider.copy.saveProvider": "Save provider",
   "enterprise.provider.copy.saveModel": "Save model",
@@ -69,8 +69,8 @@ export const dict = {
   "enterprise.provider.copy.offlineReadiness": "Offline readiness: {{status}}",
   "enterprise.guide.version": "버전 {{version}}",
   "enterprise.guide.content": "CHAI AI 가이드 내용",
-  "enterprise.command.plan.title": "Toggle Plan mode",
-  "enterprise.command.plan.description": "Switch between Build and approval-gated Plan mode",
+  "enterprise.command.plan.title": "Switch to Plan mode",
+  "enterprise.command.plan.description": "Analyze, review, and plan without changing files",
   "enterprise.command.build.title": "Switch to Build mode",
   "enterprise.command.build.description": "Use tools and edit files with the Build agent",
   "enterprise.model.recovered.title": "Model selection updated",

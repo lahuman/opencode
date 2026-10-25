@@ -84,15 +84,15 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
       title: language.t("enterprise.command.plan.title"),
       description: language.t("enterprise.command.plan.description"),
       slash: "plan",
-      disabled: !local.agent.list().some((item) => item.name === "plan"),
-      onSelect: () => local.agent.set(local.agent.current()?.name === "plan" ? "build" : "plan"),
+      disabled: !local.agent.visible() || !local.agent.list().some((item) => item.name === "plan"),
+      onSelect: () => local.agent.set("plan"),
     }),
     agentCommand({
       id: "agent.build",
       title: language.t("enterprise.command.build.title"),
       description: language.t("enterprise.command.build.description"),
       slash: "build",
-      disabled: !local.agent.list().some((item) => item.name === "build"),
+      disabled: !local.agent.visible() || !local.agent.list().some((item) => item.name === "build"),
       onSelect: () => local.agent.set("build"),
     }),
   ])

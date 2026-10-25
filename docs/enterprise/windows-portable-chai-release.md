@@ -50,6 +50,48 @@ bun typecheck
 
 The focused desktop command is the package-fixture check; it exercises the unpacked/ZIP contract, integrity metadata, and PowerShell smoke contract. The full desktop test command is required as the integrated source check. Run the enterprise Playwright command from `packages/app`: that package owns the `test:e2e` script and its Playwright configuration. It requires the local listener available to the test runner; run it outside a local-listener sandbox when required. Also run `bun run check` from the repository root for the canonical lint and package type checks. Record failures separately rather than treating a focused test pass as a complete release acceptance.
 
+### Desktop modes and bundled skills
+
+Plan supports code analysis, diagnosis, change review, and planning with read-only tools. It can load a skill either from an explicit `@` attachment in the composer or through the model's `skill` tool. Loading a skill does not change modes or authorize file edits or shell commands. Analysis and review requests should finish with findings in Plan; unavailable execution checks must be reported as not run.
+
+Use `/plan` to select Plan and `/build` to select Build. Repeating either command keeps that mode selected. The mode picker is also an explicit user selection. For a model-proposed transition, the model calls `plan_exit`, the application displays an approval form, and choosing **Build now** submits approval. Typing those words into the conversation is an ordinary message and does not switch the mode. **Keep planning**, dismissal, and a failed approval submission must leave Plan selected.
+
+The three bundled skills have distinct, complementary roles:
+
+| Skill              | Purpose                                      | Plan outcome                                             | Build outcome when requested                                     |
+| ------------------ | -------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- |
+| `analyze-codebase` | Trace structure, behavior, and change impact | Findings with code references and explicit uncertainty   | Analysis supports the requested implementation                   |
+| `debug-problems`   | Find the cause of a reported problem         | Code and existing-log investigation; reproduction limits | Reproduce, fix when authorized, and verify the cause             |
+| `verify-changes`   | Review changes and assess completion         | Findings, requirement coverage, and checks not yet run   | Run relevant checks and report fresh results and remaining risks |
+
+These skills guide the model; they do not form an automatic job pipeline. Select the relevant skill with `@` and state the intended outcome, for example `@analyze-codebase 로그인 흐름을 설명해줘`, `@debug-problems 이 오류의 원인을 찾아줘`, or `@verify-changes 변경사항을 리뷰하고 미검증 항목을 알려줘`. A request such as `@verify-changes 관련 테스트를 실행해서 완료 여부를 검증해줘` requires execution; when starting in Plan, complete available inspection and obtain approval through the form before running commands. Verification alone does not authorize additional fixes, commits, pushes, or deployment.
+
+For Windows acceptance, check these paths with the configured company model and retain the actual model ID and tool-call evidence:
+
+- Select `/plan` twice and confirm Plan remains selected. Attach each bundled skill and confirm it is included in the submitted request.
+- Request analysis or review only. Confirm the model uses available read-only tools and returns findings without demanding Build approval.
+- Request implementation or execution from Plan. Confirm a real approval form appears, **Keep planning** leaves Plan selected, and **Build now** switches the current task to Build.
+- Open a new task after Build approval, including in another workspace, and confirm Build is the default. Reload and confirm an existing task explicitly set to Plan still uses Plan.
+- Resume an older conversation after updating the application. Confirm the current mode replaces outdated Plan instructions.
+- Confirm command-based verification distinguishes passed, failed, skipped, and unavailable checks. A static review alone must not be described as a successful test run.
+
+Automated tests cover mode state, approval forms, skill delivery, and packaging. They do not establish how every company model interprets the instructions; the model-backed acceptance above remains necessary for a release. Source edits require a newly built application/server before they affect an installed desktop.
+
+### Desktop integration verification, 2026-10-24
+
+The working-tree refactor fixes repeated `/plan` selection, Desktop Build-default persistence and catalog hydration, read-only skill loading in Plan, and outdated Plan reminders retained across application updates. The three skill IDs remain unchanged; `verify-changes` owns review and completion verification. A recovered draft-storage regression test also exposed malformed JSON throwing during startup blob cleanup; cleanup now preserves blobs when any draft cannot be parsed.
+
+Verified with Bun 1.4.4 on Windows:
+
+- Canonical `bun run check`: all 34 tasks passed. Official `typecheck:tsc` passed for Core, App, and Desktop; App was checked again after the draft fix.
+- Core mode, skill, approval, and delivery tests: 38 passed. App unit suite: 820 passed. The final draft-persistence regression suite passed all 13 tests, and the actual Desktop approval/default fixture passed all 6 cases alongside 21 model-selection cases.
+- Production Chromium regression: all 8 cases passed, including repeated Plan selection, explicit Build selection, all three skill attachments and their submitted payload, and the existing question/permission request docks.
+- The production cold-session entry benchmark completed all 3 final serial runs with no incorrect destination samples: first correct display took 476.3–497.4 ms and stable display took 498.9–510.7 ms. The single prechange baseline was 523.2/539.4 ms. These observations verify scenario completion, not a statistically established performance improvement.
+- Enterprise Desktop main, preload, and renderer build passed. The full Desktop suite had 540 passes and 2 existing failures creating file-symlink fixtures (`EPERM`). The focused skill-pack, manifest, and preflight checks passed all 22 tests.
+- The full App browser-environment suite had 180 passes and 2 failures, including one module-load error. The remaining failures reference removed `dialog-connect-provider`/`dialog-select-server` helpers and the removed `HighlightsProvider` context. These legacy tests were not deleted or skipped. E2E type checking also retains existing fixture/performance/timeline errors; the new composer cases add no reported errors.
+
+The test-only static server caches `index.html` when it starts; reusing it after rebuilding serves stale chunk names. The final Chromium run used a server started from the final build. No installed application or live model server was restarted. The bundled model-evaluation scenarios were updated but not executed against company endpoints, and this source verification does not produce an installable release or replace the model-backed acceptance above.
+
 ### Dev merge verification, 2026-10-18
 
 The merge combines enterprise revision `902b59f255` with dev snapshot `7b99646cf1`. Enterprise behavior now uses the native Core, Protocol, Server, Client, CLI, App, and Desktop owners. The generated Client was regenerated from the HTTP API. Plan remains read-only until an explicit Build approval; company credentials stay outside the public credential database; enterprise saved permissions remain directory-scoped and expire when the process restarts.
