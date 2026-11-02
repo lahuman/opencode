@@ -195,7 +195,11 @@ export function createServerTransport(input: {
               const url = new URL(request.url)
               url.protocol = endpoint.protocol
               url.host = endpoint.host
-              return base(new Request(url, request))
+              // RequestInit reads request.body as a stream. Chromium rejects streaming
+              // uploads over the sidecar's HTTP/1.1 connection, so restore the buffered body.
+              const body = request.body ? await request.clone().arrayBuffer() : undefined
+              const rewritten = new Request(url, request)
+              return base(body === undefined ? rewritten : new Request(rewritten, { body }))
             }
             return send().catch((error: unknown) => {
               // Reads may retry after a disconnect; writes might already have been accepted.

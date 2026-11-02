@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { createSessionHttpServer } from "./utils/session-http-server"
 
 const REMOTE_DISABLED = "Remote servers are disabled in this build"
 const SAFE_REMEDIATION = "Install the Company TLS CA certificate and try again."
@@ -15,6 +16,31 @@ const responsiveViewports = [
   { name: "desktop", width: 1280, height: 800 },
   { name: "mobile", width: 390, height: 844 },
 ]
+
+test("enterprise creates and reads a new session through the reconnected HTTP sidecar", async ({ page }) => {
+  const server = await createSessionHttpServer()
+  try {
+    await page.goto(`${fixture("session-transport")}&endpoint=${encodeURIComponent(server.url)}`)
+    await page.getByRole("button", { name: "Create session over HTTP", exact: true }).click()
+    await expect(page.getByTestId("transport-session")).toHaveText("ses_enterprise_post")
+    expect(server.requests).toEqual([
+      {
+        method: "POST",
+        path: "/api/session",
+        contentType: "application/json",
+        body: {
+          id: "ses_enterprise_post",
+          agent: "build",
+          model: { providerID: "company", id: "company-code" },
+          location: { directory: "C:/Projects/offline" },
+        },
+      },
+      { method: "GET", path: "/api/session/ses_enterprise_post", body: undefined, contentType: undefined },
+    ])
+  } finally {
+    await server.close()
+  }
+})
 
 async function output<T>(page: Page, id: string) {
   return page.getByTestId(id).evaluate((node) => JSON.parse(node.textContent ?? "null") as T)

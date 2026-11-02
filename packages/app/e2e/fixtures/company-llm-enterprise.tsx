@@ -9,6 +9,7 @@ import {
   Match,
   onMount,
   type ParentProps,
+  Show,
   Switch,
   untrack,
 } from "solid-js"
@@ -38,6 +39,7 @@ import {
 import { SettingsProvider } from "@/settings/model"
 import { TabsProvider } from "@/shell/tabs/tabs"
 import { ToastRegion } from "@/shell/notifications/toast"
+import { createServerTransport } from "@/runtime/server/client"
 
 const DIAGNOSTIC_SUCCESS = {
   ok: true,
@@ -797,7 +799,7 @@ function ComposerScenario(props: { harness: Harness; enterprise: boolean; web?: 
     </MemoryRouter>
   )
   const platform = props.web
-    ? { ...props.harness.platform, platform: "web" as const, enterprise: undefined }
+    ? { ...props.harness.platform, platform: "web" as const, os: undefined, windowID: undefined, enterprise: undefined }
     : props.enterprise
       ? props.harness.platform
       : { ...props.harness.platform, enterprise: undefined }
@@ -868,8 +870,41 @@ function ComposerControls(props: { harness: Harness }) {
   )
 }
 
+function SessionTransportScenario() {
+  const endpoint = new URLSearchParams(window.location.search).get("endpoint")
+  if (!endpoint) throw new Error("Missing HTTP test endpoint")
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:1" },
+    resolve: async () => ({ url: endpoint }),
+  })
+  const [result, setResult] = createSignal("")
+  const create = async () => {
+    try {
+      const created = await transport.api.session.create({
+        id: "ses_enterprise_post",
+        agent: "build",
+        model: { providerID: "company", id: "company-code" },
+        location: { directory: "C:/Projects/offline" },
+      })
+      const loaded = await transport.api.session.get({ sessionID: created.id })
+      setResult(loaded.id)
+    } catch (error) {
+      setResult(String(error))
+    }
+  }
+  return (
+    <>
+      <button type="button" onClick={create}>
+        Create session over HTTP
+      </button>
+      <output data-testid="transport-session">{result()}</output>
+    </>
+  )
+}
+
 function Fixture() {
   const scenario = new URLSearchParams(window.location.search).get("scenario")
+  if (scenario === "session-transport") return <SessionTransportScenario />
   const harness = createHarness(scenario)
   return (
     <Switch fallback={<p>Unknown scenario</p>}>
