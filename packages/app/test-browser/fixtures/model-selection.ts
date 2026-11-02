@@ -1,6 +1,23 @@
 import { expect, test } from "bun:test"
 import { agent, durable, fixture, key, selection } from "./model-selection-harness"
 
+test.each([
+  [0, true],
+  [8_640_000_000_000_001, true],
+  [Date.UTC(2020, 0, 1), false],
+] as const)("handles a newly added model with release time %p", (released, visible) => {
+  const f = fixture()
+  const model = { ...f.state.models[0], id: "manual", modelID: "manual", time: { released } }
+  const { local } = f.mount()
+  f.set("models", [])
+  f.set("models", [model])
+  expect(local.model.list().map((model) => model.id)).toEqual(["manual"])
+  expect(local.model.current()?.id).toBe("manual")
+  expect(local.model.visible(key("manual"))).toBe(visible)
+  local.model.setVisibility(key("manual"), false)
+  expect(local.model.visible(key("manual"))).toBe(false)
+})
+
 test("restores durable agents even when the agent selector is hidden", () => {
   const f = fixture({ session: durable("b", "high", "plan"), agents: [agent("plan")] })
   f.set("visible", false)

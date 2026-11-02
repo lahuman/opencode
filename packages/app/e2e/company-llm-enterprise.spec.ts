@@ -284,6 +284,17 @@ test("DialogCompanyProvider manages provider, model, credentials, defaults, diag
   await expect(reasoning).toHaveCount(0)
   await expect(chat).toContainText("Default")
 
+  await dialog.getByRole("button", { name: "Delete model" }).click()
+  await dialog.getByRole("button", { name: "Confirm delete model" }).click()
+  await expect(chat).toHaveCount(0)
+  await expect(provider).toContainText("0 models")
+  await dialog.getByRole("button", { name: "Add model" }).click()
+  await page.getByLabel("Model ID").fill("chat")
+  await dialog.getByRole("button", { name: "Save model" }).click()
+  await expect(chat).toBeVisible()
+  await expect(chat).toHaveAttribute("aria-pressed", "true")
+  await expect(dialog.getByRole("button", { name: "Test connection" })).toBeEnabled()
+
   await dialog.getByRole("button", { name: "Delete provider" }).click()
   await expect(dialog).toContainText("All models and credentials for this provider will be removed")
   await dialog.getByRole("button", { name: "Confirm delete provider" }).click()
