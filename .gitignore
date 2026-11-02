@@ -27,11 +27,11 @@ a.out
 target
 .scripts
 .cache
+/packages/cli/.bun-cache/
 .direnv/
 
 # Local dev files
 opencode-dev
-UPCOMING_CHANGELOG.md
 RELEASE_REVIEW.md
 logs/
 *.bun-build

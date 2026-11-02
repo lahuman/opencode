@@ -47,7 +47,7 @@ const fixture = Effect.gen(function* () {
   const environment = Environment.Service.of({
     files: Environment.makeFiles(Environment.makeLocalDriver(spawner)), spawner,
   })
-  yield* GitDiffTool.Plugin.effect(yield* PluginHost.make(plugin)).pipe(Effect.provideService(Environment.Service, environment))
+  yield* GitDiffTool.Plugin.effect(yield* PluginHost.make(plugin, GitDiffTool.Plugin.id)).pipe(Effect.provideService(Environment.Service, environment))
   const tools = yield* registry.snapshot()
   const run = (input: typeof GitDiffTool.Input.Type) => tools.execute({
     sessionID, ...toolIdentity,

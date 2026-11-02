@@ -18,7 +18,7 @@ import { Global } from "@opencode/util/global"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { tempGlobalLayer } from "./fixture/global"
 import { location } from "./fixture/location"
-import { tmpdir } from "./fixture/tmpdir"
+import { tmpdir, tmpdirScoped } from "./fixture/tmpdir"
 import { readInitial, readUpdate, state } from "./lib/instructions"
 import { testEffect } from "./lib/effect"
 import { host } from "./plugin/host"
@@ -222,10 +222,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
     }),
   )
   it.live("loads global and upward project files and rescans them on change", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) => {
         const global = path.join(tmp.path, "global")
         const home = path.join(tmp.path, "home")
@@ -316,10 +313,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   )
 
   it.live("loads configured files, globs, home paths, and URLs alongside AGENTS.md", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) => {
         const project = path.join(tmp.path, "repo")
         const directory = path.join(project, "packages", "core")
@@ -328,18 +322,23 @@ describe("ConfigInstructionPlugin.Plugin", () => {
         const second = path.join(project, "rules", "b.md")
         const absolute = path.join(tmp.path, "absolute.md")
         const homeFile = path.join(tmp.path, "home.md")
+        const noteTop = path.join(tmp.path, "notes", "guide.md")
+        const noteNested = path.join(tmp.path, "notes", "projects", "memory.md")
         const remote = "https://example.test/instructions.md"
         const requests: string[] = []
         return Effect.gen(function* () {
           yield* Effect.promise(async () => {
             await fs.mkdir(path.dirname(first), { recursive: true })
             await fs.mkdir(directory, { recursive: true })
+            await fs.mkdir(path.dirname(noteNested), { recursive: true })
             await Promise.all([
               fs.writeFile(agents, "agents"),
               fs.writeFile(first, "first"),
               fs.writeFile(second, "second"),
               fs.writeFile(absolute, "absolute"),
               fs.writeFile(homeFile, "home"),
+              fs.writeFile(noteTop, "note top"),
+              fs.writeFile(noteNested, "note nested"),
             ])
           })
 
@@ -353,6 +352,8 @@ describe("ConfigInstructionPlugin.Plugin", () => {
               `Instructions from: ${second}\nsecond`,
               `Instructions from: ${absolute}\nabsolute`,
               `Instructions from: ${homeFile}\nhome`,
+              `Instructions from: ${noteTop}\nnote top`,
+              `Instructions from: ${noteNested}\nnote nested`,
               `Instructions from: ${remote}\nremote`,
             ].join("\n\n"),
           )
@@ -373,6 +374,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
                 "rules/*.md",
                 absolute,
                 "~/home.md",
+                "~/notes/**/*.md",
                 remote,
                 "missing.md",
                 "https://example.test/missing.md",
@@ -398,10 +400,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   )
 
   it.live("reloads configured sources on config updates and keeps the last fetched URL", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) => {
         const first = path.join(tmp.path, "first.md")
         const second = path.join(tmp.path, "second.md")
@@ -443,10 +442,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   )
 
   it.live("keeps an empty AGENTS.md as available context", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) =>
         Effect.gen(function* () {
           const file = path.join(tmp.path, "AGENTS.md")
@@ -469,10 +465,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   )
 
   it.live("discovers a newly created instruction file above the project root", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) => {
         const home = path.join(tmp.path, "home")
         const shared = path.join(home, "code")
@@ -516,10 +509,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   )
 
   it.live("stops instruction candidates at the project root outside home", () =>
-    Effect.acquireRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ).pipe(
+    tmpdirScoped().pipe(
       Effect.flatMap((tmp) => {
         const global = path.join(tmp.path, "global")
         const home = path.join(tmp.path, "home")
@@ -560,10 +550,7 @@ describe("ConfigInstructionPlugin.Plugin", () => {
   ;(process.platform === "win32" ? it.live : it.live.skip)(
     "stops at the project root when the location drive letter differs in case",
     () =>
-      Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-      ).pipe(
+      tmpdirScoped().pipe(
         Effect.flatMap((tmp) => {
           const global = path.join(tmp.path, "global")
           const home = path.join(tmp.path, "home")

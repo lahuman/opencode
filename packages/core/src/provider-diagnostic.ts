@@ -2,7 +2,7 @@ export * as ProviderDiagnostic from "./provider-diagnostic.js"
 
 import type { FailureKind, Input, Result } from "@opencode/schema/provider-diagnostic"
 import type { Provider } from "@opencode/schema/provider"
-import { AIError, LLM, LLMClient } from "@opencode/ai"
+import { AIError, ai, LLMClient } from "@opencode/ai/effect"
 import { Cause, Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Model } from "./model.js"
 import { ModelResolver } from "./model-resolver.js"
@@ -127,7 +127,7 @@ const layer = Layer.effect(
         return yield* Effect.gen(function* () {
           const selected = yield* resolver.resolve({ providerID, id: Model.ID.make(input.modelID) })
           if (!selected) return failure("basic", "model")
-          const request = LLM.request({ model: selected.model, prompt: "Reply with OK." })
+          const request = ai.request({ model: selected.model, prompt: "Reply with OK." })
           if (Enterprise.enabled()) {
             const policy = Enterprise.settings()
             const provider = policy.catalog.providers.find((provider) => provider.id === providerID)
@@ -169,7 +169,6 @@ const layer = Layer.effect(
           const streamed = yield* llm.stream(request).pipe(Stream.runCollect, Effect.timeout("15 seconds"))
           if (!streamed.some((event) => event.type === "text-delta" && event.text.trim()))
             return failure("streaming", "stream")
-          if (streamed.some((event) => event.type === "provider-error")) return failure("streaming", "stream")
           if (
             streamed.some(
               (event) =>
@@ -182,7 +181,7 @@ const layer = Layer.effect(
             state.stage = "toolCall"
             const result = yield* llm
               .generate(
-                LLM.request({
+                ai.request({
                   model: selected.model,
                   prompt: "Call the enterprise_probe tool once.",
                   tools: [

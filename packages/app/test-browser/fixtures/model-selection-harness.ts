@@ -66,7 +66,11 @@ mock.module("@/runtime/server/runtime", () => ({ useGlobal: () => ({ models: act
 mock.module("@/workspaces/location", () => ({ useWorkspaceLocation: () => () => ({ directory: active.directory }) }))
 
 mock.module("@/settings/model", () => ({
-  useSettings: () => ({ visibility: { customAgents: () => active.state.visible }, keybinds: { get: () => undefined } }),
+  useSettings: () => ({
+    visibility: { customAgents: () => active.state.visible },
+    keybinds: { get: () => undefined },
+    general: { newQuestionUI: () => active.state.newQuestionUI },
+  }),
 }))
 
 mock.module("@/composer/persistence", () => ({ useComposerState: () => active.prompt }))
@@ -109,6 +113,7 @@ export function fixture(
     platform?: "desktop" | "web"
     storage?: Map<string, string>
     reply?: (input: SessionFormReplyInput) => Promise<void>
+    newQuestionUI?: boolean
   } = {},
 ) {
   const directory = `/selection-test/${crypto.randomUUID()}`
@@ -119,6 +124,7 @@ export function fixture(
   // SAFETY: fixture transitions clear the route as well as selecting session IDs.
   const [state, set] = createStore({
     visible: true,
+    newQuestionUI: input.newQuestionUI ?? false,
     configLoaded: true,
     connection: "connected",
     route: { id: "ses_a" as string | undefined },
@@ -147,6 +153,7 @@ export function fixture(
   const [preferences, setPreferences] = createStore({
     user: [] as Array<ModelKey & { visibility: "show" | "hide" }>,
     recent: [] as ModelKey[],
+    favorite: [] as ModelKey[],
     variant: (input.preferred ? { "provider/a": input.preferred } : {}) as Record<string, string>,
   })
 
@@ -180,11 +187,17 @@ export function fixture(
     state,
     set,
     setPreferences,
-    preferences: { store: preferences, set: setPreferences, ready: () => true, recent: () => preferences.recent },
+    preferences: {
+      store: preferences,
+      set: setPreferences,
+      ready: () => true,
+      recent: () => preferences.recent,
+      favorite: () => preferences.favorite,
+    },
     data: {
       session: { get: (id: string) => state.sessions[id], message: { list: () => [] } },
       location: {
-        agent: { list: () => state.agents },
+        agent: { list: () => state.agents, sync: async () => undefined },
         config: {
           list: () => (state.configLoaded ? [{ type: "document", info: { model: state.config } }] : undefined),
           sync: async () => {

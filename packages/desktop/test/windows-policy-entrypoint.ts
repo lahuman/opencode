@@ -109,6 +109,7 @@ class FakeBrowserWindow {
       if (event === "will-navigate") this.callbacks.navigation = callback
       if (event === "will-redirect") this.callbacks.redirect = callback
     },
+    once: (event: string, callback: (...args: unknown[]) => void) => this.on(event, callback),
     getURL: () => this.loadedURL,
     getZoomFactor: () => this.zoom,
     setZoomFactor: (value: number) => {
@@ -174,7 +175,12 @@ mock.module("../src/main/logging", () => ({
 }))
 
 mock.module("electron", () => ({
-  default: { app: { getPath: () => tmpdir() } },
+  default: {
+    app: {
+      getPath: () => tmpdir(),
+      isPackaged: mode === "packaged" || mode === "packaged-renderer-env" || publicProtocol,
+    },
+  },
   app: {
     dock: undefined,
     exit() {},
@@ -289,6 +295,8 @@ if (publicProtocol) {
 }
 
 try {
+  const { setProtocolReporter } = await import("../src/main/windows/protocol")
+  setProtocolReporter((level, message, metadata) => logs.push({ service: "protocol", level, message, metadata }))
   const { createEarlyWindow } = await import("../src/main/windows/early")
   createEarlyWindow()
   createEarlyWindow()

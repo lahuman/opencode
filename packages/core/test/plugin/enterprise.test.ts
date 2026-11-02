@@ -59,7 +59,7 @@ it.effect("restricts the actual provider/model catalogs after config transforms 
       })
       editor.models.update(providerID, Model.ID.make("unapproved"), () => {})
     })
-    yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin))
+    yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin, EnterprisePlugin.Plugin.id))
     yield* providers.reload()
     expect((yield* providers.all()).map((provider) => provider.id)).toEqual([providerID])
     expect((yield* providers.get(providerID))?.name).toBe(providerID)
@@ -82,7 +82,7 @@ it.effect("adds private credentials only at request time and rejects endpoint ch
       schemaVersion: 3,
       providers: { company: { apiKey: "private-key", headers: { "X-Gateway": "private-header" } } },
     })
-    yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin))
+    yield* EnterprisePlugin.Plugin.effect(yield* PluginHost.make(plugin, EnterprisePlugin.Plugin.id))
     const scope = {
       sessionID: Session.ID.create(),
       agent: Agent.ID.make("build"),

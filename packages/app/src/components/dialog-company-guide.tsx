@@ -15,13 +15,15 @@ type CompanyGuide = {
   markdown: string
 }
 
+export const companyGuideCommand = { id: "company.guide.open" }
+
 export function openEditionHelp(input: {
   enterprise: boolean
   href: string
   trigger: (id: string) => void
   openLink: (href: string) => void
 }) {
-  if (input.enterprise) return input.trigger("company.guide.open")
+  if (input.enterprise) return input.trigger(companyGuideCommand.id)
   input.openLink(input.href)
 }
 
@@ -34,7 +36,7 @@ export function createCompanyGuideCommand(input: {
 }): CommandOption | undefined {
   if (!input.enterprise) return
   return {
-    id: "company.guide.open",
+    ...companyGuideCommand,
     title: input.title,
     category: input.category,
     onSelect: async (_source, _input, origin) => {
@@ -68,7 +70,9 @@ export function DialogCompanyGuide(props: CompanyGuide) {
       title={
         <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span class="text-16-medium text-text-strong">{language.t("enterprise.guide.title")}</span>
-          <span class="max-w-full break-words text-11-regular text-text-weak">{language.t("enterprise.guide.version", { version: props.version })}</span>
+          <span class="max-w-full break-words text-11-regular text-text-weak">
+            {language.t("enterprise.guide.version", { version: props.version })}
+          </span>
         </div>
       }
     >

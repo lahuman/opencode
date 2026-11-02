@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import path from "path"
 import { Context, Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
@@ -12,14 +13,44 @@ import { which } from "../util/which.js"
 
 export namespace RipgrepBinary {
   const VERSION = "15.1.0"
+  // SHA-256 of each release asset, from the `<asset>.sha256` files published with ripgrep 15.1.0. Release assets
+  // can be replaced after publication, so a download is only written and run when it matches the pinned hash.
   const PLATFORM = {
-    "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
-    "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
-    "x64-darwin": { platform: "x86_64-apple-darwin", extension: "tar.gz" },
-    "x64-linux": { platform: "x86_64-unknown-linux-musl", extension: "tar.gz" },
-    "arm64-win32": { platform: "aarch64-pc-windows-msvc", extension: "zip" },
-    "ia32-win32": { platform: "i686-pc-windows-msvc", extension: "zip" },
-    "x64-win32": { platform: "x86_64-pc-windows-msvc", extension: "zip" },
+    "arm64-darwin": {
+      platform: "aarch64-apple-darwin",
+      extension: "tar.gz",
+      sha256: "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715",
+    },
+    "arm64-linux": {
+      platform: "aarch64-unknown-linux-gnu",
+      extension: "tar.gz",
+      sha256: "2b661c6ef508e902f388e9098d9c4c5aca72c87b55922d94abdba830b4dc885e",
+    },
+    "x64-darwin": {
+      platform: "x86_64-apple-darwin",
+      extension: "tar.gz",
+      sha256: "64811cb24e77cac3057d6c40b63ac9becf9082eedd54ca411b475b755d334882",
+    },
+    "x64-linux": {
+      platform: "x86_64-unknown-linux-musl",
+      extension: "tar.gz",
+      sha256: "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
+    },
+    "arm64-win32": {
+      platform: "aarch64-pc-windows-msvc",
+      extension: "zip",
+      sha256: "00d931fb5237c9696ca49308818edb76d8eb6fc132761cb2a1bd616b2df02f8e",
+    },
+    "ia32-win32": {
+      platform: "i686-pc-windows-msvc",
+      extension: "zip",
+      sha256: "725be85a1e8f92878a548f40ee4f6df64bc93b809586462b3c6d884e1de1e83a",
+    },
+    "x64-win32": {
+      platform: "x86_64-pc-windows-msvc",
+      extension: "zip",
+      sha256: "124510b94b6baa3380d051fdf4650eaa80a302c876d611e9dba0b2e18d87493a",
+    },
   } as const
 
   interface Interface {
@@ -129,9 +160,8 @@ export namespace RipgrepBinary {
                 return new globalThis.Error(`Failed to download ripgrep: ${safe.message}`, { cause: safe })
               }),
             )
-            if (bytes.byteLength === 0) {
-              return yield* Effect.fail(new globalThis.Error(`Failed to download ripgrep: empty response from ${url}`))
-            }
+            if (bytes.byteLength === 0) throw new Error(`failed to download ripgrep from ${url}`)
+            verify(new Uint8Array(bytes), filename, config.sha256)
 
             yield* fs.writeWithDirs(archive, new Uint8Array(bytes))
             yield* extract(archive, config, target)
@@ -143,6 +173,12 @@ export namespace RipgrepBinary {
     }),
   )
 
+  export function verify(bytes: Uint8Array, filename: string, expected: string) {
+    const actual = createHash("sha256").update(bytes).digest("hex")
+    if (actual !== expected)
+      throw new Error(`ripgrep download ${filename} failed SHA-256 verification: expected ${expected}, got ${actual}`)
+  }
+
   export const node = makeGlobalNode({
     service: Service,
     layer: layer,
@@ -150,15 +186,14 @@ export namespace RipgrepBinary {
   })
 
   function safeDownloadCause(cause: unknown) {
-    const tag = isRecord(cause) && typeof cause._tag === "string"
-      ? cause._tag
-      : cause instanceof globalThis.Error && cause.name
-        ? cause.name
-        : "HttpClientError"
+    const tag =
+      isRecord(cause) && typeof cause._tag === "string"
+        ? cause._tag
+        : cause instanceof globalThis.Error && cause.name
+          ? cause.name
+          : "HttpClientError"
     const reason =
-      isRecord(cause) && isRecord(cause.reason) && typeof cause.reason._tag === "string"
-        ? cause.reason._tag
-        : undefined
+      isRecord(cause) && isRecord(cause.reason) && typeof cause.reason._tag === "string" ? cause.reason._tag : undefined
     const kind = reason ? `${tag}.${reason}` : tag
     const message = cause instanceof globalThis.Error && cause.message ? redactDownloadMessage(cause.message) : ""
     return new globalThis.Error(message && message !== kind ? `${kind}: ${message}` : kind)

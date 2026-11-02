@@ -53,6 +53,8 @@ const api = {
     restartCalls.push("relaunch")
   },
   getZoomFactor: async () => 1,
+  getZoomLevel: async () => 1,
+  onZoomChanged() {},
   getWindowBootstrap: () => ({ packaged: false }),
   getWindowFullscreen: async () => false,
   onWindowFullscreenChanged: () => {},

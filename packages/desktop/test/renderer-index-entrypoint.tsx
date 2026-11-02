@@ -48,7 +48,7 @@ mock.module("@opencode/app/desktop", () => ({
   },
   useCommand: () => ({ trigger() {} }),
   useLanguage: () => ({ t: (key: string) => key }),
-  useExtensionServers: () => ({ ready: () => false, list: () => [] }),
+  usePluginServers: () => ({ ready: () => false, list: () => [] }),
   useCurrentRoute: () => ({ type: "home" }),
   useTabs: () => ({}),
 }))
@@ -82,6 +82,8 @@ const api = {
   getPinchZoomEnabled: async () => false,
   getWindowFullscreen: async () => false,
   getZoomFactor: async () => 1,
+  getZoomLevel: async () => 1,
+  onZoomChanged() {},
   getWindowID: () => "renderer-index-window",
   getWindowBootstrap: () => ({ firstLaunchPending: false, packaged: true }),
   onStoreChanged() {},

@@ -22,8 +22,6 @@ export function setEnterpriseLogSecrets(values: string[]) {
 
 const MAX_LOG_AGE_DAYS = ENTERPRISE_ENABLED ? 14 : 7
 
-const TAIL_LINES = 1000
-
 const EXPORT_WINDOW = 24 * 60 * 60 * 1000
 
 const MAX_EXPORT_FILE_SIZE = 50 * 1024 * 1024
@@ -263,7 +261,7 @@ function exportEnterpriseSupport(fs: FileSystem.FileSystem, path: Path.Path) {
       appVersion: app.getVersion(),
       osBuild: `${process.platform} ${release()} ${process.arch}`,
       generatedAt: new Date().toISOString(),
-          readiness: yield* Effect.promise(() => enterprise.api.readiness()),
+      readiness: yield* Effect.promise(() => enterprise.api.readiness()),
       files,
     })
     yield* writeZip(fs, selected.filePath, [
@@ -289,7 +287,7 @@ export const tail = Effect.fn("DesktopLogging.tail")(function* () {
     const contents = yield* fs.readFileString(path)
     const lines = contents.split("\n")
 
-    return lines.slice(Math.max(0, lines.length - TAIL_LINES)).join("\n")
+    return lines.slice(-1000).join("\n")
   }).pipe(Effect.orElseSucceed(() => ""))
 })
 
@@ -410,7 +408,8 @@ function collect(fs: FileSystem.FileSystem, path: Path.Path, dir: string, prefix
 function writeZip(fs: FileSystem.FileSystem, output: string, entries: Entry[]) {
   return Effect.gen(function* () {
     const { BlobReader, BlobWriter, ZipWriter } = yield* Effect.promise(() => import("@zip.js/zip.js"))
-    const writer = new ZipWriter(new BlobWriter("application/zip"))
+    // macOS Archive Utility and ditto reject bit-3 data descriptors without the PK\x07\x08 signature.
+    const writer = new ZipWriter(new BlobWriter("application/zip"), { dataDescriptorSignature: true })
     yield* Effect.forEach(
       entries,
       (entry) =>

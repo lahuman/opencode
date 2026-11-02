@@ -25,7 +25,7 @@ export const CredentialGroup = HttpApiGroup.make("server.credential")
         identifier: "credential.create",
         summary: "Create credential",
         description:
-          "Store an integration credential. It becomes the integration's active credential unless activate is false and the integration already has one. Fails with a conflict when the requested ID already exists.",
+          "Store an integration credential. It becomes the integration's active credential unless activate is false and the integration already has one. Fails with a conflict when the requested ID already exists, and with an invalid request when an `integration.connect` policy denies the integration.",
       }),
     ),
   )

@@ -5,7 +5,7 @@ import { ServerConnection, useServers } from "@/runtime/server/registry"
 import { useTabs } from "@/shell/tabs/tabs"
 import { type ServerHealth } from "@/runtime/server/health"
 import { showToast } from "@/shell/notifications/toast"
-import { useExtensionServers } from "@/runtime/extension/servers"
+import { usePluginServers } from "@/runtime/plugin/servers"
 import { usePlatform } from "@/runtime/platform/platform"
 
 export function sortServerConnections(input: {
@@ -34,14 +34,14 @@ export function sortServerConnections(input: {
 export function useServerActionsController() {
   const platform = usePlatform()
   const server = useServers()
-  const extensions = useExtensionServers()
+  const plugins = usePluginServers()
   const tabs = useTabs()
   const language = useLanguage()
 
   const remove = async (key: ServerConnection.Key) => {
+    if (platform.enterprise) return
     try {
-      if (platform.enterprise) throw new Error(language.t("enterprise.servers.disabled"))
-      await extensions.entry(key)?.entry.remove?.()
+      await plugins.entry(key)?.entry.remove?.()
       tabs.removeServer(key)
       server.remove(key)
     } catch (err) {

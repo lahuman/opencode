@@ -34,6 +34,6 @@ contextBridge.exposeInMainWorld("electron", {
     : undefined,
   bootstrap,
   storageSnapshot: snapshot.then((snapshot) => snapshot.storage),
-  extensions: snapshot.then((snapshot) => snapshot.extensions),
+  plugins: snapshot.then((snapshot) => snapshot.plugins),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 })

@@ -1,6 +1,6 @@
 export * as PlanExitTool from "./plan-exit.js"
 
-import { ToolFailure } from "@opencode/ai"
+import { ToolFailure } from "@opencode/ai/effect"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema } from "effect"
 import { Agent } from "../../agent.js"

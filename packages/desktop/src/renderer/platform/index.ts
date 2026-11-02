@@ -1,9 +1,9 @@
 import type { Platform } from "@opencode/app/desktop"
 import type { ElectronAPI } from "../api-types"
-import { setPinchZoomEnabled, webviewZoom } from "../window/zoom"
+import { setPinchZoomEnabled, setZoomLevel, webviewZoom, zoomLevel } from "../window/zoom"
 import { windowFullscreen } from "../window/fullscreen"
 import { DragCancelEvent } from "../../shared/ipc-transport"
-import { createExtensionBridge } from "../extensions"
+import { createPluginBridge } from "../plugins"
 import { createDesktopFiles } from "./files"
 import { createDesktopMenuAction } from "./menu"
 import { createDesktopNotify } from "./notifications"
@@ -36,9 +36,16 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
     notify: createDesktopNotify(api),
     fetch: createEnterpriseRendererNetwork(ENTERPRISE_PROFILE, { openLink: () => {}, fetch }).fetch,
     webviewZoom,
+    zoomLevel,
+    setZoomLevel,
     windowFullscreen,
+    requestMicrophone: () => api.requestMicrophone(),
+    setVoiceCallActive: (active) => api.setVoiceCallActive(active),
+    setTrafficLightsPosition: (position) => api.setTrafficLightsPosition(position),
     getPinchZoomEnabled: () => api.getPinchZoomEnabled(),
     setPinchZoomEnabled,
+    getSpellcheckEnabled: () => api.getSpellcheckEnabled(),
+    setSpellcheckEnabled: (enabled) => api.setSpellcheckEnabled(enabled),
     onDragCancel: (callback) => {
       window.addEventListener(DragCancelEvent, callback)
 
@@ -48,7 +55,7 @@ export function createDesktopPlatform(api: ElectronAPI, windowState: DesktopWind
     checkAppExists: async (appName) => {
       return api.checkAppExists(appName)
     },
-    extensions: createExtensionBridge(),
+    plugins: createPluginBridge(),
   }
 }
 

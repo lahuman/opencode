@@ -9,6 +9,8 @@ import {
 } from "@/components/dialog-company-guide"
 import { showToast } from "@/shell/notifications/toast"
 
+export const exportLogsCommand = { id: "logs.export" }
+
 export function DesktopCommands() {
   const command = useCommand()
   const language = useLanguage()

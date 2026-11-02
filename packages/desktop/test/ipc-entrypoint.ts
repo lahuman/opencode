@@ -53,6 +53,7 @@ const api = {
 }
 let invoke: ((event: unknown, method: unknown, args: unknown) => unknown) | undefined
 mock.module("electron", () => ({
+  default: { app: { isPackaged: true } },
   app: { isPackaged: true },
   protocol: {},
   ipcMain: {

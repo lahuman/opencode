@@ -12,7 +12,7 @@ export const run = Effect.fn("GitDiff.run")(function* (
   cwd: string,
   args: readonly string[],
 ) {
-  const child = yield* spawner.spawn(ChildProcess.make(gitExecutable, [
+  const child = yield* spawner.spawn(ChildProcess.make(gitExecutable(), [
     "--no-pager", "--literal-pathspecs", "-c", "core.fsmonitor=false", ...args,
   ], {
     cwd,

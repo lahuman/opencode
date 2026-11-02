@@ -6,6 +6,9 @@ import { flushPersisted } from "@/runtime/persistence/persist"
 
 const defaultKey = "opencode.global.dat:agent-default"
 
+// Happy DOM has no Web Animations API; reply persistence does not depend on active CSS animations.
+Element.prototype.getAnimations = () => []
+
 test("Desktop keeps approval intent before agent hydration and restores the default across workspaces", async () => {
   const storage = new Map<string, string>()
   const f = fixture({ platform: "desktop", storage, agents: [], session: durable("a", undefined, "plan") })
@@ -54,13 +57,20 @@ test("Web does not read or write the Desktop agent preference", () => {
   expect(storage.get(defaultKey)).toBe("{malformed")
 })
 
-test.each([
-  { name: "successful Build approval", answer: "Build now", fail: false, expected: "build" },
-  { name: "Keep planning", answer: "Keep planning", fail: false, expected: "plan" },
-  { name: "failed Build reply", answer: "Build now", fail: true, expected: "plan" },
-])("Desktop form preserves the mode for $name", async (row) => {
+test.each(
+  [
+    { name: "successful Build approval", answer: "Build now", fail: false, expected: "build" },
+    { name: "Keep planning", answer: "Keep planning", fail: false, expected: "plan" },
+    { name: "failed Build reply", answer: "Build now", fail: true, expected: "plan" },
+  ].flatMap((row) => [false, true].map((newQuestionUI) => ({ ...row, newQuestionUI }))),
+)("Desktop form preserves the mode for $name (new UI: $newQuestionUI)", async (row) => {
   const response = Promise.withResolvers<void>()
-  const f = fixture({ platform: "desktop", session: durable("a", undefined, "plan"), reply: () => response.promise })
+  const f = fixture({
+    platform: "desktop",
+    session: durable("a", undefined, "plan"),
+    reply: () => response.promise,
+    newQuestionUI: row.newQuestionUI,
+  })
   const request: FormInfo = {
     id: `form-${row.answer}-${row.fail}`,
     sessionID: "ses_a",
@@ -82,7 +92,7 @@ test.each([
   }
   const { local, element, query } = f.mount(false, request)
   await ready(local.session.ready)
-  const option = Array.from(element.querySelectorAll<HTMLButtonElement>('button[role="radio"]')).find((button) =>
+  const option = Array.from(element.querySelectorAll<HTMLElement>('[role="radio"]')).find((button) =>
     button.textContent?.includes(row.answer),
   )
   expect(option).toBeDefined()
