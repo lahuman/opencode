@@ -33,19 +33,27 @@ Paths in this table are relative to the repository root on the build host. Gener
 
 The same directory contains `chai-2.2.6-win-x64.zip.sha256`, `chai-2.2.6-win-x64.release.json`, `chai-2.2.6-win-x64.sbom.cdx.json`, and `chai-2.2.6-win-x64.third-party-licenses.txt`. Retain all five files together. The previous 2.2.6 security build remains under `packages/desktop/dist/security-update` with source `f31db92745c08f96832990c92923a2a4785a176b` and ZIP SHA-256 `6d77a0f3ae070e7bd0cec99d379db7bf880147ede8e4862879d3beec7af08698`; it does not include the About-screen change. Match the full source commit and checksum rather than the shared 2.2.6 filename.
 
-Documentation-only commits made after packaging do not change the artifact's source commit. Use the commit recorded in the release metadata when following this runbook's clean-checkout identity checks.
+Documentation and development-check tooling commits made after packaging do not change the artifact's source commit. Use the commit recorded in the release metadata when following this runbook's clean-checkout identity checks. The ZIP and its SBOM retain the build-time dependency inventory; later source tooling updates do not rewrite either file.
 
 ### Verification and outstanding work
 
 - The latest release-runner tests passed: 52 tests across `package-enterprise-win`, `enterprise-build`, `enterprise-release`, and `enterprise-supply-chain`.
 - The official runner completed the desktop/server build, unpacked-package verification, full ZIP-to-unpacked comparison, clean-source commit checks, unsigned-status verification, and generation of release metadata, SBOM and notices. Copied ZIP, SBOM and notice checksums were independently compared with the metadata.
 - The built executables were queried without starting an application window or a server: Electron 44.10.1, Node.js 24.22.1, Undici 7.30.1, server application version 2.2.6, and Bun 1.4.4 matched the expected versions.
-- The About-screen source passed app type checking, focused linting and a production app bundle build. Its later full `bun run check` attempt failed in oxlint's fixed-size allocator with insufficient memory. This is separate from the successful 35-task full check recorded during the security update; the earlier pass is not evidence that the later full attempt passed.
+- The About-screen source passed app type checking, focused linting and a production app bundle build. Its first later full `bun run check` attempt failed in oxlint's fixed-size allocator with insufficient memory. After the development-tool correction described below, a fresh, unmodified `bun run check` passed the full lint and all 35 type-check tasks. Keep this recovery result separate from the earlier security-update check.
 - The session transport fix was reproduced as a Chromium HTTP/1.1 POST failure before the change and covered by a passing real-HTTP session-create/read regression afterward. The focused enterprise browser suite passed 7 cases, and the app unit suite passed 1,005 tests at that revision. These checks are historical evidence for the session fix, not a full retest after the About-screen change.
 - Remaining dependency audit findings are unchanged by the About-screen edit: 47 advisories across 9 packages, including 19 high-severity findings. Zod 3.25.76 was also found in the packaged ASAR. See the [security audit](security-audit-2026-11-02.md) for the affected paths and upgrade limits. This ZIP is not an all-vulnerabilities-cleared release.
 - Company-model chat, Windows 10/11 acceptance and retained egress evidence still require the operator workflow below. No user application, live server, settings or conversation data was restarted or reset during build verification.
 
 To use this build, completely exit the existing CHAI app, verify the ZIP hash, extract the entire ZIP into a new folder, and run `CHAI.exe`. Keep the existing user-data directory. Do not run the executable directly inside the ZIP or copy only `CHAI.exe`.
+
+### Windows push-check tooling correction
+
+The first documentation push failed in the unchanged pre-push `bun run check` hook because oxlint 1.60.0's JavaScript-plugin allocator exhausted Windows commit memory. Limiting the push process's CPU affinity did not resolve it. The [upstream Windows allocator issue](https://github.com/oxc-project/oxc/issues/19395) identifies the eager multi-gigabyte allocation and its fix in commit `4ab57eb`. The [1.65.0 release](https://github.com/oxc-project/oxc/releases/tag/apps_v1.65.0), commit `25e5cbc`, contains that fix.
+
+Root development dependencies `oxlint` and `@oxlint/plugins` are pinned together at 1.65.0. The pre-push hook, `lint`/`check` scripts and rule configuration are unchanged. This correction affects development checks, not the already generated desktop ZIP. A fresh dependency audit after this tooling update still reports 47 advisories across 9 packages (19 high, 22 moderate, 6 low).
+
+Verification after the correction: the unchanged `bun run check` completed successfully, including full lint, GUI-plugin ast-grep rules, SDK-document validation, and all 35 type-check tasks with no cached tasks. The original failing hook was not disabled or replaced.
 
 ## Release boundary
 
