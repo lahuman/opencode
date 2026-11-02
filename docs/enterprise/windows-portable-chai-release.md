@@ -2,6 +2,51 @@
 
 This runbook is the only supported operator path from a reviewed source revision to Windows acceptance for the CHAI portable release. It produces an unsigned Windows x64 ZIP and its integrity artifacts; it does not install the application, register a protocol, migrate data from the former Pilot application, or remove user data.
 
+## Latest build record, 2026-11-02
+
+The primary deliverable is the Windows x64 offline desktop application. The current local build is CHAI 2.2.6 with the desktop About/info screen reduced to the CHAI wordmark. The ZIP is a build-host verified artifact; Windows acceptance and company-model conversation acceptance have not been completed for this build.
+
+### Changes included
+
+| Commit | Change |
+| --- | --- |
+| `15c84c37b3` | Merged the dev snapshot `bbd08b61de3094e6576825dcc5b2e6e45921a0af` into `enterprise-pilot`, retaining offline desktop behavior. Desktop release tools now live under `packages/desktop/script`. |
+| `591847aec1` | Fixed new-session writes after sidecar reconnection. Reconstructing a JSON `Request` from another request exposed a streaming body that Chromium cannot upload to the HTTP/1.1 sidecar. Buffering the body before forwarding preserves JSON POST requests. POST requests are not retried automatically. |
+| `f31db92745` | Released 2.2.6 with Electron 44.10.1 / Node.js 24.22.1 / Undici 7.30.1, retained Bun 1.4.4, and applied targeted dependency security updates. The version change prevents reuse of the former 2.2.5 staged server. |
+| `8c53609538` | Desktop Settings > About/info displays only the CHAI wordmark. Version text, credits, publication details, descriptions, public links and decorative images are omitted, and the desktop path does not request GitHub contributor counts. The web About screen retains its existing behavior. |
+
+The session transport problem does not require settings or conversation-data reset. Keep `%LOCALAPPDATA%\com.company.sfmi` and its DPAPI-protected provider credentials when replacing the extracted application folder.
+
+### Artifact identity
+
+Paths in this table are relative to the repository root on the build host. Generated distribution files are ignored by Git; pushing source and documentation does not upload the ZIP or its sidecars.
+
+| Field | Latest About-screen build |
+| --- | --- |
+| ZIP | `packages/desktop/dist/about-chai/chai-2.2.6-win-x64.zip` |
+| Source commit | `8c53609538b86d8a4ab9114a468b098e81399060` |
+| Size | 315,291,498 bytes |
+| SHA-256 | `677e6d6c672c1a3ab9d160304054e33429876fa2f78e64a1252133e9ed3e8b5b` |
+| Signature status | `NotSigned` |
+| Windows acceptance records | None (`windowsAcceptance: []`) |
+| Initial model catalog | Empty; add the internal provider and models through desktop settings |
+
+The same directory contains `chai-2.2.6-win-x64.zip.sha256`, `chai-2.2.6-win-x64.release.json`, `chai-2.2.6-win-x64.sbom.cdx.json`, and `chai-2.2.6-win-x64.third-party-licenses.txt`. Retain all five files together. The previous 2.2.6 security build remains under `packages/desktop/dist/security-update` with source `f31db92745c08f96832990c92923a2a4785a176b` and ZIP SHA-256 `6d77a0f3ae070e7bd0cec99d379db7bf880147ede8e4862879d3beec7af08698`; it does not include the About-screen change. Match the full source commit and checksum rather than the shared 2.2.6 filename.
+
+Documentation-only commits made after packaging do not change the artifact's source commit. Use the commit recorded in the release metadata when following this runbook's clean-checkout identity checks.
+
+### Verification and outstanding work
+
+- The latest release-runner tests passed: 52 tests across `package-enterprise-win`, `enterprise-build`, `enterprise-release`, and `enterprise-supply-chain`.
+- The official runner completed the desktop/server build, unpacked-package verification, full ZIP-to-unpacked comparison, clean-source commit checks, unsigned-status verification, and generation of release metadata, SBOM and notices. Copied ZIP, SBOM and notice checksums were independently compared with the metadata.
+- The built executables were queried without starting an application window or a server: Electron 44.10.1, Node.js 24.22.1, Undici 7.30.1, server application version 2.2.6, and Bun 1.4.4 matched the expected versions.
+- The About-screen source passed app type checking, focused linting and a production app bundle build. Its later full `bun run check` attempt failed in oxlint's fixed-size allocator with insufficient memory. This is separate from the successful 35-task full check recorded during the security update; the earlier pass is not evidence that the later full attempt passed.
+- The session transport fix was reproduced as a Chromium HTTP/1.1 POST failure before the change and covered by a passing real-HTTP session-create/read regression afterward. The focused enterprise browser suite passed 7 cases, and the app unit suite passed 1,005 tests at that revision. These checks are historical evidence for the session fix, not a full retest after the About-screen change.
+- Remaining dependency audit findings are unchanged by the About-screen edit: 47 advisories across 9 packages, including 19 high-severity findings. Zod 3.25.76 was also found in the packaged ASAR. See the [security audit](security-audit-2026-11-02.md) for the affected paths and upgrade limits. This ZIP is not an all-vulnerabilities-cleared release.
+- Company-model chat, Windows 10/11 acceptance and retained egress evidence still require the operator workflow below. No user application, live server, settings or conversation data was restarted or reset during build verification.
+
+To use this build, completely exit the existing CHAI app, verify the ZIP hash, extract the entire ZIP into a new folder, and run `CHAI.exe`. Keep the existing user-data directory. Do not run the executable directly inside the ZIP or copy only `CHAI.exe`.
+
 ## Release boundary
 
 Use a controlled Windows x64 build machine and a reviewed, clean checkout of the exact commit to release. The build account needs Bun, the repository dependencies, Git, PowerShell 5.1 or later, and normal access to the approved internal LLM endpoints. The build machine and both acceptance VMs must trust both endpoints through the normal Windows trust store. Do not add a TLS bypass, install a private certificate as a workaround for this pilot, or use `--ignore-certificate-errors`.
@@ -43,7 +88,7 @@ bun run typecheck:e2e
 bun run test:e2e -- e2e/company-llm-enterprise.spec.ts
 
 Set-Location ..\desktop
-bun test scripts/verify-enterprise-package.test.ts scripts/enterprise-release.test.ts scripts/windows-portable-smoke.test.ts
+bun test script/verify-enterprise-package.test.ts script/enterprise-release.test.ts script/windows-portable-smoke.test.ts
 bun test
 bun typecheck
 ```
@@ -112,8 +157,8 @@ On a Windows acceptance VM, parse the PowerShell script before executing it:
 
 ```powershell
 Set-Location packages\desktop
-[void][scriptblock]::Create((Get-Content -Raw .\scripts\windows-portable-smoke.ps1))
-bun test scripts/verify-enterprise-package.test.ts scripts/enterprise-release.test.ts scripts/windows-portable-smoke.test.ts
+[void][scriptblock]::Create((Get-Content -Raw .\script\windows-portable-smoke.ps1))
+bun test script/verify-enterprise-package.test.ts script/enterprise-release.test.ts script/windows-portable-smoke.test.ts
 ```
 
 ## Controlled Windows x64 build
@@ -122,6 +167,8 @@ From the clean checkout root, set only the approved non-secret enterprise inputs
 
 ```powershell
 $env:OPENCODE_ENTERPRISE = "1"
+$env:OPENCODE_VERSION = (Get-Content -Raw .\packages\desktop\package.json | ConvertFrom-Json).version
+$env:OPENCODE_CHANNEL = "latest"
 $env:OPENCODE_ENTERPRISE_MODELS = '[{"id":"company-code","baseURL":"https://llm.corp.example/v1"},{"id":"company-reasoning","baseURL":"https://llm-dr.corp.example/v1"}]'
 $env:OPENCODE_ENTERPRISE_DEFAULT_MODEL_ID = "company-code"
 $env:OPENCODE_ENTERPRISE_ALLOWED_ORIGINS = ""
@@ -134,6 +181,14 @@ bun test
 bun typecheck
 bun run package:enterprise:win
 ```
+
+When launching from PowerShell 7, its inherited `PSModulePath` can prevent the Windows PowerShell 5.1 child from loading the module that provides `Get-AuthenticodeSignature`. If this occurs, run the same release function from `packages/desktop` with only that inherited variable removed from the child environment:
+
+```powershell
+bun -e 'import {runEnterpriseWindowsPackage,verifyEnterpriseSource,verifyEnterpriseAuthenticode} from "./script/package-enterprise-win"; const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>key.toLowerCase()!=="psmodulepath")); process.exit(await runEnterpriseWindowsPackage({platform:process.platform,arch:process.arch,env,spawn:(command,options)=>Bun.spawn(command,options),verifySource:verifyEnterpriseSource,authenticode:verifyEnterpriseAuthenticode}))'
+```
+
+Keep the approved enterprise profile and release version/channel set for this invocation. This environment adjustment preserves source, signature, package, archive and metadata verification; it does not change machine-wide PowerShell settings or skip release checks.
 
 ### Controlled release acceptance profile
 
