@@ -1,5 +1,5 @@
 import { CHAIWordmark } from "@/components/chai-wordmark"
-import { createEffect, createResource, onCleanup, Show } from "solid-js"
+import { createEffect, createResource, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { Tooltip } from "@opencode/ui/tooltip"
@@ -34,8 +34,17 @@ const writers = [
 const illustrators = ["usrnk1", "ludvigrask_", "arvsrn", "iamdavidhill"] as const
 
 export function SettingsAbout(props: { active: boolean }) {
-  const language = useLanguage()
   const platform = usePlatform()
+
+  if (platform.platform === "desktop") {
+    return (
+      <div class="settings-about-content">
+        <CHAIWordmark fade={false} muted={false} class="settings-about-wordmark" />
+      </div>
+    )
+  }
+
+  const language = useLanguage()
   const dialog = useDialog()
   const [copy, setCopy] = createStore({ pending: false, copied: false, forceCopied: false })
   const version = () => platform.version ?? language.t("settings.about.devVersion")
@@ -130,9 +139,7 @@ export function SettingsAbout(props: { active: boolean }) {
         <p>{language.t("settings.about.license")}</p>
       </div>
 
-      <Show when={platform.platform === "desktop"} fallback={<AnimatedWordmark active={props.active} />}>
-        <CHAIWordmark fade={false} muted={false} class="settings-about-wordmark" />
-      </Show>
+      <AnimatedWordmark active={props.active} />
 
       <div class="settings-about-credits">
         <p>{language.rich("settings.about.writtenByNames", { names: language.list(writerCredits()) })}</p>
